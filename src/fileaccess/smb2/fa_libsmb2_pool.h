@@ -5,6 +5,9 @@
  *  it under the terms of the GNU General Public License as published by
  *  the Free Software Foundation, either version 3 of the License, or
  *  (at your option) any later version.
+ *
+ *  Adapted from the SMB2 implementation in Buksa/movian:
+ *  https://github.com/Buksa/movian
  */
 #ifndef FA_LIBSMB2_POOL_H__
 #define FA_LIBSMB2_POOL_H__

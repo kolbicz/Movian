@@ -9,6 +9,18 @@ For more information and latest versions, please visit:
 
 [https://movian.tv/](https://movian.tv/)
 
+## Acknowledgements
+
+SMB2/SMB3 support is adapted from the open-source implementation in
+[Buksa/movian](https://github.com/Buksa/movian), with work by its contributors
+including `uzver`. It uses the patched
+[Buksa/libsmb2](https://github.com/Buksa/libsmb2) library, based on
+[Ronnie Sahlberg's libsmb2](https://github.com/sahlberg/libsmb2).
+
+The Movian adapter is distributed under GPLv3 or later. The bundled libsmb2
+client library is distributed under LGPLv2.1 or later; its copyright and
+license texts are preserved in `ext/libsmb2/`.
+
 ## How to build for Linux
 
 First you need to satisfy some dependencies (for Ubuntu 16.04.3 LTS)
@@ -88,4 +100,3 @@ $ ./Autobuild.sh -t rpi -v 5.0.500
 To update Movian on rpi with compiled one, enable Binreplace in settings:dev and issue:
 
 	curl --data-binary @build.rpi/showtime.sqfs http://rpi_ip_address:42000/api/replace
-
