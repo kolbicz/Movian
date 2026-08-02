@@ -82,9 +82,12 @@
 - (void)keyboardWasShown:(NSNotification*)aNotification
 {
   NSDictionary* info = [aNotification userInfo];
-  CGSize kbSize = [[info objectForKey:UIKeyboardFrameBeginUserInfoKey] CGRectValue].size;
+  CGRect keyboardFrame = [[info objectForKey:UIKeyboardFrameEndUserInfoKey] CGRectValue];
+  keyboardFrame = [self convertRect:keyboardFrame fromView:nil];
+  CGFloat keyboardHeight = CGRectGetHeight(CGRectIntersection(self.bounds,
+                                                               keyboardFrame));
 
-  int h = self.frame.size.height - kbSize.height;
+  int h = self.bounds.size.height - keyboardHeight;
   int h2 = self.rect.y2 / self.contentScaleFactor;
 
   self.oskscroll = (h2 - h) * self.contentScaleFactor;
@@ -128,7 +131,10 @@ openosk(struct glw_root *gr,
 static void
 glw_in_fullwindow(void *opaque, int val)
 {
-  [UIApplication sharedApplication].idleTimerDisabled = val ? YES : NO;
+  BOOL disabled = val ? YES : NO;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [UIApplication sharedApplication].idleTimerDisabled = disabled;
+  });
 }
 
 
@@ -247,20 +253,14 @@ glw_in_fullwindow(void *opaque, int val)
 
 - (void)didReceiveMemoryWarning
 {
-    [super didReceiveMemoryWarning];
+  [super didReceiveMemoryWarning];
+}
 
-    if ([self isViewLoaded] && ([[self view] window] == nil)) {
-        self.view = nil;
-        
-        [self tearDownGL];
-        
-        if ([EAGLContext currentContext] == self.context) {
-            [EAGLContext setCurrentContext:nil];
-        }
-        self.context = nil;
-    }
-
-    // Dispose of any resources that can be recreated.
+- (void)viewSafeAreaInsetsDidChange
+{
+  [super viewSafeAreaInsetsDidChange];
+  if(self.gr != NULL)
+    glw_need_refresh(self.gr, 0);
 }
 
 - (BOOL)prefersStatusBarHidden {
@@ -364,12 +364,20 @@ glw_in_fullwindow(void *opaque, int val)
   glw_root_t *gr = self.gr;
   glw_lock(gr);
   glw_pointer_event_t gpe;
-  
-  const int height = [[self view] bounds].size.height;
-  const int width  = [[self view] bounds].size.width;
-  
-  gpe.screen_x =  (2.0 * point->x / width)  - 1;
-  gpe.screen_y = -(2.0 * point->y / height) + 1;
+
+  UIView *view = [self view];
+  UIEdgeInsets insets = view.safeAreaInsets;
+  CGRect bounds = view.bounds;
+  CGFloat width = bounds.size.width - insets.left - insets.right;
+  CGFloat height = bounds.size.height - insets.top - insets.bottom;
+
+  if(width <= 0 || height <= 0) {
+    glw_unlock(gr);
+    return;
+  }
+
+  gpe.screen_x =  (2.0 * (point->x - insets.left) / width)  - 1;
+  gpe.screen_y = -(2.0 * (point->y - insets.top) / height) + 1;
   gpe.ts = ts * 1000000.0;
   gpe.type = type;
   glw_pointer_event(gr, &gpe);
@@ -465,8 +473,17 @@ denormal_ftz(void)
   denormal_ftz();
   glw_lock(gr);
   
-  gr->gr_width  = (int)view.drawableWidth;
-  gr->gr_height = (int)view.drawableHeight;
+  UIEdgeInsets insets = view.safeAreaInsets;
+  CGRect bounds = view.bounds;
+  CGFloat scaleX = view.drawableWidth / bounds.size.width;
+  CGFloat scaleY = view.drawableHeight / bounds.size.height;
+  int safeLeft = (int)lround(insets.left * scaleX);
+  int safeRight = (int)lround(insets.right * scaleX);
+  int safeTop = (int)lround(insets.top * scaleY);
+  int safeBottom = (int)lround(insets.bottom * scaleY);
+
+  gr->gr_width = (int)view.drawableWidth - safeLeft - safeRight;
+  gr->gr_height = (int)view.drawableHeight - safeTop - safeBottom;
   
   glw_prepare_frame(self.gr, 0);
 
@@ -482,7 +499,8 @@ denormal_ftz(void)
       glw_layout0(gr->gr_universe, &rc);
       
       if(refresh & GLW_REFRESH_FLAG_RENDER) {
-        glViewport(0, view.oskscroll, gr->gr_width, gr->gr_height);
+        glViewport(safeLeft, safeBottom + view.oskscroll,
+                   gr->gr_width, gr->gr_height);
         glClear(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
         glw_render0(gr->gr_universe, &rc);
       }

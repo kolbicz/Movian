@@ -24,8 +24,9 @@
 
 
 static duk_ret_t
-make_printable(duk_context *ctx)
+make_printable(duk_context *ctx, void *udata)
 {
+  (void)udata;
   if(duk_is_object(ctx, -1)) {
     duk_json_encode(ctx, -1);
   }
@@ -47,7 +48,7 @@ log_concat(duk_context *ctx)
 
   for(int i = 0; i < argc; i++) {
     duk_dup(ctx, i);
-    duk_safe_call(ctx, make_printable, 1, 1);
+    duk_safe_call(ctx, make_printable, NULL, 1, 1);
   }
 
   duk_join(ctx, argc);

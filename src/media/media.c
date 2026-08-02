@@ -852,14 +852,17 @@ media_global_hold(int on, int flag)
   i = 0;
   LIST_FOREACH(mp, &media_pipelines, mp_global_link)
     mpv[i++] = mp_retain(mp);
+  count = i;
 
   hts_mutex_unlock(&media_mutex);
 
   for(i = 0; i < count; i++) {
     mp = mpv[i];
     
-    if(!(mp->mp_flags & MP_VIDEO))
+    if(!(mp->mp_flags & MP_VIDEO)) {
+      mp_release(mp);
       continue;
+    }
 
     if(on)
       mp_hold(mp, flag, NULL);
@@ -969,6 +972,5 @@ media_discontinuity_debug(media_discontinuity_aux_t *aux,
   aux->epoch = epoch;
   aux->skip = skip;
 }
-
 
 

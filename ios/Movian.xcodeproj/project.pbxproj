@@ -135,6 +135,10 @@
 		6A35C2021C1041C000D8EA86 /* ftpparse.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDF11B30165E0099FB5A /* ftpparse.c */; };
 		6A35C2031C1041D200D8EA86 /* fa_nativesmb.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDF51B30165E0099FB5A /* fa_nativesmb.c */; };
 		6A35C2041C1041D200D8EA86 /* nmb.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCDF71B30165E0099FB5A /* nmb.c */; };
+		F10000000000000000000011 /* fa_libsmb2.c in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* fa_libsmb2.c */; };
+		F10000000000000000000012 /* fa_libsmb2_pool.c in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* fa_libsmb2_pool.c */; };
+		F10000000000000000000013 /* fa_libsmb2.c in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* fa_libsmb2.c */; };
+		F10000000000000000000014 /* fa_libsmb2_pool.c in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* fa_libsmb2_pool.c */; };
 		6A35C2051C1041FC00D8EA86 /* glw_popup.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A6AD6D11C0E2EC700931F45 /* glw_popup.c */; };
 		6A35C2061C1041FC00D8EA86 /* glw_scroll.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A08CDEB1C07000F00387E87 /* glw_scroll.c */; };
 		6A35C2071C1041FC00D8EA86 /* glw_array.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCF631B30785D0099FB5A /* glw_array.c */; };
@@ -331,6 +335,7 @@
 		6A7808C11C45B139009FADCB /* longpress.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A7808BF1C45B139009FADCB /* longpress.c */; };
 		6A8104391CBCBCD300E29BE8 /* persistent_nsuserdefaults.m in Sources */ = {isa = PBXBuildFile; fileRef = 6A8104381CBCBCD300E29BE8 /* persistent_nsuserdefaults.m */; };
 		6A81043B1CBCC14800E29BE8 /* persistent_nsuserdefaults.m in Sources */ = {isa = PBXBuildFile; fileRef = 6A8104381CBCBCD300E29BE8 /* persistent_nsuserdefaults.m */; };
+		A11600010000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A11600020000000000000001 /* PrivacyInfo.xcprivacy */; };
 		6A8385301B427E0C002816FB /* res in Resources */ = {isa = PBXBuildFile; fileRef = 6A83852F1B427E0C002816FB /* res */; };
 		6A8385331B4280C2002816FB /* prop_proxy.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A8385311B4280C2002816FB /* prop_proxy.c */; };
 		6A8385361B4280E6002816FB /* websocket.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A8385341B4280E6002816FB /* websocket.c */; };
@@ -719,6 +724,7 @@
 		6AB9264D1C0743CD002D59A6 /* mac_audio.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = mac_audio.c; sourceTree = "<group>"; };
 		6AC2B8701B1F23D700969FB4 /* Movian-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Movian-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		6AC2B8741B1F23D700969FB4 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A11600020000000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		6AC2B8751B1F23D700969FB4 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		6AC2B8771B1F23D700969FB4 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		6AC2B8781B1F23D700969FB4 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
@@ -976,6 +982,9 @@
 		6ADCCDF81B30165E0099FB5A /* nmb.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = nmb.h; sourceTree = "<group>"; };
 		6ADCCDF91B30165E0099FB5A /* smbv1.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = smbv1.h; sourceTree = "<group>"; };
 		6ADCCDFA1B30165E0099FB5A /* svfs.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = svfs.h; sourceTree = "<group>"; };
+		F10000000000000000000001 /* fa_libsmb2.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_libsmb2.c; sourceTree = "<group>"; };
+		F10000000000000000000002 /* fa_libsmb2_pool.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_libsmb2_pool.c; sourceTree = "<group>"; };
+		F10000000000000000000003 /* fa_libsmb2_pool.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = fa_libsmb2_pool.h; sourceTree = "<group>"; };
 		6ADCCE341B304C280099FB5A /* asyncio.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = asyncio.h; sourceTree = "<group>"; };
 		6ADCCE351B304C280099FB5A /* asyncio_http.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = asyncio_http.c; sourceTree = "<group>"; };
 		6ADCCE371B304C280099FB5A /* asyncio_posix.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = asyncio_posix.c; sourceTree = "<group>"; };
@@ -1270,6 +1279,7 @@
 			isa = PBXGroup;
 			children = (
 				6AC2B8741B1F23D700969FB4 /* Info.plist */,
+				A11600020000000000000001 /* PrivacyInfo.xcprivacy */,
 				6AC2B8751B1F23D700969FB4 /* main.m */,
 			);
 			name = "Supporting Files";
@@ -1668,6 +1678,7 @@
 				6ADCCDF21B30165E0099FB5A /* ftpparse.h */,
 				6ADCCDF31B30165E0099FB5A /* http_client.h */,
 				6ADCCDF41B30165E0099FB5A /* smb */,
+				F10000000000000000000004 /* smb2 */,
 				6ADCCDFA1B30165E0099FB5A /* svfs.h */,
 			);
 			name = fileaccess;
@@ -1684,6 +1695,16 @@
 				6ADCCDF91B30165E0099FB5A /* smbv1.h */,
 			);
 			path = smb;
+			sourceTree = "<group>";
+		};
+		F10000000000000000000004 /* smb2 */ = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000001 /* fa_libsmb2.c */,
+				F10000000000000000000002 /* fa_libsmb2_pool.c */,
+				F10000000000000000000003 /* fa_libsmb2_pool.h */,
+			);
+			path = smb2;
 			sourceTree = "<group>";
 		};
 		6ADCCE331B304C280099FB5A /* networking */ = {
@@ -2158,6 +2179,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A11600010000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
 				6A83853A1B42811B002816FB /* lang in Resources */,
 				6A8385391B42811B002816FB /* glwskins in Resources */,
 				6AC2B8881B1F23D800969FB4 /* LaunchScreen.xib in Resources */,
@@ -2430,6 +2452,8 @@
 				6ADCCCB21B3000CC0099FB5A /* str.c in Sources */,
 				6ADCCDBD1B3016110099FB5A /* string_piece.c in Sources */,
 				6ADCCE1B1B30165E0099FB5A /* fa_nativesmb.c in Sources */,
+				F10000000000000000000011 /* fa_libsmb2.c in Sources */,
+				F10000000000000000000012 /* fa_libsmb2_pool.c in Sources */,
 				6ADCCD391B30135B0099FB5A /* playqueue.c in Sources */,
 				6ADCCE1C1B30165E0099FB5A /* nmb.c in Sources */,
 				6ADCCE191B30165E0099FB5A /* fileaccess.c in Sources */,
@@ -2703,6 +2727,8 @@
 				6A35C2A61C1042C000D8EA86 /* h264_parser.c in Sources */,
 				6A35C2931C10428F00D8EA86 /* sub_ass.c in Sources */,
 				6A35C2031C1041D200D8EA86 /* fa_nativesmb.c in Sources */,
+				F10000000000000000000013 /* fa_libsmb2.c in Sources */,
+				F10000000000000000000014 /* fa_libsmb2_pool.c in Sources */,
 				6A35C27C1C10426F00D8EA86 /* ssdp.c in Sources */,
 				6A35C2A01C1042B700D8EA86 /* upnp_browse.c in Sources */,
 				6A35C2421C10423600D8EA86 /* i18n.c in Sources */,
@@ -2932,7 +2958,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				EMBEDDED_CONTENT_CONTAINS_SWIFT = NO;
-				ENABLE_BITCODE = YES;
+				ENABLE_BITCODE = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				EXCLUDED_RECURSIVE_SEARCH_PATH_SUBDIRECTORIES = "*";
@@ -2959,11 +2985,12 @@
 					"$(SRCROOT)/../",
 					"$(SRCROOT)/../src",
 					"$(SRCROOT)/freetype2-ios/include",
+					"$(SRCROOT)/../ext/libsmb2/include",
 					"$(BUILT_PRODUCTS_DIR)/usr/local/include",
 				);
 				INFOPLIST_PREFIX_HEADER = InfoPlist.h;
 				INFOPLIST_PREPROCESS = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 8.3;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_CFLAGS = "";
@@ -2993,7 +3020,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				EMBEDDED_CONTENT_CONTAINS_SWIFT = NO;
-				ENABLE_BITCODE = YES;
+				ENABLE_BITCODE = NO;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				EXCLUDED_RECURSIVE_SEARCH_PATH_SUBDIRECTORIES = "*";
@@ -3017,7 +3044,7 @@
 				);
 				INFOPLIST_PREFIX_HEADER = InfoPlist.h;
 				INFOPLIST_PREPROCESS = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 8.3;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				OTHER_CFLAGS = "";
 				SDKROOT = iphoneos;
@@ -3040,9 +3067,10 @@
 					"$(SRCROOT)/../",
 					"$(SRCROOT)/../src",
 					"$(SRCROOT)/freetype2-ios/include",
+					"$(SRCROOT)/../ext/libsmb2/include",
 				);
 				INFOPLIST_FILE = Movian/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 8.3;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				OTHER_CFLAGS = (
@@ -3065,6 +3093,7 @@
 					"${BUILT_PRODUCTS_DIR}/lib/libavutil.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavresample.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libswscale.a",
+					"$(SRCROOT)/../build.ios/libsmb2/lib/libsmb2.a",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = tv.Movian;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -3086,9 +3115,10 @@
 					"$(SRCROOT)/../",
 					"$(SRCROOT)/../src",
 					"$(SRCROOT)/freetype2-ios/include",
+					"$(SRCROOT)/../ext/libsmb2/include",
 				);
 				INFOPLIST_FILE = Movian/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 8.3;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				OTHER_CFLAGS = (
@@ -3111,6 +3141,7 @@
 					"${BUILT_PRODUCTS_DIR}/lib/libavutil.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavresample.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libswscale.a",
+					"$(SRCROOT)/../build.ios/libsmb2/lib/libsmb2.a",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = tv.Movian;
 				PRODUCT_NAME = "$(TARGET_NAME)";

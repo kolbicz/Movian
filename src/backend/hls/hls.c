@@ -1068,6 +1068,9 @@ demuxer_select_variant_random(hls_demuxer_t *hd)
 
   }
 
+  if(cnt == 0)
+    return NULL;
+
   int r = rand() % cnt;
   cnt = 0;
   TAILQ_FOREACH(hv, &hd->hd_variants, hv_link) {

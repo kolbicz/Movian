@@ -26,8 +26,8 @@ function build_for_arch()
             --cpu=generic \
             --sysroot=`xcrun --sdk ${SDK_NAME} --show-sdk-path` \
             --target-os=darwin \
-            --extra-cflags="-arch $1  -fembed-bitcode" \
-            --extra-ldflags="-arch $1  -fembed-bitcode" \
+            --extra-cflags="-arch $1 -Wno-error=incompatible-function-pointer-types" \
+            --extra-ldflags="-arch $1" \
             --enable-cross-compile \
             --enable-static \
             --disable-shared \
@@ -80,5 +80,4 @@ for F in avcodec avformat avresample avutil swscale; do
          -output \
          "${BUILT_PRODUCTS_DIR}/lib/lib${F}.a"
 done
-
 

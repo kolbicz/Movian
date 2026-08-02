@@ -22,7 +22,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#include <sqlite3.h>
+#include "ext/sqlite/sqlite3.h"
 
 #include "config.h"
 #include "main.h"
@@ -1110,4 +1110,3 @@ kvstore_deferred_flush(void)
 }
 
 #endif
-

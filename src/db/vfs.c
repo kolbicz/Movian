@@ -23,7 +23,7 @@
 #include <sys/time.h>
 #include <string.h>
 #include <unistd.h>
-#include <sqlite3.h>
+#include "ext/sqlite/sqlite3.h"
 
 #include "main.h"
 #include "arch/atomic.h"

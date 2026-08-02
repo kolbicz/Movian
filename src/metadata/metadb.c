@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include <sqlite3.h>
+#include "ext/sqlite/sqlite3.h"
 
 #include "prop/prop.h"
 
@@ -2405,6 +2405,5 @@ metadata_get_video_data(const char *url)
     return NULL;
   return md;
 }
-
 
 

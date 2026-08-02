@@ -188,29 +188,34 @@ static void set_media_type(void *opaque, const char *str)
 
 
 
-- (void)nextTrack
+- (MPRemoteCommandHandlerStatus)nextTrack:(MPRemoteCommandEvent *)event
 {
   [self emitMediaAction:ACTION_SKIP_FORWARD];
+  return MPRemoteCommandHandlerStatusSuccess;
 }
 
-- (void)previousTrack
+- (MPRemoteCommandHandlerStatus)previousTrack:(MPRemoteCommandEvent *)event
 {
   [self emitMediaAction:ACTION_SKIP_BACKWARD];
+  return MPRemoteCommandHandlerStatusSuccess;
 }
 
-- (void)togglePlayPause
+- (MPRemoteCommandHandlerStatus)togglePlayPause:(MPRemoteCommandEvent *)event
 {
   [self emitMediaAction:ACTION_PLAYPAUSE];
+  return MPRemoteCommandHandlerStatusSuccess;
 }
 
-- (void)play
+- (MPRemoteCommandHandlerStatus)play:(MPRemoteCommandEvent *)event
 {
   [self emitMediaAction:ACTION_PLAY];
+  return MPRemoteCommandHandlerStatusSuccess;
 }
 
-- (void)pause
+- (MPRemoteCommandHandlerStatus)pause:(MPRemoteCommandEvent *)event
 {
   [self emitMediaAction:ACTION_PAUSE];
+  return MPRemoteCommandHandlerStatusSuccess;
 }
 
 
@@ -253,15 +258,13 @@ static void set_media_type(void *opaque, const char *str)
   service_createp("Files", _p("Files"), [docsdir UTF8String],
                   "files", NULL, 0, 1, SVC_ORIGIN_SYSTEM);
 
-  [[UIApplication sharedApplication] beginReceivingRemoteControlEvents];
-
   MPRemoteCommandCenter *remoteCommandCenter = [MPRemoteCommandCenter sharedCommandCenter];
   
-  [[remoteCommandCenter nextTrackCommand] addTarget:self action:@selector(nextTrack)];
-  [[remoteCommandCenter previousTrackCommand] addTarget:self action:@selector(previousTrack)];
-  [[remoteCommandCenter togglePlayPauseCommand] addTarget:self action:@selector(togglePlayPause)];
-  [[remoteCommandCenter pauseCommand] addTarget:self action:@selector(pause)];
-  [[remoteCommandCenter playCommand] addTarget:self action:@selector(play)];
+  [[remoteCommandCenter nextTrackCommand] addTarget:self action:@selector(nextTrack:)];
+  [[remoteCommandCenter previousTrackCommand] addTarget:self action:@selector(previousTrack:)];
+  [[remoteCommandCenter togglePlayPauseCommand] addTarget:self action:@selector(togglePlayPause:)];
+  [[remoteCommandCenter pauseCommand] addTarget:self action:@selector(pause:)];
+  [[remoteCommandCenter playCommand] addTarget:self action:@selector(play:)];
 
   
   [self setupMediaInfo];

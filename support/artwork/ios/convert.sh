@@ -9,7 +9,8 @@ convert ${SRC} -resize 40x40 out/Icon-40.png
 convert ${SRC} -resize 80x80 out/Icon-40@2x.png
 convert ${SRC} -resize 120x120 out/Icon-40@3x.png
 convert ${SRC} -resize 120x120 out/Icon-60@2x.png
-convert ${SRC} -resize 160x160 out/Icon-60@3x.png
+convert ${SRC} -resize 180x180 out/Icon-60@3x.png
 convert ${SRC} -resize 76x76 out/Icon-76.png
 convert ${SRC} -resize 152x152 out/Icon-76@2x.png
 convert ${SRC} -resize 167x167 out/Icon-83_5@2x.png
+convert ${SRC} -resize 1024x1024 out/Icon-1024.png
