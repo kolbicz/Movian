@@ -241,7 +241,7 @@ vda_decode(struct media_codec *mc, struct video_decoder *vd,
   vda_decoder_t *vdad = mc->opaque;
   CFDictionaryRef user_info;
   CFDataRef coded_frame;
-  const int num_kvs = 6;
+  enum { num_kvs = 6 };
   CFStringRef keys[num_kvs];
   CFNumberRef values[num_kvs];
   const int keyframe = mb->mb_keyframe;

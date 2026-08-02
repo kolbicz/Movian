@@ -49,12 +49,15 @@ enable timegm
 enable realpath
 enable polarssl
 enable librtmp
-enable dvd
+# The legacy bundled libdvdread/libdvdcss no longer compiles with current
+# Apple Clang. Disable physical-DVD support in the modern macOS build.
+disable dvd
 enable fsevents
 enable webpopup
 enable libpthread
 enable zlib
 enable vmir
+enable libsmb2
 
 [ -f project.config ] && source project.config
 
@@ -84,6 +87,10 @@ done
 
 setup_env "$@"
 
+sh "${TOPDIR}/osx/build_libsmb2.sh" "${BUILDDIR}/libsmb2"
+echo >>${CONFIG_MAK} "CFLAGS_cfg += -I${TOPDIR}/ext/libsmb2/include"
+echo >>${CONFIG_MAK} "LDFLAGS_cfg += ${BUILDDIR}/libsmb2/lib/libsmb2.a"
+
 if enabled openssl; then
     # Assumes installed from brew or equivivalent
     disable polarssl
@@ -91,12 +98,12 @@ if enabled openssl; then
     echo >>${CONFIG_MAK} "CFLAGS_cfg += -I/usr/local/opt/openssl/include"
 fi
 
-MACOSXSDK_CFLAGS="-mmacosx-version-min=10.8"
+MACOSXSDK_CFLAGS="-mmacosx-version-min=15.0"
 MACOSXSDK_LDFLAGS="$MACOSXSDK_CFLAGS"
-LIBAV_CFLAGS="$MACOSXSDK_CFLAGS"
+LIBAV_CFLAGS="$MACOSXSDK_CFLAGS -Wno-error=incompatible-function-pointer-types"
 LIBAV_LDFLAGS="$MACOSXSDK_CFLAGS"
 echo >>${CONFIG_MAK} "LDFLAGS_cfg += $MACOSXSDK_LDFLAGS"
-echo >>${CONFIG_MAK} "CFLAGS_cfg += $MACOSXSDK_CFLAGS  -D_FILE_OFFSET_BITS=64"
+echo >>${CONFIG_MAK} "CFLAGS_cfg += $MACOSXSDK_CFLAGS -D_FILE_OFFSET_BITS=64 -Wno-error=unused-but-set-variable -Wno-error=macro-redefined -Wno-error=objc-missing-super-calls -Wno-error=single-bit-bitfield-constant-conversion"
 echo >>${CONFIG_MAK} "CFLAGS_ext += $MACOSXSDK_CFLAGS"
 
 #
@@ -118,7 +125,12 @@ echo >>${CONFIG_MAK} "LDFLAGS_cfg += -framework CoreAudio"
 echo >>${CONFIG_MAK} "LDFLAGS_cfg += -framework AudioToolBox"
 
 export CFLAGS="$MACOSXSDK_CFLAGS"
-freetype_setup
+FREETYPE_PREFIX=$(brew --prefix freetype 2>/dev/null) || \
+  die "Homebrew freetype is required for the macOS build"
+echo >>${CONFIG_MAK} "CFLAGS_cfg += -I${FREETYPE_PREFIX}/include/freetype2"
+LIBPNG_PREFIX=$(brew --prefix libpng 2>/dev/null) || \
+  die "Homebrew libpng is required for the macOS build"
+echo >>${CONFIG_MAK} "LDFLAGS_cfg += ${FREETYPE_PREFIX}/lib/libfreetype.a ${LIBPNG_PREFIX}/lib/libpng16.a -lbz2 -lz"
 export -n CFLAGS
 
 LIBAV_ARCH_FLAGS="--disable-shared --enable-static"

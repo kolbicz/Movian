@@ -36,6 +36,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <smb2/smb2.h>
@@ -273,8 +274,18 @@ movian_smb2_can_query_user(int flags)
   if(flags & (FA_NON_INTERACTIVE | FA_DISABLE_AUTH))
     return 0;
 
+#ifdef PLATFORM_OSX
+  /*
+   * Cocoa directory scans run on Movian's asyncio-named worker, but the
+   * keyring dialog is dispatched to the main application UI. Suppressing the
+   * query solely because of that worker name leaves macOS unable to request
+   * credentials for any SMB2 server.
+   */
+  return 1;
+#else
   char name[64];
   return strcmp(hts_thread_name(name, sizeof(name)), "asyncio");
+#endif
 }
 
 

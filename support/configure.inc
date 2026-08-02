@@ -70,6 +70,7 @@ CONFIG_LIST="
  libpthread
  libpulse
  librtmp
+ libsmb2
  libx11
  libxext
  libxrandr

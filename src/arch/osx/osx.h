@@ -30,7 +30,7 @@ void webpopup_init(void);
 /**
  *
  */
-@interface GLWView : NSOpenGLView  <NSWindowDelegate>
+@interface GLWView : NSOpenGLView  <NSWindowDelegate, NSTextFieldDelegate>
 {
   struct glw_root *gr;
   struct prop *eventSink;
@@ -47,9 +47,12 @@ void webpopup_init(void);
   CGLContextObj m_cgl_context;
   CGLPixelFormatObj m_cgl_pixel_format;
   int64_t hide_cursor_at;
+  NSTextField *native_text_field;
+  bool native_edit_ending;
 }
 - (id)initWithFrame:(NSRect)frameRect :(struct glw_root *)gr;
 - (void)stop;
+- (void)finishNativeEditing;
 
 @end
 

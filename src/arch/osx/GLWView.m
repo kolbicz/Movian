@@ -29,6 +29,10 @@
 
 - (CVReturn)getFrameForTime:(const CVTimeStamp *)ot;
 - (void)drawFrame;
+- (void)openNativeEditorForWidget:(glw_t *)w
+                             rect:(const glw_rect_t *)rect
+                             text:(const char *)text
+                         password:(int)password;
 
 @end
 
@@ -108,6 +112,35 @@ newframe(CVDisplayLinkRef displayLink, const CVTimeStamp *now,
 {
   CVReturn result = [(GLWView *)displayLinkContext getFrameForTime:outputTime];
   return result;
+}
+
+
+static void
+openosk(glw_root_t *gr, const char *title, const char *text, glw_t *w,
+        int password)
+{
+  GLWView *view = (GLWView *)gr->gr_private;
+  if(view == nil || w->glw_matrix == NULL)
+    return;
+
+  glw_rect_t rect;
+  glw_project_matrix(&rect, w->glw_matrix, gr);
+  NSString *initialText = text != NULL ? [NSString stringWithUTF8String:text] : @"";
+  glw_ref(w);
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    glw_lock(gr);
+    BOOL stillEditing = gr->gr_osk_widget == w;
+    glw_unlock(gr);
+
+    if(stillEditing)
+      [view openNativeEditorForWidget:w rect:&rect text:[initialText UTF8String]
+                              password:password];
+
+    glw_lock(gr);
+    glw_unref(w);
+    glw_unlock(gr);
+  });
 }
 
 
@@ -225,6 +258,137 @@ glw_in_fullwindow(void *opaque, int val)
   glw_unlock(gr);
 }
 
+
+- (int)nativeCursorPosition
+{
+  NSText *editor = [native_text_field currentEditor];
+  if(editor == nil)
+    return 0;
+
+  NSRange selection = [(NSTextView *)editor selectedRange];
+  NSString *value = [native_text_field stringValue];
+  NSUInteger position = MIN(selection.location, [value length]);
+  NSString *prefix = [value substringToIndex:position];
+  return (int)([prefix lengthOfBytesUsingEncoding:NSUTF32LittleEndianStringEncoding] /
+               sizeof(uint32_t));
+}
+
+
+- (void)syncNativeTextToMovian
+{
+  if(native_text_field == nil || gr == NULL)
+    return;
+
+  const char *text = [[native_text_field stringValue] UTF8String];
+  int cursor = [self nativeCursorPosition];
+  glw_lock(gr);
+  if(gr->gr_osk_widget != NULL)
+    glw_gtb_set_edit_text(gr->gr_osk_widget, text, cursor);
+  glw_unlock(gr);
+}
+
+
+- (void)controlTextDidChange:(NSNotification *)notification
+{
+  [self syncNativeTextToMovian];
+}
+
+
+- (BOOL)control:(NSControl *)control
+       textView:(NSTextView *)textView
+doCommandBySelector:(SEL)commandSelector
+{
+  if(commandSelector == @selector(insertNewline:)) {
+    [self finishNativeEditing];
+    event_t *e = event_create_action(ACTION_ENTER);
+    prop_send_ext_event(eventSink, e);
+    event_release(e);
+    return YES;
+  }
+
+  if(commandSelector == @selector(cancelOperation:)) {
+    [self finishNativeEditing];
+    return YES;
+  }
+  return NO;
+}
+
+
+- (void)finishNativeEditing
+{
+  NSTextField *field = native_text_field;
+  if(field == nil || native_edit_ending)
+    return;
+
+  native_edit_ending = YES;
+  [self syncNativeTextToMovian];
+  native_text_field = nil;
+  [field setDelegate:nil];
+  [[self window] endEditingFor:nil];
+  [field removeFromSuperview];
+  [field release];
+
+  glw_lock(gr);
+  if(gr->gr_osk_widget != NULL) {
+    glw_gtb_set_native_editor(gr->gr_osk_widget, 0);
+    glw_osk_close(gr);
+  }
+  glw_unlock(gr);
+  native_edit_ending = NO;
+}
+
+
+- (void)openNativeEditorForWidget:(glw_t *)w
+                             rect:(const glw_rect_t *)rect
+                             text:(const char *)text
+                         password:(int)password
+{
+  /* A deferred request may replace an editor after GLW has already switched
+   * gr_osk_widget to the new target. Tear down only the Cocoa control here;
+   * finishNativeEditing would incorrectly close that new GLW edit session. */
+  if(native_text_field != nil) {
+    NSTextField *oldField = native_text_field;
+    native_text_field = nil;
+    [oldField setDelegate:nil];
+    [[self window] endEditingFor:nil];
+    [oldField removeFromSuperview];
+    [oldField release];
+  }
+
+  NSRect backingRect = NSMakeRect(rect->x1, gr->gr_height - rect->y2,
+                                  rect->x2 - rect->x1,
+                                  rect->y2 - rect->y1);
+  NSRect frame = [self convertRectFromBacking:backingRect];
+  if(frame.size.height < 28.0) {
+    CGFloat center = NSMidY(frame);
+    frame.size.height = 28.0;
+    frame.origin.y = center - frame.size.height / 2.0;
+  }
+  frame = NSIntersectionRect(frame, [self bounds]);
+
+  NSTextField *field = password ? [[NSSecureTextField alloc] initWithFrame:frame]
+                                : [[NSTextField alloc] initWithFrame:frame];
+  [field setDelegate:self];
+  [field setStringValue:text != NULL ? [NSString stringWithUTF8String:text] : @""];
+  [field setFont:[NSFont systemFontOfSize:16.0]];
+  [field setTextColor:[NSColor whiteColor]];
+  [field setBackgroundColor:[NSColor colorWithCalibratedWhite:0.08 alpha:0.98]];
+  [field setDrawsBackground:YES];
+  [field setBezeled:YES];
+  [field setBezelStyle:NSTextFieldRoundedBezel];
+
+  glw_lock(gr);
+  if(gr->gr_osk_widget == w)
+    glw_gtb_set_native_editor(w, 1);
+  glw_unlock(gr);
+
+  native_text_field = field;
+  [self addSubview:field];
+  [[self window] makeFirstResponder:field];
+  NSTextView *editor = (NSTextView *)[field currentEditor];
+  [editor setSelectedRange:NSMakeRange([[field stringValue] length], 0)];
+}
+
 - (void)scrollWheel:(NSEvent *)event
 {
   if([event hasPreciseScrollingDeltas]) {
@@ -270,6 +434,8 @@ glw_in_fullwindow(void *opaque, int val)
 
 
 - (void)mouseDown:(NSEvent *)event {
+  if(native_text_field != nil)
+    [self finishNativeEditing];
   [self glwEventFromMouseEvent:event];
 }
 
@@ -436,6 +602,9 @@ glw_in_fullwindow(void *opaque, int val)
 - (void)drawFrame
 {
   NSOpenGLContext *currentContext = [self openGLContext];
+  if(stopped || currentContext == nil || gr->gr_be_render_unlocked == NULL)
+    return;
+
   [currentContext makeCurrentContext];
   CGLLockContext((CGLContextObj)[currentContext CGLContextObj]);
 
@@ -484,6 +653,7 @@ glw_in_fullwindow(void *opaque, int val)
  */
 - (void)stop
 {
+  [self finishNativeEditing];
   stopped = YES;
 
   [self showCursor];
@@ -563,6 +733,8 @@ glw_in_fullwindow(void *opaque, int val)
   [wpf release];
 
   gr = root;
+  gr->gr_private = self;
+  gr->gr_open_osk = openosk;
   minimized = NO;
   eventSink = prop_create(gr->gr_prop_ui, "eventSink");
 
@@ -574,12 +746,15 @@ glw_in_fullwindow(void *opaque, int val)
 		   PROP_TAG_ROOT, gr->gr_prop_ui,
 		   NULL);
 
+  NSOpenGLContext *openGLContext = [self openGLContext];
+  [openGLContext makeCurrentContext];
+
   GLint one = 1;
-  [[self openGLContext] setValues:&one forParameter:NSOpenGLCPSwapInterval];
+  [openGLContext setValues:&one forParameter:NSOpenGLCPSwapInterval];
 
   CVDisplayLinkCreateWithActiveCGDisplays(&m_displayLink);
   CVDisplayLinkSetOutputCallback(m_displayLink, newframe, self);
-  m_cgl_context = (CGLContextObj)[[self openGLContext] CGLContextObj];
+  m_cgl_context = (CGLContextObj)[openGLContext CGLContextObj];
   m_cgl_pixel_format =
     (CGLPixelFormatObj)[[self pixelFormat] CGLPixelFormatObj];
 
@@ -588,14 +763,20 @@ glw_in_fullwindow(void *opaque, int val)
                                                     m_cgl_pixel_format);
 
   NSSize s = [self bounds].size;
-  gr->gr_private = self;
   gr->gr_width = s.width;
   gr->gr_height = s.height;
 
-  glw_opengl_init_context(gr);
+  CGLLockContext(m_cgl_context);
+  int gl_init_status = glw_opengl_init_context(gr);
+  CGLUnlockContext(m_cgl_context);
   stopped = NO;
 
-  CVDisplayLinkStart(m_displayLink);
+  if(gl_init_status == 0 && gr->gr_be_render_unlocked != NULL) {
+    CVDisplayLinkStart(m_displayLink);
+  } else {
+    stopped = YES;
+    NSLog(@"Unable to initialize Movian's OpenGL renderer");
+  }
 
   [self registerForDraggedTypes:[NSArray arrayWithObjects:NSFilenamesPboardType,NSURLPboardType,nil]];
 

@@ -248,8 +248,13 @@ SRCS-$(CONFIG_LIBAV) += \
 SRCS-$(CONFIG_LOCATEDB)        += src/fileaccess/fa_locatedb.c
 SRCS-$(CONFIG_SPOTLIGHT)       += src/fileaccess/fa_spotlight.c
 SRCS-$(CONFIG_LIBNTFS)         += src/fileaccess/fa_ntfs.c
-SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c \
-				  src/fileaccess/smb/nmb.c
+SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c
+SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c \
+				  src/fileaccess/smb2/fa_libsmb2_pool.c
+
+ifneq (,$(filter yes,$(CONFIG_NATIVESMB) $(CONFIG_LIBSMB2)))
+SRCS += src/fileaccess/smb/nmb.c
+endif
 SRCS-$(CONFIG_RAR)             += src/fileaccess/fa_rar.c
 
 BUNDLES += res/fileaccess
@@ -565,6 +570,7 @@ SRCS-$(CONFIG_DVD) += 	ext/dvd/dvdcss/css.c \
 			ext/dvd/dvdnav/searching.c
 
 ${BUILDDIR}/ext/dvd/dvdcss/%.o : CFLAGS = ${OPTFLAGS} \
+ -Wno-error=incompatible-function-pointer-types \
  -DHAVE_LIMITS_H -DHAVE_UNISTD_H -DHAVE_ERRNO_H -DVERSION="0" $(DVDCSS_CFLAGS)
 
 ${BUILDDIR}/ext/dvd/libdvdread/%.o : CFLAGS = ${OPTFLAGS} \
@@ -650,6 +656,8 @@ SRCS-$(CONFIG_POLARSSL) += \
 
 
 ${BUILDDIR}/ext/polarssl-1.3/library/%.o : CFLAGS = -Wall ${OPTFLAGS}
+${BUILDDIR}/ext/polarssl-1.3/library/camellia.o : CFLAGS = -Wall ${OPTFLAGS} \
+ -include string.h
 
 
 ifeq ($(CONFIG_POLARSSL), yes)
@@ -740,7 +748,7 @@ SRCS-$(CONFIG_METADATA) += src/ecmascript/es_metadata.c
 SRCS-$(CONFIG_SQLITE) += src/ecmascript/es_sqlite.c
 
 ${BUILDDIR}/ext/duktape/%.o : CFLAGS = -Wall ${OPTFLAGS} \
- -fstrict-aliasing -std=c99 -DDUK_OPT_FASTINT #-DDUK_OPT_ASSERTIONS #-DDUK_OPT_DEBUG -DDUK_OPT_DPRINT -DDUK_OPT_DDPRINT -DDUK_OPT_DDDPRINT
+ -fstrict-aliasing -std=c99 #-DDUK_OPT_ASSERTIONS #-DDUK_OPT_DEBUG -DDUK_OPT_DPRINT -DDUK_OPT_DDPRINT -DDUK_OPT_DDDPRINT
 
 ##############################################################
 # VMIR

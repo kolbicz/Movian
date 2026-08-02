@@ -726,8 +726,13 @@ glw_text_bitmap_event(glw_t *w, event_t *e)
 
     } else {
 
+      /* Legacy desktop GLW treats a mouse click as focus-only. Cocoa now
+       * provides a native editor overlay, so the same click must be allowed
+       * to enter the OSK hook and create that editor. */
+#ifndef PLATFORM_OSX
       if(event_is_action(e, ACTION_ACTIVATE) && e->e_flags & EVENT_MOUSE)
         return 1;
+#endif
 
       glw_osk_open(w->glw_root,
                    gtb->gtb_description,

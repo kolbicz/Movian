@@ -18,8 +18,12 @@
 	<string>APPL</string>
 	<key>CFBundleSignature</key>
 	<string>SHTI</string>
+	<key>CFBundleShortVersionString</key>
+	<string>5.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>1.0</string>
+	<string>2026080304</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
