@@ -1681,6 +1681,8 @@ void glw_destroy_program(struct glw_root *gr, struct glw_program *gp);
 // text bitmap semi-private stuff
 
 void glw_gtb_set_caption_raw(glw_t *w, uint32_t *uc, int len);
+void glw_gtb_set_edit_text(glw_t *w, const char *text, int cursor);
+void glw_gtb_set_native_editor(glw_t *w, int active);
 
 extern const float glw_identitymtx[16];
 
@@ -1728,5 +1730,3 @@ glw_schedule_refresh(glw_root_t *gr, int64_t when)
 }
 
 #endif /* GLW_H */
-
-

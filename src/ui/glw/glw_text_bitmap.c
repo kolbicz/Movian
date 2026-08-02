@@ -112,6 +112,7 @@ typedef struct glw_text_bitmap {
   uint8_t gtb_need_layout : 1;
   uint8_t gtb_deferred_realize : 1;
   uint8_t gtb_caption_dirty : 1;
+  uint8_t gtb_native_editor : 1;
 
 } glw_text_bitmap_t;
 
@@ -405,6 +406,11 @@ glw_text_bitmap_render(glw_t *w, const glw_rctx_t *rc)
 
   if(glw_is_focusable_or_clickable(w))
     glw_store_matrix(w, rc);
+
+  /* A platform-native editor is positioned over this widget. Keep storing
+   * its matrix for hit testing, but do not paint a second field underneath. */
+  if(gtb->gtb_native_editor)
+    return;
 
   alpha = rc->rc_alpha * w->glw_alpha;
 
@@ -842,6 +848,35 @@ glw_gtb_set_caption_raw(glw_t *w, uint32_t *uc, int len)
   gtb->gtb_uc_len = len;
 
   gtb_update_epilogue(gtb, GTB_UPDATE_REALIZE);
+}
+
+
+/**
+ * Replace an editable text widget's contents from a native platform editor
+ * and keep Movian's cursor and bound property in sync. The caller must hold
+ * the GLW root lock.
+ */
+void
+glw_gtb_set_edit_text(glw_t *w, const char *text, int cursor)
+{
+  glw_text_bitmap_t *gtb = (glw_text_bitmap_t *)w;
+
+  caption_set_internal(gtb, text ?: "", 0);
+  gtb->gtb_edit_ptr = MIN(MAX(cursor, 0), gtb->gtb_uc_len);
+  gtb->gtb_update_cursor = 1;
+  gtb_notify(gtb);
+}
+
+
+/**
+ * Hide this editable widget while a platform-native editor is overlaid.
+ * The caller must hold the GLW root lock.
+ */
+void
+glw_gtb_set_native_editor(glw_t *w, int active)
+{
+  glw_text_bitmap_t *gtb = (glw_text_bitmap_t *)w;
+  gtb->gtb_native_editor = active != 0;
 }
 
 

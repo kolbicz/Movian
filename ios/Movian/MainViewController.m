@@ -34,11 +34,12 @@
 @end
 
 
-@interface GLWView: GLKView <UIKeyInput>
+@interface GLWView: GLKView <UIKeyInput, UITextFieldDelegate>
 @property (nonatomic) prop_t *eventSink;
 @property (nonatomic) glw_rect_t rect;
 @property (nonatomic) glw_root_t *gr;
 @property (nonatomic) int oskscroll;
+@property (strong, nonatomic) UITextField *nativeTextField;
 @end
 
 @implementation GLWView
@@ -70,11 +71,126 @@
   return YES;
 }
 
-- (void)openOSKforWidget:(struct glw *)w position:(const glw_rect_t *)rect
+- (int)nativeCursorPosition
+{
+  UITextPosition *beginning = self.nativeTextField.beginningOfDocument;
+  UITextPosition *cursor = self.nativeTextField.selectedTextRange.start;
+  NSInteger utf16Position = [self.nativeTextField offsetFromPosition:beginning
+                                                          toPosition:cursor];
+  if(utf16Position <= 0)
+    return 0;
+
+  NSString *prefix = [self.nativeTextField.text substringToIndex:utf16Position];
+  return (int)([prefix lengthOfBytesUsingEncoding:NSUTF32LittleEndianStringEncoding] /
+               sizeof(uint32_t));
+}
+
+- (void)syncNativeTextToMovian
+{
+  if(self.gr == NULL || self.gr->gr_osk_widget == NULL ||
+     self.nativeTextField == nil)
+    return;
+
+  const char *text = [self.nativeTextField.text UTF8String];
+  int cursor = [self nativeCursorPosition];
+  glw_lock(self.gr);
+  if(self.gr->gr_osk_widget != NULL)
+    glw_gtb_set_edit_text(self.gr->gr_osk_widget, text, cursor);
+  glw_unlock(self.gr);
+}
+
+- (void)nativeTextChanged:(UITextField *)textField
+{
+  [self syncNativeTextToMovian];
+}
+
+- (void)finishNativeEditing
+{
+  UITextField *field = self.nativeTextField;
+  if(field == nil)
+    return;
+
+  [self syncNativeTextToMovian];
+
+  /* Clear this first: resignFirstResponder may synchronously post the
+   * keyboard-hide notification, which must not close a later GLW editor. */
+  self.nativeTextField = nil;
+  field.delegate = nil;
+  [field resignFirstResponder];
+  [field removeFromSuperview];
+  self.oskscroll = 0;
+
+  if(self.gr != NULL) {
+    glw_lock(self.gr);
+    if(self.gr->gr_osk_widget != NULL) {
+      glw_gtb_set_native_editor(self.gr->gr_osk_widget, 0);
+      glw_osk_close(self.gr);
+    }
+    glw_unlock(self.gr);
+  }
+}
+
+- (void)textFieldDidChangeSelection:(UITextField *)textField
+{
+  [self syncNativeTextToMovian];
+}
+
+- (BOOL)textFieldShouldReturn:(UITextField *)textField
+{
+  [self finishNativeEditing];
+  event_t *e = event_create_action(ACTION_ENTER);
+  prop_send_ext_event(self.eventSink, e);
+  event_release(e);
+  return YES;
+}
+
+- (void)openOSKforWidget:(struct glw *)w
+                position:(const glw_rect_t *)rect
+                    text:(const char *)text
+                password:(int)password
 {
   self.gr = w->glw_root;
   self.rect = *rect;
-  [self becomeFirstResponder];
+
+  [self.nativeTextField removeFromSuperview];
+
+  CGFloat scale = self.contentScaleFactor;
+  UIEdgeInsets insets = self.safeAreaInsets;
+  CGRect frame = CGRectMake(insets.left + rect->x1 / scale,
+                            insets.top + rect->y1 / scale,
+                            (rect->x2 - rect->x1) / scale,
+                            (rect->y2 - rect->y1) / scale);
+  if(frame.size.height < 44.0) {
+    CGFloat center = CGRectGetMidY(frame);
+    frame.size.height = 44.0;
+    frame.origin.y = center - frame.size.height / 2.0;
+  }
+  frame = CGRectIntersection(frame, UIEdgeInsetsInsetRect(self.bounds, insets));
+
+  UITextField *field = [[UITextField alloc] initWithFrame:frame];
+  field.delegate = self;
+  field.text = text != NULL ? [NSString stringWithUTF8String:text] : @"";
+  field.secureTextEntry = password != 0;
+  field.textColor = UIColor.whiteColor;
+  field.tintColor = UIColor.systemBlueColor;
+  field.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.96];
+  field.borderStyle = UITextBorderStyleRoundedRect;
+  field.clearButtonMode = UITextFieldViewModeWhileEditing;
+  field.returnKeyType = UIReturnKeyDone;
+  field.autocorrectionType = UITextAutocorrectionTypeNo;
+  field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+  field.spellCheckingType = UITextSpellCheckingTypeNo;
+  [field addTarget:self action:@selector(nativeTextChanged:)
+                         forControlEvents:UIControlEventEditingChanged];
+
+  glw_lock(self.gr);
+  if(self.gr->gr_osk_widget == w)
+    glw_gtb_set_native_editor(w, 1);
+  glw_unlock(self.gr);
+
+  [self addSubview:field];
+  self.nativeTextField = field;
+  [field becomeFirstResponder];
 }
 
 #if TARGET_OS_IOS == 1
@@ -98,12 +214,10 @@
 
 - (void)keyboardWillBeHidden:(NSNotification*)aNotification
 {
-  self.oskscroll = 0;
-  if(self.gr) {
-    glw_lock(self.gr);
-    glw_osk_close(self.gr);
-    glw_unlock(self.gr);
-  }
+  if(self.nativeTextField != nil)
+    [self finishNativeEditing];
+  else
+    self.oskscroll = 0;
 }
 #endif
 
@@ -124,8 +238,32 @@ openosk(struct glw_root *gr,
     return;
   glw_rect_t r;
   glw_project_matrix(&r, w->glw_matrix, gr);
-  
-  [view openOSKforWidget:w position:&r];
+
+  /*
+   * glw_osk_open() is invoked while the GLW root is locked. UIKit may call
+   * textFieldDidChangeSelection synchronously from becomeFirstResponder;
+   * that callback synchronizes into GLW and needs the same lock. Defer the
+   * native editor until this GLW event has unwound to avoid self-deadlock.
+   */
+  NSString *initialText = str != NULL ? [NSString stringWithUTF8String:str] : @"";
+  glw_rect_t rect = r;
+  glw_ref(w);
+  dispatch_async(dispatch_get_main_queue(), ^{
+    glw_lock(gr);
+    BOOL stillEditing = gr->gr_osk_widget == w;
+    glw_unlock(gr);
+
+    if(stillEditing) {
+      [view openOSKforWidget:w
+                    position:&rect
+                        text:initialText.UTF8String
+                    password:password];
+    }
+
+    glw_lock(gr);
+    glw_unref(w);
+    glw_unlock(gr);
+  });
 }
 
 static void
@@ -394,6 +532,15 @@ glw_in_fullwindow(void *opaque, int val)
 
   if ([touches count] < 1) return;
   CGPoint point = [[touches anyObject] locationInView:[self view]];
+
+  /* A native UITextField owns touches inside its frame. A touch delivered
+   * here is outside the active editor: commit and blur it, but keep handling
+   * this same touch so the newly tapped Movian control activates normally. */
+  GLWView *glwView = (GLWView *)self.view;
+  if(glwView.nativeTextField != nil &&
+     !CGRectContainsPoint(glwView.nativeTextField.frame, point))
+    [glwView finishNativeEditing];
+
   self.touch_start_pos = point;
   self.touch_start_time = event.timestamp;
     
