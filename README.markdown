@@ -21,6 +21,12 @@ The Movian adapter is distributed under GPLv3 or later. The bundled libsmb2
 client library is distributed under LGPLv2.1 or later; its copyright and
 license texts are preserved in `ext/libsmb2/`.
 
+## Release versioning
+
+Releases use semantic `MAJOR.MINOR.PATCH` Git tags. The iOS marketing version
+is generated from the current tag, and its bundle build number uses
+`YYYYMMDDNN`, where `NN` is the build sequence for that day.
+
 ## How to build for Linux
 
 First you need to satisfy some dependencies (for Ubuntu 16.04.3 LTS)
