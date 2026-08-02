@@ -23,6 +23,14 @@ onEvent(back, {
   $ui.logwindow = false;
 }, $ui.logwindow);
 
+onEvent(back, {
+  $ui.mediainfo = false;
+}, $ui.mediainfo);
+
+onEvent(back, {
+  $ui.sysinfo = false;
+}, $ui.sysinfo);
+
 
 $ui.orientation = select($ui.aspect > 1, "landscape", "portrait");
 

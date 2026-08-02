@@ -5,6 +5,9 @@ widget(container_x, {
     widget(quad, {
       alpha: 0.9;
       color: 0;
+      onEvent(activate, {
+        $ui.sysinfo = false;
+      });
     });
     widget(container_y, {
       padding: 1em;
