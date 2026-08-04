@@ -5,7 +5,7 @@
 ### Added
 
 - Added documented TrollStore, Apple-ID sideloading and jailbreak installation
-  methods, plus reproducible rootless (`iphoneos-arm64`) and RootHide/Relaxin
+  methods, plus reproducible rootless (`iphoneos-arm64`) and RootHide
   (`iphoneos-arm64e`) Debian package generation from the unsigned IPA.
 - Added the GPU/IOSurface user-client entitlements required for Movian's
   OpenGL ES renderer in RootHide and conventional rootless environments.

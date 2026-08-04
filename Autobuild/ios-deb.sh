@@ -8,6 +8,7 @@ VERSION=${VERSION:-7.0.272}
 IPA=${IPA:-"${BUILDDIR}/Movian-iOS-${VERSION}-unsigned.ipa"}
 PACKAGE_REVISION=${PACKAGE_REVISION:-1}
 ROOTLESS_MINIMUM_IOS=${ROOTLESS_MINIMUM_IOS:-16.0}
+ROOTHIDE_MINIMUM_IOS=${ROOTHIDE_MINIMUM_IOS:-15.0}
 ROOTLESS_SUFFIX=${ROOTLESS_SUFFIX:-rootless}
 BUILD_ROOTLESS_ONLY=${BUILD_ROOTLESS_ONLY:-0}
 PACKAGE_ID=${PACKAGE_ID:-tv.movian.m7}
@@ -158,8 +159,8 @@ fi
 
 # RootHide is a distinct scheme. Its package manager maps /Applications into
 # the randomized jailbreak root and identifies packages as iphoneos-arm64e.
-# Relaxin uses this scheme on iOS 17. RootHide's documented app entitlements
-# allow LaunchServices and application-container access from that environment.
+# RootHide's documented app entitlements allow LaunchServices and
+# application-container access from that environment.
 ROOTHIDE_ENTITLEMENTS="$WORKDIR/roothide-entitlements.plist"
 cat > "$ROOTHIDE_ENTITLEMENTS" <<'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -176,7 +177,7 @@ cat > "$ROOTHIDE_ENTITLEMENTS" <<'EOF'
   <true/>
   <!-- RootHide platform applications do not inherit the ordinary third-party
        app sandbox's OpenGL ES allowance. Movian needs these GPU and IOSurface
-       user clients to create its EAGLContext on iOS 17. -->
+       user clients to create its EAGLContext. -->
   <key>com.apple.security.exception.iokit-user-client-class</key>
   <array>
     <string>AGXCommandQueue</string>
@@ -198,5 +199,5 @@ cat > "$ROOTHIDE_ENTITLEMENTS" <<'EOF'
 </dict>
 </plist>
 EOF
-make_package roothide iphoneos-arm64e "" roothide 17.0 \
+make_package roothide iphoneos-arm64e "" roothide "$ROOTHIDE_MINIMUM_IOS" \
   "$ROOTHIDE_ENTITLEMENTS"

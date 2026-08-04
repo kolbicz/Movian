@@ -1,9 +1,9 @@
 # Installing Movian on iOS and iPadOS
 
-The current Movian 7.0.272 IPA and conventional rootless package require iOS
-or iPadOS 15 or newer on an arm64 device. The RootHide/Relaxin package requires
-iOS 17 or newer. Choose one installation method; do not install the IPA and a
-jailbreak package at the same time because both provide the same application.
+The current Movian 7.0.272 IPA, conventional rootless package, and RootHide
+package require iOS or iPadOS 15 or newer on an arm64 device. Choose one
+installation method; do not install the IPA and a jailbreak package at the
+same time because both provide the same application.
 
 ## TrollStore
 
@@ -61,9 +61,8 @@ and Zebra:
 - `Movian-iOS-7.0.272-rootless.deb`: modern rootless jailbreaks, Debian
   architecture `iphoneos-arm64`, iOS 15 or newer, installed below `/var/jb`.
   It includes the platform-app and GPU/IOSurface permissions needed by Movian.
-- `Movian-iOS-7.0.272-roothide.deb`: RootHide environments, including Relaxin
-  on supported iOS 17 devices; Debian architecture `iphoneos-arm64e`. Use the
-  newest available Relaxin release before installing this package.
+- `Movian-iOS-7.0.272-roothide.deb`: RootHide environments on iOS 15 or newer;
+  Debian architecture `iphoneos-arm64e`.
 
 Download the package matching the jailbreak, open it in the package manager,
 and install it. The package refreshes the application cache automatically. If
@@ -76,12 +75,10 @@ from conventional rootless: its package environment maps `/Applications` into
 a randomized jailbreak root. The RootHide package includes the application
 entitlements required by the official RootHide developer specification.
 
-Relaxin is new jailbreak software. Confirm that the exact Relaxin release,
-device and iOS version are supported before installing packages, and keep a
-working backup. This package targets the RootHide architecture used by Relaxin;
-it does not install or modify the jailbreak itself. The package includes the
-GPU and IOSurface user-client entitlements required by Movian's OpenGL ES
-renderer; older Relaxin builds may not handle that configuration reliably.
+Confirm that the exact RootHide environment, device and iOS version are
+supported before installing packages, and keep a working backup. This package
+does not install or modify the jailbreak itself. It includes the GPU and
+IOSurface user-client entitlements required by Movian's OpenGL ES renderer.
 
 To rebuild both packages after building the IPA:
 
