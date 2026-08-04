@@ -36,16 +36,13 @@ if [ ! -f "$SOURCE_APP/$EXECUTABLE" ]; then
   exit 1
 fi
 
-# Jailbreaks trust an ad-hoc signed executable. Movian does not require private
-# or platform entitlements, so do not add privileges that the application does
-# not use.
-"$LDID" -S "$SOURCE_APP/$EXECUTABLE"
-
 make_package() {
   SCHEME=$1
   ARCH=$2
   PREFIX=$3
   SUFFIX=$4
+  MINIMUM_IOS=$5
+  ENTITLEMENTS=${6:-}
   PKGROOT="$WORKDIR/$SCHEME"
   APPDIR="$PKGROOT$PREFIX/Applications"
   CONTROL="$WORKDIR/control-$SCHEME"
@@ -53,6 +50,11 @@ make_package() {
 
   mkdir -p "$APPDIR" "$CONTROL"
   cp -R "$SOURCE_APP" "$APPDIR/Movian.app"
+  if [ -n "$ENTITLEMENTS" ]; then
+    "$LDID" -S"$ENTITLEMENTS" "$APPDIR/Movian.app/$EXECUTABLE"
+  else
+    "$LDID" -S "$APPDIR/Movian.app/$EXECUTABLE"
+  fi
 
   SIZE=$(du -sk "$PKGROOT" | awk '{print $1}')
   cat > "$CONTROL/control" <<EOF
@@ -64,7 +66,7 @@ Description: Media center with modern HLS, plugins and SMB2/SMB3 support.
 Section: Multimedia
 Priority: optional
 Installed-Size: $SIZE
-Depends: firmware (>= 16.0)
+Depends: firmware (>= $MINIMUM_IOS)
 Maintainer: Christoph Kolbicz
 Author: Movian contributors and Dean Kasabow
 Homepage: https://github.com/kolbicz/Movian
@@ -101,8 +103,29 @@ EOF
 }
 
 # Rootless jailbreaks install third-party content below /var/jb and use the
-# iphoneos-arm64 Debian architecture. Rootful packages retain /Applications
-# and the historical iphoneos-arm package architecture.
-make_package rootless iphoneos-arm64 /var/jb rootless
-make_package rootful iphoneos-arm "" rootful
+# iphoneos-arm64 Debian architecture.
+make_package rootless iphoneos-arm64 /var/jb rootless 16.0
 
+# RootHide is a distinct scheme. Its package manager maps /Applications into
+# the randomized jailbreak root and identifies packages as iphoneos-arm64e.
+# Relaxin uses this scheme on iOS 17. RootHide's documented app entitlements
+# allow LaunchServices and application-container access from that environment.
+ROOTHIDE_ENTITLEMENTS="$WORKDIR/roothide-entitlements.plist"
+cat > "$ROOTHIDE_ENTITLEMENTS" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>platform-application</key>
+  <true/>
+  <key>com.apple.private.security.no-sandbox</key>
+  <true/>
+  <key>com.apple.private.security.storage.AppBundles</key>
+  <true/>
+  <key>com.apple.private.security.storage.AppDataContainers</key>
+  <true/>
+</dict>
+</plist>
+EOF
+make_package roothide iphoneos-arm64e "" roothide 17.0 \
+  "$ROOTHIDE_ENTITLEMENTS"

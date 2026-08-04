@@ -3,7 +3,7 @@
 This branch contains Movian **7.0.272** for:
 
 - iOS and iPadOS 16 or newer (`arm64`), distributed as an unsigned IPA for
-  TrollStore/sideloading and as rootless and rootful jailbreak packages. See
+  TrollStore/sideloading and as rootless and RootHide jailbreak packages. See
   the [iOS installation guide](docs/ios-installation.md).
 - Apple Silicon macOS 15 or newer, distributed as a Developer ID signed,
   notarized and stapled DMG.

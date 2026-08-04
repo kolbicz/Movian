@@ -1,7 +1,7 @@
 # Installing Movian on iOS and iPadOS
 
 Movian 7.0.272 requires iOS or iPadOS 16 or newer on an arm64 device. Choose
-one installation method; do not install the IPA and jailbreak package at the
+one installation method; do not install the IPA and a jailbreak package at the
 same time because both provide the same application.
 
 ## TrollStore
@@ -59,8 +59,8 @@ and Zebra:
 
 - `Movian-iOS-7.0.272-rootless.deb`: modern rootless jailbreaks, Debian
   architecture `iphoneos-arm64`, installed below `/var/jb`.
-- `Movian-iOS-7.0.272-rootful.deb`: rootful jailbreaks, Debian architecture
-  `iphoneos-arm`, installed below `/Applications`.
+- `Movian-iOS-7.0.272-roothide.deb`: RootHide environments, including Relaxin
+  on supported iOS 17 devices; Debian architecture `iphoneos-arm64e`.
 
 Download the package matching the jailbreak, open it in the package manager,
 and install it. The package refreshes the application cache automatically. If
@@ -68,9 +68,15 @@ the icon does not appear, refresh the icon cache or respring once. Remove it
 through the same package manager.
 
 The `.deb` files contain an ad-hoc signed application and require an active
-jailbreak. They cannot install Movian on a stock device. Rootless and rootful
-refer to the jailbreak filesystem layout, not to the CPU architecture of the
-Movian executable.
+jailbreak. They cannot install Movian on a stock device. RootHide is distinct
+from conventional rootless: its package environment maps `/Applications` into
+a randomized jailbreak root. The RootHide package includes the application
+entitlements required by the official RootHide developer specification.
+
+Relaxin is new jailbreak software. Confirm that the exact Relaxin release,
+device and iOS version are supported before installing packages, and keep a
+working backup. This package targets the RootHide architecture used by Relaxin;
+it does not install or modify the jailbreak itself.
 
 To rebuild both packages after building the IPA:
 
@@ -78,5 +84,5 @@ To rebuild both packages after building the IPA:
 ./Autobuild/ios-deb.sh
 ```
 
-The packaging script requires `ldid` (`brew install ldid` on macOS).
-
+The packaging script requires `ldid` (`brew install ldid` on macOS). RootHide
+packaging follows the [official RootHide developer guide](https://github.com/roothide/Developer).
