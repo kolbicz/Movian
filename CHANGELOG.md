@@ -4,6 +4,9 @@
 
 ### Added
 
+- Added documented TrollStore, Apple-ID sideloading and jailbreak installation
+  methods, plus reproducible rootless (`iphoneos-arm64`) and rootful
+  (`iphoneos-arm`) Debian package generation from the unsigned IPA.
 - Integrated M7 7.0.271 network updates: WS-Discovery for modern Windows SMB
   hosts and Network settings for SMB2 large reads and per-protocol extended
   attributes, while retaining SMB2 administrative shares and EA support.
