@@ -58,7 +58,8 @@ The release supplies two Debian packages for package managers such as Sileo
 and Zebra:
 
 - `Movian-iOS-7.0.272-rootless.deb`: modern rootless jailbreaks, Debian
-  architecture `iphoneos-arm64`, installed below `/var/jb`.
+  architecture `iphoneos-arm64`, installed below `/var/jb`. It includes the
+  GPU/IOSurface permissions needed by Movian's OpenGL ES renderer.
 - `Movian-iOS-7.0.272-roothide.deb`: RootHide environments, including Relaxin
   on supported iOS 17 devices; Debian architecture `iphoneos-arm64e`. Use the
   newest available Relaxin release before installing this package.

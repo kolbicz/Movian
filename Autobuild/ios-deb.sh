@@ -8,6 +8,7 @@ VERSION=${VERSION:-7.0.272}
 IPA=${IPA:-"${BUILDDIR}/Movian-iOS-${VERSION}-unsigned.ipa"}
 PACKAGE_ID=${PACKAGE_ID:-tv.movian.m7}
 LDID=${LDID:-ldid}
+DPKG_DEB=${DPKG_DEB:-dpkg-deb}
 
 if [ ! -f "$IPA" ]; then
   echo "Missing IPA: $IPA" >&2
@@ -17,6 +18,11 @@ fi
 
 if ! command -v "$LDID" >/dev/null 2>&1; then
   echo "ldid is required (Homebrew: brew install ldid)." >&2
+  exit 1
+fi
+
+if ! command -v "$DPKG_DEB" >/dev/null 2>&1; then
+  echo "dpkg-deb is required (Homebrew: brew install dpkg)." >&2
   exit 1
 fi
 
@@ -43,13 +49,10 @@ make_package() {
   SUFFIX=$4
   MINIMUM_IOS=$5
   ENTITLEMENTS=${6:-}
-  CONTROL_VERSION=$VERSION
-  if [ "$SCHEME" = roothide ]; then
-    CONTROL_VERSION="${VERSION}-1"
-  fi
+  CONTROL_VERSION="${VERSION}-1"
   PKGROOT="$WORKDIR/$SCHEME"
   APPDIR="$PKGROOT$PREFIX/Applications"
-  CONTROL="$WORKDIR/control-$SCHEME"
+  CONTROL="$PKGROOT/DEBIAN"
   OUTPUT="${BUILDDIR}/Movian-iOS-${VERSION}-${SUFFIX}.deb"
 
   mkdir -p "$APPDIR" "$CONTROL"
@@ -94,21 +97,43 @@ exit 0
 EOF
   chmod 0755 "$CONTROL/postinst" "$CONTROL/prerm"
 
-  COPYFILE_DISABLE=1 tar --format=ustar --uid 0 --gid 0 \
-    -C "$CONTROL" -czf "$WORKDIR/control.tar.gz" .
-  COPYFILE_DISABLE=1 tar --format=ustar --uid 0 --gid 0 \
-    -C "$PKGROOT" -czf "$WORKDIR/data.tar.gz" .
-  printf '2.0\n' > "$WORKDIR/debian-binary"
-
   rm -f "$OUTPUT"
-  (cd "$WORKDIR" && ar -q "$OUTPUT" \
-    debian-binary control.tar.gz data.tar.gz)
+  "$DPKG_DEB" --build --root-owner-group -Zgzip "$PKGROOT" "$OUTPUT"
   echo "Jailbreak package: $OUTPUT"
 }
 
 # Rootless jailbreaks install third-party content below /var/jb and use the
-# iphoneos-arm64 Debian architecture.
-make_package rootless iphoneos-arm64 /var/jb rootless 16.0
+# iphoneos-arm64 Debian architecture. Like RootHide platform apps, Movian must
+# explicitly receive the GPU/IOSurface sandbox extension used by OpenGL ES.
+ROOTLESS_ENTITLEMENTS="$WORKDIR/rootless-entitlements.plist"
+cat > "$ROOTLESS_ENTITLEMENTS" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.exception.iokit-user-client-class</key>
+  <array>
+    <string>AGXCommandQueue</string>
+    <string>AGXDevice</string>
+    <string>AGXDeviceUserClient</string>
+    <string>AGXSharedUserClient</string>
+    <string>IOGPUDeviceUserClient</string>
+    <string>IOAccelContext</string>
+    <string>IOAccelContext2</string>
+    <string>IOAccelDevice</string>
+    <string>IOAccelDevice2</string>
+    <string>IOAccelSharedUserClient</string>
+    <string>IOAccelSharedUserClient2</string>
+    <string>IOAccelSubmitter2</string>
+    <string>IOSurfaceAcceleratorClient</string>
+    <string>IOSurfaceRootUserClient</string>
+    <string>IOMobileFramebufferUserClient</string>
+  </array>
+</dict>
+</plist>
+EOF
+make_package rootless iphoneos-arm64 /var/jb rootless 16.0 \
+  "$ROOTLESS_ENTITLEMENTS"
 
 # RootHide is a distinct scheme. Its package manager maps /Applications into
 # the randomized jailbreak root and identifies packages as iphoneos-arm64e.

@@ -8,7 +8,7 @@
   methods, plus reproducible rootless (`iphoneos-arm64`) and RootHide/Relaxin
   (`iphoneos-arm64e`) Debian package generation from the unsigned IPA.
 - Added the GPU/IOSurface user-client entitlements required for Movian's
-  OpenGL ES renderer in RootHide environments.
+  OpenGL ES renderer in RootHide and conventional rootless environments.
 - Integrated M7 7.0.271 network updates: WS-Discovery for modern Windows SMB
   hosts and Network settings for SMB2 large reads and per-protocol extended
   attributes, while retaining SMB2 administrative shares and EA support.
@@ -37,6 +37,8 @@
 
 - Removed the obsolete Movian 3/4 `glwskins/old` skin and unused MP3 speaker
   samples; current builds use the flat skin and WAV speaker-position samples.
+- Replaced the hand-built Debian archive with canonical `dpkg-deb` packaging,
+  normalized root ownership and gzip members for Sileo compatibility.
 - Standardized the default HTTP user agent on macOS and iOS as
   `Movian Apple 7.0.272`.
 - Fixed the macOS launcher on case-sensitive filesystems by using the exact
