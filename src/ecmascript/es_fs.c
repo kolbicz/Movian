@@ -101,6 +101,12 @@ get_filename(duk_context *ctx, int index, const es_context_t *ec,
      (ec->ec_path    != NULL && mystrbegins(filename, ec->ec_path)))
     return filename;
 
+  if(!for_write && ec->ec_storage != NULL && mystrbegins(filename, "zip://") && strlen(filename)>12 && mystrbegins(filename+6, ec->ec_storage))
+	  return filename;
+
+  if(!for_write && (mystrbegins(filename, "zip://http") || mystrbegins(filename, "http")))
+	  return filename;
+
   duk_error(ctx, DUK_ERR_ERROR, "Bad filename %s -- Access not allowed",
             filename);
 }
@@ -233,6 +239,21 @@ es_file_write(duk_context *ctx)
  * fd
  */
 static int
+es_file_close(duk_context *ctx)
+{
+  es_fd_t *efd = es_fd_get(ctx, 0);
+  if(efd && efd->efd_fh)
+  {
+	fa_close(efd->efd_fh);
+	efd->efd_fh = NULL;
+  }
+  return 1;
+}
+
+/**
+ * fd
+ */
+static int
 es_file_fsize(duk_context *ctx)
 {
   es_fd_t *efd = es_fd_get(ctx, 0);
@@ -252,10 +273,79 @@ static int
 es_file_ftruncate(duk_context *ctx)
 {
   es_fd_t *efd = es_fd_get(ctx, 0);
-  fa_ftruncate(efd->efd_fh, duk_to_number(ctx, 1));
+  int status = fa_ftruncate(efd->efd_fh, duk_to_number(ctx, 1));
+  if(status < 0)
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to truncate '%s' -- %s",
+              efd->efd_path, fa_err_code_str(status));
+  //fa_ftruncate(efd->efd_fh, duk_to_number(ctx, 1));
   return 0;
 }
 
+static int
+es_file_unlink(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *filename = get_filename(ctx, 0, ec, 1);
+  char errbuf[512];
+
+  if(fa_unlink(filename, errbuf, sizeof(errbuf)))
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to remove '%s' -- %s",
+              filename, errbuf);
+
+  return 0;
+}
+
+
+/**
+ * path
+ */
+static int
+es_file_rmdir(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *path = get_filename(ctx, 0, ec, 1);
+  char errbuf[512];
+
+  if(fa_rmdir(path, errbuf, sizeof(errbuf)))
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to remove directory '%s' -- %s",
+              path, errbuf);
+
+  return 0;
+}
+
+
+/**
+ * path
+ */
+static int
+es_file_readdir(duk_context *ctx)
+{
+  es_context_t *ec = es_get(ctx);
+
+  const char *path = get_filename(ctx, 0, ec, 0);
+  char errbuf[512];
+
+  fa_dir_t *fd = fa_scandir(path, errbuf, sizeof(errbuf));
+  if(fd == NULL)
+    duk_error(ctx, DUK_ERR_ERROR, "Unable to scan directory '%s' -- %s",
+              path, errbuf);
+
+  duk_push_array(ctx);
+  int idx = 0;
+  fa_dir_entry_t *fde;
+  RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+    const char *name = rstr_get(fde->fde_filename);
+    if(!strcmp(name, ".") || !strcmp(name, ".."))
+      continue;
+    duk_push_string(ctx, name);
+    duk_put_prop_index(ctx, -2, idx++);
+  }
+
+  fa_dir_free(fd);
+  return 1;
+}
 
 /**
  * oldname, newname
@@ -340,7 +430,8 @@ es_file_copy(duk_context *ctx)
   char errbuf[256];
   es_context_t *ec = es_get(ctx);
 
-  const char *from = duk_to_string(ctx, 0);
+  const char *from = get_filename(ctx, 0, ec, 0); //duk_to_string(ctx, 0);
+
   const char *to   = duk_to_string(ctx, 1);
 
   cleanup = mystrdupa(to);
@@ -359,14 +450,23 @@ es_file_copy(duk_context *ctx)
   return 1;
 }
 
+
 static const duk_function_list_entry fnlist_fs[] = {
   { "open",             es_file_open,             3 },
+  { "close",            es_file_close,            1 },
   { "read",             es_file_read,             5 },
   { "write",            es_file_write,            5 },
   { "fsize",            es_file_fsize,            1 },
   { "ftrunctae",        es_file_ftruncate,        2 },
+  { "ftruncate",        es_file_ftruncate,        2 },
+  { "funlink",          es_file_unlink,           1 },
   { "rename",           es_file_rename,           2 },
   { "mkdirs",           es_file_mkdirs,           2 },
+
+  { "unlink",           es_file_unlink,           1 },
+  { "rmdir",            es_file_rmdir,            1 },
+  { "readdir",          es_file_readdir,          1 },
+
   { "dirname",          es_file_dirname,          1 },
   { "basename",         es_file_basename,         1 },
   { "copyfile",         es_file_copy,             2 },

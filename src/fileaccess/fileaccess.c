@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2007-2019 Lonelycoder AB
+ *  Copyright (C) 2007-2015 Lonelycoder AB
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -336,12 +336,12 @@ fa_read(void *fh_, void *buf, size_t size)
  *
  */
 void
-fa_deadline(void *fh_, int deadline)
+fa_deadline(void *fh_, int deadline, int probe)
 {
   fa_handle_t *fh = fh_;
 
   if(fh->fh_proto->fap_deadline != NULL)
-    fh->fh_proto->fap_deadline(fh, deadline);
+    fh->fh_proto->fap_deadline(fh, deadline, probe);
 }
 
 
@@ -1149,12 +1149,9 @@ fa_makedir_p(fa_protocol_t *fap, const char *path)
     memcpy(p, path, l);
     p[l--] = 0;
 
-    if (p[l] == '/')
-      p[l] = 0;
-
     for(; l >= 0; l--)
       if(p[l] == '/')
-        break;
+	break;
     if(l == 0)
       return FAP_NOENT;
 

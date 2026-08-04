@@ -127,7 +127,7 @@ mp_create(const char *name, int flags)
 
   atomic_set(&mp->mp_refcount, 1);
 
-  mp->mp_buffer_limit = 1 * 1024 * 1024;
+  mp->mp_buffer_limit = 8 * 1024 * 1024;
 
   mp->mp_name = name;
 
@@ -157,6 +157,7 @@ mp_create(const char *name, int flags)
 
   mp->mp_prop_video = prop_create(mp->mp_prop_root, "video");
   mp->mp_setting_video_root = prop_create(mp->mp_prop_video, "settings");
+  mp->mp_prop_video_track_current = prop_create(mp->mp_prop_video, "current");
   mq_init(&mp->mp_video, mp->mp_prop_video, &mp->mp_mutex, mp);
 
   //--------------------------------------------------
@@ -312,6 +313,7 @@ mp_reset(media_pipe_t *mp)
   prop_destroy_childs(mp->mp_prop_audio_tracks);
   prop_destroy_childs(mp->mp_prop_subtitle_tracks);
 
+  prop_set_void(mp->mp_prop_video_track_current);
   prop_set_void(mp->mp_prop_audio_track_current);
   prop_set_int(mp->mp_prop_audio_track_current_manual, 0);
 
@@ -751,10 +753,12 @@ mp_configure(media_pipe_t *mp, int flags, int buffer_size, int64_t duration,
   switch(buffer_size) {
   case MP_BUFFER_NONE:
     mp->mp_buffer_limit = 0;
+	mp->mp_flags &= ~MP_PRE_BUFFERING;
     break;
 
   case MP_BUFFER_SHALLOW:
-    mp->mp_buffer_limit = 1 * 1024 * 1024;
+    mp->mp_buffer_limit = 16 * 1024 * 1024;
+	mp->mp_flags &= ~MP_PRE_BUFFERING;
     break;
 
   case MP_BUFFER_DEEP:
@@ -852,17 +856,14 @@ media_global_hold(int on, int flag)
   i = 0;
   LIST_FOREACH(mp, &media_pipelines, mp_global_link)
     mpv[i++] = mp_retain(mp);
-  count = i;
 
   hts_mutex_unlock(&media_mutex);
 
   for(i = 0; i < count; i++) {
     mp = mpv[i];
-    
-    if(!(mp->mp_flags & MP_VIDEO)) {
-      mp_release(mp);
+
+    if(!(mp->mp_flags & MP_VIDEO))
       continue;
-    }
 
     if(on)
       mp_hold(mp, flag, NULL);
@@ -972,5 +973,3 @@ media_discontinuity_debug(media_discontinuity_aux_t *aux,
   aux->epoch = epoch;
   aux->skip = skip;
 }
-
-

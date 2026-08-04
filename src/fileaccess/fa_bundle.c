@@ -192,7 +192,7 @@ b_scandir(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
   fa_dir_entry_t *fde, *last = NULL;
   struct filebundle *fb;
   char buf[PATH_MAX];
-  char buf2[PATH_MAX];
+  char buf2[PATH_MAX-16];
   const struct filebundle_entry *fbe;
   const char *u, *u2;
   char *s;
@@ -207,7 +207,7 @@ b_scandir(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
 	snprintf(buf2, sizeof(buf2), "%s", fb->prefix);
 	if((s = strchr(buf2, '/')) != NULL)
 	  *s = 0;
-      
+
 	RB_FOREACH(fde, &fd->fd_entries, fde_link)
 	  if(!strcmp(rstr_get(fde->fde_filename), buf2))
 	    break;
@@ -288,7 +288,7 @@ b_scandir(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
 	  continue;
 	ok = 1;
 	u2++;
-	
+
 	if(fd == NULL)
 	  continue;
 
@@ -298,7 +298,7 @@ b_scandir(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
 
 	  if(last != NULL && !strcmp(rstr_get(last->fde_filename), buf2))
 	    continue;
-	  
+
 	  snprintf(buf, sizeof(buf), "bundle://%s/%.*s/%s", fb->prefix,
 		   (int)strlen(u), fbe->filename, buf2);
 	} else {
@@ -448,7 +448,7 @@ FAP_REGISTER(memfile);
 /**
  *
  */
-int 
+int
 memfile_register(const void *data, size_t len)
 {
   memfile_t *mf = malloc(sizeof(memfile_t));

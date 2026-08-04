@@ -250,7 +250,8 @@ SRCS-$(CONFIG_SPOTLIGHT)       += src/fileaccess/fa_spotlight.c
 SRCS-$(CONFIG_LIBNTFS)         += src/fileaccess/fa_ntfs.c
 SRCS-$(CONFIG_NATIVESMB)       += src/fileaccess/smb/fa_nativesmb.c
 SRCS-$(CONFIG_LIBSMB2)         += src/fileaccess/smb2/fa_libsmb2.c \
-				  src/fileaccess/smb2/fa_libsmb2_pool.c
+				  src/fileaccess/smb2/fa_libsmb2_pool.c \
+				  src/sd/wsd.c
 
 ifneq (,$(filter yes,$(CONFIG_NATIVESMB) $(CONFIG_LIBSMB2)))
 SRCS += src/fileaccess/smb/nmb.c

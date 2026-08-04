@@ -89,7 +89,7 @@ i18n_init(void)
 {
   prop_t *s = settings_add_dir(NULL, _p("Languages"), "i18n", NULL,
 			       _p("Preferred languages"),
-			       "settings:i18n");
+			       "settings:i18n", "04");
   int i;
 
   nls_init(s);
@@ -455,7 +455,7 @@ nls_load_from_data(char *s)
     if((s2 = mystrbegins(s, "id:")) != NULL) {
       while(*s2 <33 && *s2)
 	s2++;
-      
+
       deescape_cstyle((char *)s2);
       ns = nls_string_find(s2);
       ns_val_clr(ns);
@@ -466,10 +466,10 @@ nls_load_from_data(char *s)
       continue;
 
     if((s2 = mystrbegins(s, "msg:")) != NULL) {
-      
+
       while(*s2 <33 && *s2)
 	s2++;
-      
+
       if(*s2) {
 	deescape_cstyle((char *)s2);
 	ns_val_set(ns, 0, s2);
@@ -481,7 +481,7 @@ nls_load_from_data(char *s)
     if((s2 = mystrbegins(s, "msg[")) != NULL) {
       while(*s2 <33 && *s2)
 	s2++;
-      
+
       int i = atoi(s2);
       while(*s2 != ']' && *s2)
 	s2++;
@@ -494,7 +494,7 @@ nls_load_from_data(char *s)
       s2++;
       while(*s2 <33 && *s2)
 	s2++;
-      
+
       if(*s2) {
 	deescape_cstyle((char *)s2);
 	ns_val_set(ns, i, s2);
@@ -582,8 +582,8 @@ nls_lang_metadata(const char *path, char *errbuf, size_t errlen,
     s[l] = 0;
     if(s[0] == '#')
       continue;
-    
-    
+
+
     if((s2 = mystrbegins(s, "language:")) != NULL) {
       while((uint8_t)*s2 <33 && *s2)
 	s2++;
@@ -603,7 +603,7 @@ nls_lang_metadata(const char *path, char *errbuf, size_t errlen,
 
   if(*language && *native)
     return 0;
-  
+
   snprintf(errbuf, errlen, "Not a valid language file");
   return -1;
 }
@@ -785,7 +785,7 @@ typedef struct lang {
 /**
  *
  */
-static int 
+static int
 langcmp(lang_t *a, lang_t *b)
 {
   return dictcmp(a->str, b->str);
@@ -834,9 +834,9 @@ nls_init(prop_t *parent)
       continue;
     *e = 0;
 
-    if(nls_lang_metadata(rstr_get(fde->fde_url), 
+    if(nls_lang_metadata(rstr_get(fde->fde_url),
 			 buf2, sizeof(buf2),
-			 language, sizeof(language), 
+			 language, sizeof(language),
 			 native, sizeof(native))) {
       TRACE(TRACE_ERROR, "i18n", "Unable to load language from %s -- %s",
 	    rstr_get(fde->fde_url), buf2);

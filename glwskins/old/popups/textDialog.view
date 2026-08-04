@@ -11,10 +11,10 @@ widget(container_x, {
     .weight = 1.0;
 
     .align = center;
-    
+
     popupGroup(
       .filterConstraintX = true;
-      
+
       widget(container_y, {
 	.spacing = 4;
 

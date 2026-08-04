@@ -42,7 +42,7 @@ window.onload = function() {
 	    s.className = 'listcell itemtitle'
 	    stpp.bindInnerHTML(node, "metadata.title", s);
 	    e.appendChild(s);
-      
+
 	    var s = document.createElement('span');
 	    s.className = 'listcell itemduration'
 	    stpp.bindInnerHTML(node, "metadata.duration", s, durationText);
@@ -66,7 +66,7 @@ window.onload = function() {
 	    s.className = 'listcell itemtitle'
 	    stpp.bindInnerHTML(node, "metadata.title", s);
 	    e.appendChild(s);
-      
+
 	    var s = document.createElement('span');
 	    s.className = 'listcell itemartist'
 	    stpp.bindInnerHTML(node, "metadata.artist", s);

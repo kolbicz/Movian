@@ -23,7 +23,7 @@
 #include <sys/time.h>
 #include <string.h>
 #include <unistd.h>
-#include "ext/sqlite/sqlite3.h"
+#include <sqlite3.h>
 
 #include "main.h"
 #include "arch/atomic.h"
@@ -63,12 +63,12 @@ vfs_fs_Read(sqlite3_file *id, void *pBuf, int amt, sqlite3_int64 offset)
   vfsfile_t *vf = (vfsfile_t *)id;
   int got;
   int64_t pos = fa_seek(vf->fh, offset, SEEK_SET);
-  
+
   if(pos != offset)
     return SQLITE_IOERR;
-  
+
   got = fa_read(vf->fh, pBuf, amt);
-  
+
   VFSTRACE("Read file %s : %d bytes : %s",
 	   vf->fname, amt, got == amt ? "OK" : "FAIL");
 
@@ -88,12 +88,12 @@ vfs_fs_Write(sqlite3_file *id, const void *pBuf, int amt,sqlite3_int64 offset)
   vfsfile_t *vf = (vfsfile_t *)id;
   int got;
   int64_t pos = fa_seek(vf->fh, offset, SEEK_SET);
-  
+
   if(pos != offset)
     return SQLITE_IOERR;
 
   got = fa_write(vf->fh, pBuf, amt);
-  
+
   VFSTRACE("Write file %s : %d bytes : %s",
 	   vf->fname, amt, got == amt ? "OK" : "FAIL");
 
@@ -105,7 +105,7 @@ vfs_fs_Write(sqlite3_file *id, const void *pBuf, int amt,sqlite3_int64 offset)
     return SQLITE_IOERR_WRITE;
   return SQLITE_OK;
 }
- 
+
 
 static int
 vfs_fs_Truncate( sqlite3_file *id, sqlite3_int64 nByte )
@@ -302,7 +302,7 @@ vfs_randomness(sqlite3_vfs *NotUsed, int nBuf, char *zBuf)
 static sqlite3_vfs vfs = {
   3,                 /* iVersion */
   sizeof(vfsfile_t),   /* szOsFile */
-  PATH_MAX,      /* mxPathname */
+  2048,//PATH_MAX,      /* mxPathname */
   0,                 /* pNext */
   APPNAME,        /* zName */
   0,                 /* pAppData */
@@ -330,11 +330,11 @@ int
 sqlite3_os_init(void)
 {
   sqlite3_vfs_register(&vfs, 1);
-  return SQLITE_OK; 
+  return SQLITE_OK;
 }
 
 int
 sqlite3_os_end(void)
 {
-  return SQLITE_OK; 
+  return SQLITE_OK;
 }

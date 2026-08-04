@@ -1,6 +1,6 @@
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
 
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
@@ -13,7 +13,7 @@ widget(backdrop, {
       shadow: true;
       outline: true;
       color: select(isFocused(), 1.0, 0.6);
-      
+
       caption: $self.metadata.title + ":";
       ellipsize: true;
     });
@@ -24,7 +24,7 @@ widget(backdrop, {
       max: $self.max;
       step: $self.step;
       bind($self.value);
-      
+
       widget(backdrop, {
 	source: "skin://graphics/plate8.png";
 	margin: 3;
@@ -32,7 +32,7 @@ widget(backdrop, {
 	padding: -4;
 	alphaSelf: 0.3;
 	color: 0;
-	
+
 	widget(backdrop, {
 	  source: "skin://graphics/border-tiny.png";
 	  border: 4;

@@ -19,38 +19,37 @@ widget(container_x, {
 
           InfoLine(_("Version"), $core.app.version);
 
-          InfoLine(_("Framerate"),
+          InfoLine(_("UI Framerate"),
                    fmt("%2.2f Hz", $ui.framerate));
           InfoLine(_("System Total"),
-                   fmt("%d kB", $core.system.mem.systotal),
+                   fmt("%d MB", $core.system.mem.systotal),
                    isVoid($core.system.mem.systotal));
           InfoLine(_("System Free"),
-                   fmt("%d kB", $core.system.mem.sysfree),
+                   fmt("%d MB (%d MB)", $core.system.mem.sysfreeA, $core.system.mem.sysfree),
                    isVoid($core.system.mem.sysfree));
-          InfoLine(_("Memory usage"),
-                   fmt("%d kB", $core.system.mem.activeMem),
+          InfoLine(_("Used by M7"),
+                   fmt("%d MB", $core.system.mem.activeMem),
+				// fmt("%d MB (%d MB)", $core.system.mem.activeMem, $core.system.mem.inactiveMem),
                    isVoid($core.system.mem.activeMem));
-          InfoLine(_("Inactive memory"),
-                   fmt("%d kB", $core.system.mem.inactiveMem),
-                   isVoid($core.system.mem.inactiveMem));
-          InfoLine(_("Fragmentation"),
-                   fmt("%d", $core.system.mem.unusedChunks),
-	           isVoid($core.system.mem.unusedChunks));
-          InfoLine(_("VM Page In/Out"),
-                   fmt("%d / %d",
-                       $core.system.mem.pagein,
-                       $core.system.mem.pageout),
-	           !$core.system.mem.vmstat);
-          InfoLine(_("CPU Temp"),
-                   fmt("%d°C", $core.system.temp.cpu),
-	           isVoid($core.system.temp.cpu));
-          InfoLine(_("GPU Temp"),
-                   fmt("%d°C", $core.system.temp.gpu),
-	           isVoid($core.system.temp.gpu));
-          InfoLine(_("HDD Avail"),
-                   fmt("%.1f / %.1f GB", $core.system.hdd.avail,
-                       $core.system.hdd.size),
-	           isVoid($core.system.hdd.avail));
+
+          // InfoLine(_("Inactive memory"), fmt("%d kB", $core.system.mem.inactiveMem), isVoid($core.system.mem.inactiveMem));
+          // InfoLine(_("Fragmentation"), fmt("%d", $core.system.mem.unusedChunks), isVoid($core.system.mem.unusedChunks));
+          // InfoLine(_("VM Page In/Out"),
+          //          fmt("%d / %d",
+          //              $core.system.mem.pagein,
+          //              $core.system.mem.pageout),
+	      //      !$core.system.mem.vmstat);
+          // InfoLine(_("CPU Temp"),
+          //          fmt("%d°C", $core.system.temp.cpu),
+	      //      isVoid($core.system.temp.cpu));
+          // InfoLine(_("GPU Temp"),
+          //          fmt("%d°C", $core.system.temp.gpu),
+	      //      isVoid($core.system.temp.gpu));
+          // InfoLine(_("HDD Avail"),
+          //          fmt("%.1f / %.1f GB", $core.system.hdd.avail,
+          //              $core.system.hdd.size),
+	      //      isVoid($core.system.hdd.avail));
+
           InfoLine(_("Network"),
                    select($core.net.connectivity,
                           _("Connected"),

@@ -166,7 +166,7 @@ resolve_propref(stpp_t *stpp, int propref)
 static void
 stpp_sub_json_add_child(stpp_subscription_t *ss, http_connection_t *hc,
 			prop_t *p, prop_t *before)
-{ 
+{
   char buf2[128];
   unsigned int b = before ? sp_get(before, ss)->sp_id : 0;
   stpp_prop_t *sp = stpp_property_export_from_sub(ss, p, &ss->ss_dir_props);
@@ -181,7 +181,7 @@ stpp_sub_json_add_child(stpp_subscription_t *ss, http_connection_t *hc,
 static void
 stpp_sub_json_add_childs(stpp_subscription_t *ss, http_connection_t *hc,
 			 prop_vec_t *pv, prop_t *before)
-{ 
+{
   unsigned int b = before ? sp_get(before, ss)->sp_id : 0;
   int i;
   htsbuf_queue_t hq;
@@ -206,7 +206,7 @@ stpp_sub_json_add_childs(stpp_subscription_t *ss, http_connection_t *hc,
 static void
 stpp_sub_json_del_child(stpp_subscription_t *ss, http_connection_t *hc,
 			prop_t *p)
-{ 
+{
   stpp_prop_t *sp = prop_tag_clear(p, ss);
   char buf2[128];
   snprintf(buf2, sizeof(buf2), "[6,%u,[%u]]", ss->ss_id, sp->sp_id);
@@ -222,7 +222,7 @@ stpp_sub_json_del_child(stpp_subscription_t *ss, http_connection_t *hc,
 static void
 stpp_sub_json_move_child(stpp_subscription_t *ss, http_connection_t *hc,
 			 prop_t *p, prop_t *before)
-{ 
+{
   stpp_prop_t *sp =          prop_tag_get(p, ss);
   stpp_prop_t *b =  before ? prop_tag_get(before, ss) : NULL;
   char buf2[128];
@@ -262,7 +262,7 @@ stpp_sub_json(void *opaque, prop_event_t event, ...)
   prop_vec_t *pv;
   const char *str, *str2;
   va_start(ap, event);
-  
+
   switch(event) {
   case PROP_SET_FLOAT:
     my_double2str(buf, sizeof(buf), va_arg(ap, double));
@@ -593,7 +593,7 @@ stpp_cmd_unsub(stpp_t *stpp, unsigned int id)
 {
   stpp_subscription_t s, *ss;
   s.ss_id = id;
-  
+
   if((ss = RB_FIND(&stpp->stpp_subscriptions, &s, ss_link, ss_cmp)) == NULL)
     return;
   ss_destroy(stpp, ss);
@@ -646,7 +646,7 @@ static void
 stpp_json(stpp_t *stpp, htsmsg_t *m)
 {
   int cmd = htsmsg_get_u32_or_default(m, HTSMSG_INDEX(0), 0);
-  
+
   switch(cmd) {
   case STPP_CMD_SUBSCRIBE:
     stpp_cmd_sub(stpp,
@@ -1182,7 +1182,7 @@ stpp_binary(stpp_t *stpp, const uint8_t *data, int len)
  *
  */
 static int
-stpp_input(http_connection_t *hc, int opcode, 
+stpp_input(http_connection_t *hc, int opcode,
 	   uint8_t *data, size_t len, void *opaque)
 {
   stpp_t *stpp = opaque;
@@ -1234,20 +1234,23 @@ stpp_init(http_connection_t *hc, void *opaque)
 static void
 stpp_fini(http_connection_t *hc, void *opaque)
 {
-  stpp_t *stpp = opaque;
+  if(opaque != NULL)
+  {
+	  stpp_t *stpp = opaque;
 
-  while(stpp->stpp_subscriptions.root != NULL)
-    ss_destroy(stpp, stpp->stpp_subscriptions.root);
+	  while(stpp->stpp_subscriptions.root != NULL)
+		ss_destroy(stpp, stpp->stpp_subscriptions.root);
 
-  assert(stpp->stpp_props.root == NULL);
+	  assert(stpp->stpp_props.root == NULL);
 
-  stpp_imagereq_t *sir;
-  while((sir = LIST_FIRST(&stpp->stpp_imagereqs)) != NULL) {
-    LIST_REMOVE(sir, sir_link);
-    sir->sir_stpp = NULL;
+	  stpp_imagereq_t *sir;
+	  while((sir = LIST_FIRST(&stpp->stpp_imagereqs)) != NULL) {
+		LIST_REMOVE(sir, sir_link);
+		sir->sir_stpp = NULL;
+	  }
+
+	  free(stpp);
   }
-
-  free(stpp);
 
   prop_t *p = prop_create_multi(prop_get_global(),
                                 "stpp", "remoteControlled", NULL);
@@ -1428,7 +1431,7 @@ build_msg(stppmsg_t *msg)
   extern int http_server_port;
   if(stpp_system_name == NULL)
     return -1;
-  strncpy(msg->name, rstr_get(stpp_system_name), sizeof(msg->name));
+  strncpy(msg->name, rstr_get(stpp_system_name), sizeof(msg->name)-1);
   strncpy(msg->type, arch_get_system_type(), sizeof(msg->type));
   memcpy(msg->magic, "STPP", 4);
   memcpy(msg->deviceid, stpp_id, sizeof(msg->deviceid));

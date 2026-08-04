@@ -370,7 +370,7 @@ glw_list_render_x(glw_t *w, const glw_rctx_t *rc)
   rc1 = rc0;
 
   glw_Translatef(&rc1, -2.0f * l->gsc.rounded_pos / width, 0, 0);
-  
+
   TAILQ_FOREACH(c, &w->glw_childs, glw_parent_link) {
     if(c->glw_flags & GLW_HIDDEN)
       continue;
@@ -399,7 +399,7 @@ glw_list_render_x(glw_t *w, const glw_rctx_t *rc)
 		   height,
 		   cd->pos + cd->width,
 		   0);
-    
+
     glw_render0(c, &rc2);
 
     if(lc != -1)
@@ -646,6 +646,13 @@ handle_pointer_event_filter(struct glw *w, const glw_pointer_event_t *gpe)
 }
 
 
+static int
+handle_pointer_event_x(struct glw *w, const glw_pointer_event_t *gpe)
+{
+  glw_list_t *l = (glw_list_t *)w;
+  return glw_scroll_handle_pointer_event_x(&l->gsc, w, gpe);
+}
+
 
 static glw_class_t glw_list_y = {
   .gc_name = "list_y",
@@ -684,9 +691,12 @@ static glw_class_t glw_list_x = {
   .gc_signal_handler = glw_list_callback,
   .gc_suggest_focus = glw_list_suggest_focus,
   .gc_set_int16_4 = glw_list_set_int16_4,
+  .gc_pointer_event = handle_pointer_event_x,
+  .gc_pointer_event_filter = handle_pointer_event_filter,
   .gc_bubble_event = glw_navigate_horizontal,
   .gc_set_int_unresolved = glw_list_set_int_unresolved,
   .gc_set_float_unresolved = glw_list_set_float_unresolved,
+  .gc_find_visible_child = glw_list_find_visible_child,
 };
 
 GLW_REGISTER_CLASS(glw_list_x);

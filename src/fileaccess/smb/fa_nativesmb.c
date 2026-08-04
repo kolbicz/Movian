@@ -199,6 +199,9 @@ smberr_write(char *errbuf, size_t errlen, int code)
   case 0xc0000034:
     r = _("Object name not found");
     break;
+  case 0xc000000d:
+    r = _("Invalid parameters");
+    break;
   default:
     snprintf(errbuf, errlen, "NTStatus: 0x%08x", code);
     return;
@@ -2573,6 +2576,9 @@ smb_set_xattr(struct fa_protocol *fap, const char *url,
               const char *name,
               const void *data, size_t data_len)
 {
+  if(!(gconf.enable_smb_xattr & 1))
+    return FAP_NOT_SUPPORTED;
+
   char filename[512];
   int r;
   cifs_tree_t *ct;
@@ -2650,6 +2656,9 @@ smb_get_xattr(struct fa_protocol *fap, const char *url,
               const char *name,
               void **datap, size_t *lenp)
 {
+  if(!(gconf.enable_smb_xattr & 1))
+    return FAP_NOT_SUPPORTED;
+
   char filename[512];
   int r;
   cifs_tree_t *ct;

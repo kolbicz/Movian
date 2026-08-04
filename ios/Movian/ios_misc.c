@@ -45,7 +45,7 @@ arch_malloc_size(void *ptr)
 const char *
 arch_get_system_type(void)
 {
-    return "iOS";
+    return "Apple";
 }
 
 

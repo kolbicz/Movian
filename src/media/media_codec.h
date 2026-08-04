@@ -18,6 +18,7 @@
  *  For more information, contact andreas@lonelycoder.com
  */
 #pragma once
+#include <libavfilter/avfilter.h>
 struct AVCodecContext;
 struct video_decoder;
 
@@ -54,6 +55,13 @@ typedef struct media_codec {
   unsigned int sar_den;
 
   int (*get_buffer2)(struct AVCodecContext *s, AVFrame *frame, int flags);
+
+  AVFilterContext *filt_filter_src_ctx;
+  AVFilterContext *filt_filter_sink_ctx;
+  AVFilterGraph *filt_filter_graph;
+  AVFrame *filt_filter_frame;
+  AVFilterInOut *filt_inputs;
+  AVFilterInOut *filt_outputs;
 
 } media_codec_t;
 
@@ -132,7 +140,7 @@ void media_codec_deref(media_codec_t *cw);
 media_codec_t *media_codec_ref(media_codec_t *cw);
 
 media_codec_t *media_codec_create(int codec_id, int parser,
-				  struct media_format *fw, 
+				  struct media_format *fw,
 				  struct AVCodecContext *ctx,
 				  const media_codec_params_t *mcp,
                                   struct media_pipe *mp);

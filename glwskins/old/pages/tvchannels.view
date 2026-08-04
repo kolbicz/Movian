@@ -34,9 +34,9 @@ widget(container_y, {
 
 	scrollThreshold: $ui.width / 10;
 
-	
+
 	$self.focused <- focusedChild();
-	
+
 	cloner($self.model.nodes, container_z, {
 	  autoRefocusable: true;
 	  focusable: true;
@@ -51,7 +51,7 @@ widget(container_y, {
 		color: 0;
 		alpha: 0.5;
 	      });
-	      
+
 	      widget(image, {
 		align: bottom;
 		width: $ui.size * 8;
@@ -71,7 +71,7 @@ widget(container_y, {
 
 	    });
 	  });
-	  
+
 	  widget(backdrop, {
 	    source: "skin://graphics/border32.png";
 	    border: 16;

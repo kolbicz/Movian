@@ -47,26 +47,26 @@ widget(container_y, {
       widget(label, {
 	hidden: !$args.status.installedVersion;
 	TextStyleItem();
-	caption: '<font color="#888">' + _("Installed version: ") + '</font>' + 
+	caption: '<font color="#888">' + _("Installed version: ") + '</font>' +
 	  $args.status.installedVersion;
       });
 
       widget(label, {
 	hidden: !$args.status.availableVersion;
 	TextStyleItem();
-	caption: '<font color="#888">' + _("Available version: ") + '</font>' + 
+	caption: '<font color="#888">' + _("Available version: ") + '</font>' +
 	  $args.status.availableVersion;
       });
 
       widget(label, {
 	hidden: !$args.metadata.author;
 	TextStyleItem();
-	caption: '<font color="#888">' + _("Author: ") + '</font>' + 
+	caption: '<font color="#888">' + _("Author: ") + '</font>' +
 	  $args.metadata.author;
       });
     });
   });
-  
+
 
   widget(backdrop, {
     filterConstraintY: true;

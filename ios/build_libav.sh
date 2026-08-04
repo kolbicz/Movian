@@ -31,9 +31,11 @@ function build_for_arch()
             --enable-cross-compile \
             --enable-static \
             --disable-shared \
+            --enable-avresample \
             --disable-encoders \
             --disable-bsfs \
             --disable-filters \
+            --enable-filter=bwdif \
             --disable-muxers \
             --disable-devices \
             --disable-demuxer=rtp \
@@ -43,12 +45,12 @@ function build_for_arch()
             --disable-decoder=cavs \
             --enable-encoder=mjpeg \
             --enable-encoder=png \
-            --disable-avfilter \
+            --disable-doc \
             --enable-encoder=ac3 \
             --enable-encoder=eac3 \
             --disable-programs
 
-        make -j8 V=1
+        make -j6 V=1
         mkdir -p "${BUILT_PRODUCTS_DIR}"
         make install-headers DESTDIR="${BUILT_PRODUCTS_DIR}" V=1
     )
@@ -61,7 +63,7 @@ function rebuild_for_arch()
         set -e
         cd       "${O}"
 
-        make -j8 V=1
+        make -j6 V=1
         mkdir -p "${BUILT_PRODUCTS_DIR}"
         make install-headers DESTDIR="${BUILT_PRODUCTS_DIR}" V=1
     )
@@ -74,10 +76,9 @@ done
 
 mkdir -p "${BUILT_PRODUCTS_DIR}/lib"
 
-for F in avcodec avformat avresample avutil swscale; do
+for F in avcodec avfilter avformat avresample avutil swresample swscale; do
     lipo -create \
          "${OBJECT_FILE_DIR}"/libav-*/lib${F}/lib${F}.a \
          -output \
          "${BUILT_PRODUCTS_DIR}/lib/lib${F}.a"
 done
-

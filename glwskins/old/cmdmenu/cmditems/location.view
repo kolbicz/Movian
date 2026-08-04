@@ -1,5 +1,5 @@
 widget(backdrop, {
-  
+
   source: "skin://pages/listitems/highlight.png";
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 

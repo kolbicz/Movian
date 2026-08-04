@@ -1,13 +1,13 @@
 #import "skin://common.view"
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
   focusOnClick: true;
   onEvent(activate, playTrackFromSource($self, $parent.model));
-  
+
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 
   suggestFocus($self.playing);

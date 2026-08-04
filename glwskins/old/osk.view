@@ -36,7 +36,7 @@ widget(container_y, {
 	caption: $ui.osk.title;
 	shadow: true;
       });
-      
+
       widget(container_x, {
 	spacing: 4;
 	height: $ui.size * 2;

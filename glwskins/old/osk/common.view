@@ -6,7 +6,7 @@
     source: select(isFocused(),
 		   "pixmap:gradient:180,200,255:80,90,100",
 		   "pixmap:gradient:255,255,255:180,180,180");
-	   
+
     focusable: FW;
     cornerRadius: 4;
     onEvent(activate, {
@@ -40,7 +40,7 @@
 		   select(isFocused(),
 			  "pixmap:gradient:180,200,255:80,90,100",
 			  "pixmap:gradient:255,255,255:180,180,180"));
-	   
+
     focusable: select(ENABLED, 0.5, 0);
     cornerRadius: 4;
     onEvent(activate, EV);

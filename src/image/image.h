@@ -80,6 +80,7 @@ typedef enum image_coded_type {
   IMAGE_GIF = 3,
   IMAGE_SVG = 4,
   IMAGE_BMP = 5,
+  IMAGE_WEBP = 6,
 } image_coded_type_t;
 
 

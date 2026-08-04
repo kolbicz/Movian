@@ -1,13 +1,13 @@
 #import "skin://common.view"
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
   focusOnClick: true;
   onEvent(activate, playTrackFromSource($self, $parent.model));
-  
+
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 
   suggestFocus($self.playing);
@@ -27,7 +27,7 @@ widget(backdrop, {
 			"play", "dataroot://res/svg/Play.svg",
 			"pause", "dataroot://res/svg/Pause.svg");
     });
-    
+
     widget(label, {
       TextStyleItem();
       color: select(isFocused(), 1.0, 0.6);
@@ -47,7 +47,7 @@ widget(backdrop, {
       align: right;
       shadow: true;
       color: select(isFocused(), 1.0, 0.6);
-      
+
       caption: value2duration($self.metadata.duration);
     });
   });

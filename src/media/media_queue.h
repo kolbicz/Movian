@@ -68,6 +68,11 @@ typedef struct media_queue {
 
   prop_t *mq_prop_codec;
 
+  prop_t *mq_prop_vq;
+  prop_t *mq_prop_aq;
+
+  prop_t *mq_prop_bw; // network bandwidth
+
   prop_t *mq_prop_too_slow;
 
   struct media_pipe *mq_mp;

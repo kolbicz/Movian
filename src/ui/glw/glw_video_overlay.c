@@ -831,6 +831,13 @@ gvo_create_from_vo_text(glw_video_t *gv, video_overlay_t *vo)
       gvo->gvo_padding_top      = default_pad;
       gvo->gvo_padding_right    = default_pad;
       gvo->gvo_padding_bottom   = default_pad;
+    } else if(vo->vo_padding_left == -2) {
+      int default_pad = gv->w.glw_root->gr_current_size;
+      gvo->gvo_padding_left     = default_pad;
+      gvo->gvo_padding_top      = (gv->gv_vo_displace_y > 0) ? (default_pad + gv->gv_vo_displace_y*2) : default_pad;
+	  //gv->gv_vo_displace_y		= 0;
+      gvo->gvo_padding_right    = default_pad;
+      gvo->gvo_padding_bottom   = default_pad;
     } else {
       gvo->gvo_padding_left   = vo->vo_padding_left;
       gvo->gvo_padding_top    = vo->vo_padding_top;

@@ -21,6 +21,8 @@
 #include "misc/rstr.h"
 #include "misc/queue.h"
 
+#include "subtitles_settings.h"
+
 struct video_args;
 struct prop;
 
@@ -38,7 +40,7 @@ typedef struct sub_scanner {
   hts_mutex_t ss_mutex;  // Lock around ss_proproot
   struct prop *ss_proproot;   // property where to add subs
 
-  char *ss_url;  // can be NULL 
+  char *ss_url;  // can be NULL
 
   int ss_stop;   // set if we should stop working (video playback have stopped)
 
@@ -65,6 +67,7 @@ typedef struct subtitle_provider {
   int sp_enabled;
   int sp_autosel;
   int sp_prio;
+  int sp_prio2;
   void (*sp_query)(struct subtitle_provider *sp, struct sub_scanner *ss,
                    int score, int autosel);
   void (*sp_retain)(struct subtitle_provider *sp);
@@ -73,32 +76,14 @@ typedef struct subtitle_provider {
 
   struct setting *sp_setting_enabled;
   struct setting *sp_setting_autosel;
+  struct setting *sp_setting_prio;
 
   void *sp_opaque;
 
 } subtitle_provider_t;
 
 
-/**
- *
- */
-struct subtitle_settings {
 
-  struct setting *scaling_setting;
-  struct setting *align_on_video_setting;
-  struct setting *vertical_displacement_setting;
-  struct setting *horizontal_displacement_setting;
-
-  int alignment;   // LAYOUT_ALIGN_ from layout.h
-  int style_override;
-  int color;
-  int shadow_color;
-  int shadow_displacement;
-  int outline_color;
-  int outline_size;
-};
-
-extern struct subtitle_settings subtitle_settings;
 
 
 sub_scanner_t *sub_scanner_create(const char *url, struct prop *proproot,

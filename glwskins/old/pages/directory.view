@@ -38,7 +38,7 @@ multiopt($view.path,
 		   "images",     makeUri(_("Images"),     "images.view")
 		    ),
 
-	 select($self.model.contents == "images", 
+	 select($self.model.contents == "images",
 		makeUri(_("Slideshow"), "slideshow.view"), void),
 
 	 select($self.model.safeui, void,

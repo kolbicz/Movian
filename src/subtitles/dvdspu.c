@@ -47,7 +47,7 @@ get_nibble(const uint8_t *buf, int nibble_offset)
  *
  */
 static int
-decode_rle(uint8_t *bitmap, int linesize, int w, int h, 
+decode_rle(uint8_t *bitmap, int linesize, int w, int h,
 	   const uint8_t *buf, int nibble_offset, int buf_size)
 {
   unsigned int v;
@@ -209,7 +209,7 @@ dvdspu_decode(dvdspu_t *d, int64_t pts)
 	retval = 1;
 	stop = 1;
 	break;
-	      
+
       default:
 	stop = 1;
 	break;
@@ -225,12 +225,12 @@ dvdspu_decode(dvdspu_t *d, int64_t pts)
       d->d_x2 = x2 + 1;
       d->d_y1 = y1;
       d->d_y2 = y2;
-      
+
       if(d->d_bitmap != NULL)
 	free(d->d_bitmap);
 
       d->d_bitmap = malloc(width * height);
-      
+
       decode_rle(d->d_bitmap, width * 2, width, height / 2 + (height & 1),
 		 buf, offset1 * 2, d->d_size);
 
@@ -252,7 +252,7 @@ dvdspu_decode(dvdspu_t *d, int64_t pts)
 /**
  *
  */
-static uint32_t 
+static uint32_t
 yuv_to_rgb(uint32_t u32)
 {
   int C, D, E, Y, U, V, R, G, B;
@@ -295,7 +295,7 @@ dvdspu_decode_clut(uint32_t *dst, const uint32_t *src)
  *
  */
 void
-dvdspu_enqueue(media_pipe_t *mp, const void *data, int size, 
+dvdspu_enqueue(media_pipe_t *mp, const void *data, int size,
 	       const uint32_t *clut, int width, int height, int64_t pts)
 {
   dvdspu_t *d;
@@ -310,8 +310,8 @@ dvdspu_enqueue(media_pipe_t *mp, const void *data, int size,
   d->d_size = size;
   d->d_cmdpos = getbe16(d->d_data + 2);
   d->d_pts = pts;
-  d->d_canvas_width  = width;
-  d->d_canvas_height = height;
+  d->d_canvas_width  = 720;//width;
+  d->d_canvas_height = 576;//height;
 
   hts_mutex_lock(&mp->mp_overlay_mutex);
   TAILQ_INSERT_TAIL(&mp->mp_spu_queue, d, d_link);
@@ -402,7 +402,7 @@ dvdspu_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   if(mcp->extradata_size == 0)
     return 1;
-  
+
   dvdspu_codec_t *dc = calloc(1, sizeof(dvdspu_codec_t));
 
   char *s = strdup((const char *)mcp->extradata);

@@ -354,9 +354,9 @@ upnp_service_guess(const char *url)
 
       if(port2 == -1 && !strcasecmp(proto2, "http"))
 	port2 = 80;
-    
+
       if(!strcmp(proto1, proto2) &&
-	 !strcmp(hostname1, hostname2) && 
+	 !strcmp(hostname1, hostname2) &&
 	 port1 == port2)
 	return us;
     }
@@ -398,7 +398,7 @@ add_content_directory(upnp_service_t *us, const char *hostname, int port)
   snprintf(buf, sizeof(buf), "%s (%s) on %s:%d",
 	   title, ud->ud_modelNumber ?: "Unknown version", hostname, port);
   us->us_settings = settings_add_dir_cstr(gconf.settings_sd, title, NULL,
-					  us->us_icon_url, buf, NULL);
+					  us->us_icon_url, buf, NULL, "99");
 
   us->us_service = service_create(svcid, NULL, us->us_local_url, NULL,
 				  us->us_icon_url, 1, 0,
@@ -639,7 +639,7 @@ upnp_add_device(const char *url, const char *type, int maxage)
     }
   }
   hts_cond_broadcast(&upnp_device_cond);
-    
+
   hts_mutex_unlock(&upnp_lock);
 }
 

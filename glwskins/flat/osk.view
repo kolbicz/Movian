@@ -9,108 +9,109 @@ $ui.osk.caps = 0;
 $ui.osk.shifted = $ui.osk.shift ^^ $ui.osk.caps;
 
 multiopt($view.path,
-         $view.selopt,
-         void,
-         $core.glw.osk.userKeyboard,
-         vectorize($core.glw.views.standard.osk),
-         makeUri(_("Default"), "skin://osk/default.view")
-         );
+	 $view.selopt,
+	 void,
+	 $core.glw.osk.userKeyboard,
+	 vectorize($core.glw.views.standard.osk),
+	 makeUri(_("English"), "skin://osk/default.view"),
+	 makeUri(_("Български"), "skin://osk/bul.view"),
+	 makeUri(_("Русский"), "skin://osk/rus.view")
+	 );
 
 widget(popup, {
 
-  clickable: true;
-  onEvent(click, deliverEvent($ui.osk.eventSink, "Cancel"), true, true, true);
+	clickable: true;
+	onEvent(click, deliverEvent($ui.osk.eventSink, "Cancel"), true, true, true);
 
-  widget(container_z, {
-    clickable: true;
-    PopupBackdrop();
-    width: 30em;
+	widget(container_z, {
+	clickable: true;
+	PopupBackdrop();
+	width: 49em;
 
-    widget(container_y, {
-      onEvent(cancel, deliverEvent($ui.osk.eventSink, "Cancel"));
-      onEvent(back,   deliverEvent($ui.osk.eventSink, "Cancel"));
-      navPositional: true;
+	widget(container_y, {
+	onEvent(cancel, deliverEvent($ui.osk.eventSink, "Cancel"));
+	onEvent(back,	 deliverEvent($ui.osk.eventSink, "Cancel"));
+	navPositional: true;
 
-      padding: 1em;
-      spacing: 0.1em;
+	padding: 1em;
+	spacing: 4;
 
-      widget(label, {
-	sizeScale: 1.5;
+	widget(label, {
+	sizeScale: 1;
 	caption: $ui.osk.title;
 	shadow: true;
-      });
+	});
 
-      widget(container_x, {
-	spacing: 0.1em;
-	height: 2em;
+	widget(container_x, {
+	spacing: 4;
+	height: $ui.size * 2.5;
+	width: 47em;
 
-        widget(container_z, {
-	  weight: 10;
-	  filterConstraintX: true;
-	  filterConstraintY: true;
-          widget(quad, {
-            color: 0;
-          });
-	  widget(text, {
-	    password: $ui.osk.password;
-	    oskPassword: true;
-	    padding: [1em, 0];
-	    bind($ui.osk.text);
-	    sizeScale: 1.5;
-	    permanentCursor: true;
-	    id: "input";
-	  });
-        });
+	widget(container_z, {
+	weight: 10;
+	filterConstraintX: true;
+	filterConstraintY: true;
+		widget(quad, {
+		color: 0;
+		});
+	widget(text, {
+	password: $ui.osk.password;
+	oskPassword: true;
+	padding: [1em, 0];
+	bind($ui.osk.text);
+	sizeScale: 1.1;
+	permanentCursor: true;
+	id: "input";
+	maxlines: 2;
+	});
+	});
+
 	ACTION_ICON("skin://icons/ic_chevron_left_48px.svg",
-                    targetedEvent("input", Left));
+			targetedEvent("input", Left), 1);
 
 	ACTION_ICON("skin://icons/ic_chevron_right_48px.svg",
-                    targetedEvent("input", Right));
-	ACTION_ICON("skin://icons/ic_skip_previous_48px.svg", {
-	  $ui.osk.text = void;
-	}, 1.5);
-	ACTION_ICON("skin://icons/ic_cancel_48px.svg",
-                    deliverEvent($ui.osk.eventSink, "Cancel"), 1.5);
+			targetedEvent("input", Right), 1);
+
+	ACTION_ICON("skin://icons/ic_arrow_back_48px.svg", targetedEvent("input", Backspace), 1.5);
 	ACTION_ICON("skin://icons/ic_check_48px.svg",
-                    deliverEvent($ui.osk.eventSink, "Ok"), 1.5);
-      });
+			deliverEvent($ui.osk.eventSink, "Ok"), 1.5);
+	});
 
-      widget(loader, {
-        source: $view.path;
-        time: 0;
-      });
+	widget(loader, {
+	source: $view.path;
+	time: 0;
+	});
 
-      widget(container_x, {
-        height: 2em;
-        spacing: 1em;
+	widget(container_x, {
+	height: 3em;
+	spacing: 1em;
+	padding: 0.5em;
 
-        space(6);
+	ACTION_ICON("skin://icons/ic_cancel_48px.svg", deliverEvent($ui.osk.eventSink, "Cancel"), 1);
+	ACTION_ICON("skin://icons/ic_skip_previous_48px.svg", {$ui.osk.text = void;}, 1);
+	//ACTION_ICON("skin://icons/ic_description_48px.svg", targetedEvent("input", PasteStr), 1);
+	space(1);
+	ACTION_ICON("skin://icons/ic_language_48px.svg", targetedEvent("opt", Decrease), 1, false, $view.canLayoutPrev);
+	ACTION_ICON("skin://icons/ic_language_48px.svg", targetedEvent("opt", Increase), 1, false, $view.canLayoutNext);
 
-	ACTION("←", targetedEvent("opt", Decrease), 1, false, $view.canLayoutPrev);
-	ACTION("→", targetedEvent("opt", Increase), 1, false, $view.canLayoutNext);
+	widget(container_x, {
+		weight: 6;
+		filterConstraintX: true;
 
+		widget(deck, {
+		$view.canLayoutPrev = canSelectPrevious();
+		$view.canLayoutNext = canSelectNext();
 
-        widget(container_x, {
-          weight: 6;
-          filterConstraintX: true;
-          widget(label, {
-            caption: _("Keyboard layout:");
-          });
+		id: "opt";
+		effect: blend;
+		time: 0.1;
 
-          widget(deck, {
-            $view.canLayoutPrev = canSelectPrevious();
-            $view.canLayoutNext = canSelectNext();
-
-            id: "opt";
-            effect: blend;
-            time: 0.1;
-
-            cloner($view.selopt.options, label, {
-	      caption: $self.title;
-            });
-          });
-        });
-      });
-    });
-  });
+		cloner($view.selopt.options, label, {
+	caption: $self.title;
+		});
+		});
+	});
+	});
+	});
+	});
 });

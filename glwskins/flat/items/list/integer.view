@@ -12,7 +12,13 @@ widget(deck, {
     style: "ListItemOuter";
 
     ListItemBevel();
-    ListItemHighlight();
+    /* Slider hit areas can spill hover state across cloned list rows. Keep
+     * keyboard navigation feedback, but do not paint a row-wide mouse hover. */
+    widget(quad, {
+      fhpSpill: true;
+      additive: true;
+      alpha: 0.2 * isNavFocused();
+    });
 
     widget(container_x, {
       style: "ListItem";
@@ -104,7 +110,11 @@ widget(deck, {
       });
 
       widget(container_z, {
-        ListItemHighlight();
+        widget(quad, {
+          fhpSpill: true;
+          additive: true;
+          alpha: 0.2 * isNavFocused();
+        });
         height: 1em;
 
         widget(container_x, {

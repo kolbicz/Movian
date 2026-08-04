@@ -591,8 +591,8 @@ movian_smb2_scan_host(fa_dir_t *fd, const char *url,
   for(int i = 0; i < o->nshares; i++) {
     const char *name = o->shares[i].name;
     uint32_t share_type = o->shares[i].type;
-    int add = (share_type & 3) == SHARE_TYPE_DISKTREE &&
-      !(share_type & SHARE_TYPE_HIDDEN);
+    int add = name != NULL && name[0] != '\0' &&
+      (share_type & 3) == SHARE_TYPE_DISKTREE;
 
     SMB2TRACE("Enumerated share %s type=0x%x -> %s",
               name, share_type, add ? "add" : "filtered");
@@ -875,6 +875,9 @@ movian_smb2_read(fa_handle_t *fh, void *buf, size_t size)
   hts_mutex_lock(&file->fh_lock);
   int timeout = file->read_timeout_sec;
   uint32_t max_read = session->max_read_size;
+  if(!gconf.enable_smb_large_read &&
+     (max_read == 0 || max_read > 64 * 1024))
+    max_read = 64 * 1024;
 
   uint32_t total = 0;
   int failed = 0;
@@ -1506,6 +1509,9 @@ static fa_err_code_t
 movian_smb2_set_xattr(struct fa_protocol *fap, const char *url,
                       const char *name, const void *data, size_t len)
 {
+  if(!(gconf.enable_smb_xattr & 2))
+    return FAP_NOT_SUPPORTED;
+
   movian_smb2_target_t target = {};
   char errbuf[256];
 
@@ -1696,6 +1702,9 @@ static fa_err_code_t
 movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
                       const char *name, void **datap, size_t *lenp)
 {
+  if(!(gconf.enable_smb_xattr & 2))
+    return FAP_NOT_SUPPORTED;
+
   movian_smb2_target_t target = {};
   char errbuf[256];
 
@@ -1806,7 +1815,6 @@ movian_smb2_get_xattr(struct fa_protocol *fap, const char *url,
             url, name, result, *lenp);
   return result;
 }
-
 
 static int
 movian_smb2_no_parking(fa_handle_t *fh)

@@ -151,6 +151,8 @@ static struct strtab actionnames[] = {
   { "NextTrack",             ACTION_SKIP_FORWARD },
   { "SeekForward",           ACTION_SEEK_FORWARD },
   { "SeekReverse",           ACTION_SEEK_BACKWARD },
+  { "SeekForwardFrame",      ACTION_SEEK_FORWARD_FRAME },
+  { "SeekReverseFrame",      ACTION_SEEK_BACKWARD_FRAME },
 
   { "VolumeUp",              ACTION_VOLUME_UP },
   { "VolumeDown",            ACTION_VOLUME_DOWN },
@@ -162,7 +164,6 @@ static struct strtab actionnames[] = {
   { "Select",                ACTION_SELECT },
   { "MediaStats",            ACTION_SHOW_MEDIA_STATS },
   { "Home",                  ACTION_HOME },
-  { "SysHome",               ACTION_SYSTEM_HOME },
   { "Reset",                 ACTION_RESET },
   { "Copy",                  ACTION_COPY },
   { "Paste",                 ACTION_PASTE },
@@ -198,6 +199,10 @@ static struct strtab actionnames[] = {
 
   { "SwitchUI",              ACTION_SWITCH_UI },
 
+  { "Hypstart",              ACTION_HYPSTART },
+  { "Hypstop",               ACTION_HYPSTOP },
+  { "Hypwarm",               ACTION_HYPWARM },
+  { "Hypcold",               ACTION_HYPCOLD },
 };
 
 
@@ -344,7 +349,7 @@ playtrack_dtor(event_t *e)
 event_t *
 event_create_playtrack(struct prop *track, struct prop *psource, int mode)
 {
-  event_playtrack_t *ep = event_create(EVENT_PLAYTRACK, 
+  event_playtrack_t *ep = event_create(EVENT_PLAYTRACK,
 				       sizeof(event_playtrack_t));
 
   ep->track    = prop_xref_addref(track);
@@ -388,7 +393,7 @@ action_update_hold_by_event(int hold, event_t *e)
 {
   if(event_is_action(e, ACTION_PLAYPAUSE))
     return !hold;
-  
+
   if(event_is_action(e, ACTION_PAUSE))
     return 1;
 
@@ -541,8 +546,8 @@ event_to_prop(prop_t *p, event_t *e)
 void
 event_to_ui(event_t *e)
 {
-  event_to_prop(prop_get_by_name(PNVEC("global", "userinterfaces", "ui", "eventSink"),
-				 1, NULL), e);
+  event_to_prop(prop_find(prop_get_global(), "userinterfaces", "ui",
+                          "eventSink", NULL), e);
   event_release(e);
 }
 
@@ -561,10 +566,10 @@ event_dispatch(event_t *e)
     event_release(e);
     e = event_create_action(ACTION_PLAYPAUSE);
   }
-  
+
   event_to_prop(prop_get_by_name(PNVEC("global", "eventSink"),
 				 1, NULL), e);
-  
+
   if(event_is_action(e, ACTION_NAV_BACK) ||
 	    event_is_action(e, ACTION_NAV_FWD) ||
 	    event_is_action(e, ACTION_HOME) ||
@@ -580,15 +585,27 @@ event_dispatch(event_t *e)
     p = prop_get_by_name(PNVEC("global", "audio", "mastervolume"), 1, NULL);
     prop_add_float(p, event_is_action(e, ACTION_VOLUME_DOWN) ? -1 : 1);
     prop_ref_dec(p);
-    
+
   } else if(event_is_action(e, ACTION_VOLUME_MUTE_TOGGLE)) {
 
     p = prop_get_by_name(PNVEC("global", "audio", "mastermute"), 1, NULL);
     prop_toggle_int(p);
     prop_ref_dec(p);
+  }/* else if(event_is_action(e, ACTION_HYPSTART)) {
+    system("/usr/bin/hyperion-remote -x > /dev/null");
+    system("/usr/bin/hyperiond /etc/hyperion.config.json > /dev/null &");
+  } else if(event_is_action(e, ACTION_HYPSTOP)) {
+    system("/usr/bin/pkill -f hyperion > /dev/null");
+  } else if(event_is_action(e, ACTION_HYPWARM)) {
+    system("/usr/bin/hyperion-remote -c fcffa6 > /dev/null");
+  } else if(event_is_action(e, ACTION_HYPCOLD) || event_is_action(e, ACTION_RECORD)) {
+    system("/usr/bin/hyperiond /etc/hyperion.config.json > /dev/null &");
+    system("/usr/bin/hyperion-remote -c e3e1a0 > /dev/null");
 
-  } else if(event_is_action(e, ACTION_SEEK_BACKWARD) ||
+  }*/ else if(event_is_action(e, ACTION_SEEK_BACKWARD) ||
 	    event_is_action(e, ACTION_SEEK_FORWARD) ||
+		event_is_action(e, ACTION_SEEK_BACKWARD_FRAME) ||
+	    event_is_action(e, ACTION_SEEK_FORWARD_FRAME) ||
 	    event_is_action(e, ACTION_PLAYPAUSE) ||
 	    event_is_action(e, ACTION_PLAY) ||
 	    event_is_action(e, ACTION_PAUSE) ||
@@ -603,8 +620,8 @@ event_dispatch(event_t *e)
 	    event_is_action(e, ACTION_PREV_CHANNEL) ||
 	    event_is_action(e, ACTION_CYCLE_AUDIO) ||
 	    event_is_action(e, ACTION_CYCLE_SUBTITLE) ||
-	    event_is_type(e, EVENT_DELTA_SEEK_REL) || 
-	    event_is_type(e, EVENT_SELECT_AUDIO_TRACK) || 
+	    event_is_type(e, EVENT_DELTA_SEEK_REL) ||
+	    event_is_type(e, EVENT_SELECT_AUDIO_TRACK) ||
 	    event_is_type(e, EVENT_SELECT_SUBTITLE_TRACK)
 	    ) {
     event_to_prop(prop_get_by_name(PNVEC("global", "media", "eventSink"),

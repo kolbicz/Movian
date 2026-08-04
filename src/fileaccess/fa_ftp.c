@@ -444,7 +444,7 @@ static int
 ftp_add_dir_entry(ftp_connection_t *fc, const char *path, fa_dir_t *fd,
                   char *n)
 {
-  char buf[512];
+  char buf[768];
   char fname[512];
   struct ftpparse fp;
 
@@ -586,6 +586,18 @@ ftp_open(struct fa_protocol *fap, const char *url,
 
   ftp_file_size(ff);
 
+  if(flags & FA_WRITE) {
+	//TRACE(TRACE_INFO, "FTP", "FA_WRITE %s", url);
+	//ff->ff_size = 0;
+  }
+
+    if((flags & FA_APPEND))
+	{
+		//TRACE(TRACE_INFO, "FTP", "FA_APPEND %s", url);
+		//ff->ff_size = 0;
+	}
+
+
   ff->fh.fh_proto = fap;
   return &ff->fh;
 }
@@ -620,7 +632,7 @@ ftp_read(fa_handle_t *fh, void *buf, size_t size0)
 {
   ftp_file_t *ff = (ftp_file_t *)fh;
   int64_t size = size0;
-
+//TRACE(TRACE_ERROR, "FTP", "ftp_read(%i) - 1", (int) size0);
   if(ff_reconnect(ff, NULL, 0, 0))
     return -1;
 
@@ -652,6 +664,7 @@ ftp_read(fa_handle_t *fh, void *buf, size_t size0)
   size_t rval = 0;
   while(size > 0) {
     int r = tcp_read_data_nowait(ff->ff_xfer, buf, size);
+
     FTP_TRACE("[%dd]: Recv data: %d", ff->ff_fc->fc_id, r);
     if(r < 0) {
       tcp_close(ff->ff_xfer);
@@ -668,9 +681,75 @@ ftp_read(fa_handle_t *fh, void *buf, size_t size0)
     rval += r;
   }
   ff->ff_fpos += rval;
+  //TRACE(TRACE_ERROR, "FTP", "ftp_read(%i) - 1 - %i", (int) size0, rval);
   return rval;
 }
 
+/**
+ * Write to file. Same semantics as POSIX read(2)
+ */
+static int
+ftp_write(fa_handle_t *fh, const void *buf, size_t size0)
+{
+  ftp_file_t *ff = (ftp_file_t *)fh;
+  int64_t size = size0;
+  if(ff_reconnect(ff, NULL, 0, 0))
+  {
+    return -1;
+  }
+
+  if(ff->ff_size > 0 && ff->ff_fpos + size > ff->ff_size)
+    size = ff->ff_size - ff->ff_fpos;
+
+  if(size <= 0)
+  {
+    return 0;
+  }
+
+
+  if(ff->ff_xfer == NULL) {
+    ff->ff_xfer = ftp_open_data_transfer(ff->ff_fc);
+
+    if(ff->ff_xfer == NULL)
+      return -1;
+
+    fc_write(ff->ff_fc, "REST %"PRId64"\n", ff->ff_fpos);
+    int r = fc_read_result(ff->ff_fc, NULL, 0);
+    if(r != 350)
+      return -1;
+
+    fc_write(ff->ff_fc, "STOR %s\n", ff->ff_pathx);
+    r = fc_read_result(ff->ff_fc, NULL, 0);
+    if(r != 150) {
+      tcp_close(ff->ff_xfer);
+      ff->ff_xfer = NULL;
+      return -1;
+    }
+  }
+
+  size_t rval = 0;
+  while(size > 0) {
+    int r = tcp_write_data(ff->ff_xfer, buf, size);
+    FTP_TRACE("[%dd]: Send data: %d", ff->ff_fc->fc_id, r);
+    if(r < 0) {
+      tcp_close(ff->ff_xfer);
+      ff->ff_xfer = NULL;
+      fc_read_result(ff->ff_fc, NULL, 0);
+	  //TRACE(TRACE_INFO, "FTP_WRITE", "ftp_write(%i) - 6", (int) size0);
+      return -1;
+    }
+
+    if(r == 0)
+      break;
+
+    buf += r;
+    size -= r;
+    rval += r;
+  }
+  ff->ff_fpos += size0-rval;
+  //TRACE(TRACE_INFO, "FTP_WRITE", "ftp_write(%i) - ff_pos=%lli, rval=%i", (int) size0, ff->ff_fpos, rval);
+  return size0-rval;
+}
 
 /**
  * Seek in file. Same semantics as POSIX lseek(2)
@@ -708,6 +787,7 @@ ftp_seek(fa_handle_t *fh, int64_t pos, int whence, int lazy)
   if(ff->ff_fpos == np)
     return ff->ff_fpos;
 
+#if 1
   if(ff->ff_xfer != NULL) {
     assert(ff->ff_fc != NULL);
     FTP_TRACE("[%dd]: Closing due to seek", ff->ff_fc->fc_id);
@@ -724,7 +804,7 @@ ftp_seek(fa_handle_t *fh, int64_t pos, int whence, int lazy)
     if(r >= 500)
       return -1;
   }
-
+#endif
   ff->ff_fpos = np;
   FTP_TRACE("After seek pos = %"PRId64"", ff->ff_fpos);
   return ff->ff_fpos;
@@ -754,6 +834,29 @@ mkint(const char *s, int len)
   for(i = 0; i < len; i++)
     r = r * 10 + s[i] - '0';
   return r;
+}
+
+static int
+ftp_unlink(const fa_protocol_t *fap, const char *url,
+          char *errbuf, size_t errlen)
+{
+
+  ftp_file_t *ff = ftp_file_init(url, errbuf, errlen, 0);
+  if(ff == NULL)
+    return 1;
+
+  if(ff->ff_xfer == NULL) {
+    ff->ff_xfer = ftp_open_data_transfer(ff->ff_fc);
+    if(ff->ff_xfer == NULL)
+      return -1;
+
+    fc_write(ff->ff_fc, "DELE %s\n", ff->ff_pathx);
+    fc_read_result(ff->ff_fc, NULL, 0);
+      tcp_close(ff->ff_xfer);
+      ff->ff_xfer = NULL;
+  }
+  return 0;
+
 }
 
 /**
@@ -902,6 +1005,8 @@ static fa_protocol_t fa_protocol_ftp = {
   .fap_open  = ftp_open,
   .fap_close = ftp_close,
   .fap_read  = ftp_read,
+  .fap_write = ftp_write,
+  .fap_unlink= ftp_unlink,
   .fap_seek  = ftp_seek,
   .fap_fsize = ftp_fsize,
   .fap_stat  = ftp_stat,

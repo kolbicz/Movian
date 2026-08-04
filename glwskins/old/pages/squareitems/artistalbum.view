@@ -15,13 +15,13 @@ widget(frontdrop, {
     widget(container_y, {
       filterConstraintX: true;
       space(2);
-      
+
       widget(container_z, {
 	widget(quad, {
 	  color: 0;
 	  alpha: 0.75;
 	});
-	
+
 	widget(container_y, {
 	  align: center;
 	  padding: [$ui.size/2, 0];

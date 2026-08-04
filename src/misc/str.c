@@ -17,6 +17,7 @@
  *  This program is also available under a commercial proprietary license.
  *  For more information, contact andreas@lonelycoder.com
  */
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -230,19 +231,19 @@ html_entities_decode(char *s)
   for(; *s; s++) {
     if(*s != '&')
       continue;
-    
+
     e = strchr(s, ';');
     if(e == NULL)
       continue;
-    
+
     snprintf(name, sizeof(name), "%.*s", (int)(intptr_t)(e - s - 1), s + 1);
     code = html_entity_lookup(name);
-    
+
     if(code == -1)
       continue;
 
     s += utf8_put(s, code);
-    
+
     memmove(s, e + 1, strlen(e + 1) + 1);
     s--;
   }
@@ -685,7 +686,7 @@ utf8_put(char *out, int c)
 {
   if(c == 0xfffe || c == 0xffff || (c >= 0xD800 && c < 0xE000))
     return 0;
-  
+
   if (c < 0x80) {
     if(out)
       *out = c;
@@ -718,7 +719,7 @@ utf8_put(char *out, int c)
     }
     return 4;
   }
-  
+
   if(c < 0x4000000) {
     if(out) {
       *out++ = 0xf8 | (0x03 & (c >> 24));
@@ -748,7 +749,7 @@ utf8_put(char *out, int c)
 char *
 utf8_cleanup(const char *str)
 {
-  const char *s = str; 
+  const char *s = str;
   int outlen = 1;
   int c;
   int bad = 0;
@@ -947,7 +948,7 @@ mystrstr(const char *haystack, const char *needle)
   const char *h1, *n1, *r;
 
   n = unicode_casefold(utf8_get(&needle));
-    
+
   while(1) {
     r = haystack;
     h = unicode_casefold(utf8_get(&haystack));
@@ -1046,7 +1047,7 @@ strvec_free(char **s)
 /**
  *
  */
-void 
+void
 strvec_addpn(char ***strvp, const char *v, size_t len)
 {
   char **strv = *strvp;
@@ -1067,7 +1068,7 @@ strvec_addpn(char ***strvp, const char *v, size_t len)
 /**
  *
  */
-void 
+void
 strvec_addp(char ***strvp, const char *v)
 {
   strvec_addpn(strvp, v, strlen(v));
@@ -1521,7 +1522,7 @@ utf8_to_ucs2(uint8_t *dst, const char *src, int le)
   while((c = utf8_get(&src)) != 0) {
     if(c > 0xffff)
       return -1;
-    
+
     if(dst != NULL) {
       if(le) {
 	dst[o] = c;
@@ -1553,7 +1554,7 @@ utf8_to_ascii(uint8_t *dst, const char *src)
   while((c = utf8_get(&src)) != 0) {
     if(c > 0xff)
       return -1;
-    
+
     if(dst != NULL) {
       dst[o] = c;
     }
@@ -1690,8 +1691,9 @@ lp_get(char **lp)
 char *
 find_str(const char *s, int len, const char *needle)
 {
+	if(!needle) return NULL;
   int nlen = strlen(needle);
-  if(len < nlen)
+  if(len < nlen || !s)
     return NULL;
 
   len -= nlen;
@@ -1716,12 +1718,22 @@ find_str(const char *s, int len, const char *needle)
 void
 mystrlower(char *s)
 {
+	if(!s) return;
   for(;*s; s++) {
     if(*s >= 'A' && *s <= 'Z')
       *s = *s + 32;
   }
 }
 
+void
+mystrupper(char *s)
+{ if(!s) return;
+  for(;*s; s++) {
+	  if(*s==',' || *s=='_') {*s=0;break;}
+    if(*s >= 'a' && *s <= 'z')
+      *s = *s - 32;
+  }
+}
 
 /**
  *
@@ -1805,4 +1817,31 @@ pattern_match(const char *str, const char *pat)
       return 1;
   } while (*str++);
   return 0;
+}
+
+void
+freecharp(char **ptr)
+{
+  free(*ptr);
+  *ptr = NULL;
+}
+
+char *
+fmtv(const char *fmt, va_list ap)
+{
+  char *ret;
+  if(vasprintf(&ret, fmt, ap) == -1)
+    abort();
+  return ret;
+}
+
+char *
+fmt(const char *fmt, ...)
+{
+  va_list ap;
+  char *ret;
+  va_start(ap, fmt);
+  ret = fmtv(fmt, ap);
+  va_end(ap);
+  return ret;
 }

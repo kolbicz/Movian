@@ -133,6 +133,75 @@ glw_scroll_handle_pointer_event(glw_scroll_control_t *gs,
   return 0;
 }
 
+/**
+ *
+ */
+int
+glw_scroll_handle_pointer_event_x(glw_scroll_control_t *gs,
+                                glw_t *w,
+                                const glw_pointer_event_t *gpe)
+{
+  glw_root_t *gr = w->glw_root;
+  int64_t dt;
+  const int grabbed = gr->gr_pointer_grab_scroll == w;
+  float v;
+  switch(gpe->type) {
+
+  case GLW_POINTER_SCROLL:
+    gs->bottom_anchored = 0;
+    gs->target_pos -= gs->page_size * gpe->delta_x;
+    w->glw_flags |= GLW_UPDATE_METRICS;
+    glw_schedule_refresh(w->glw_root, 0);
+    return 1;
+
+  case GLW_POINTER_FINE_SCROLL:
+    gs->bottom_anchored = 0;
+    gs->target_pos -= gpe->delta_x;
+    w->glw_flags |= GLW_UPDATE_METRICS;
+    glw_schedule_refresh(w->glw_root, 0);
+    return 1;
+
+  case GLW_POINTER_TOUCH_CANCEL:
+    if(grabbed)
+      gr->gr_pointer_grab_scroll = NULL;
+    return 1;
+
+  case GLW_POINTER_FOCUS_MOTION:
+    if(!grabbed)
+      return 0;
+
+    gs->bottom_anchored = 0;
+    gs->target_pos = (gs->initial_touch_x - gpe->local_x) *
+        gs->page_size * 0.5 + gs->initial_pos;
+
+    const int max_value =
+      MAX(0, gs->total_size - gs->page_size + gs->scroll_threshold_post);
+    gs->target_pos = GLW_CLAMP(gs->target_pos, 0, max_value);
+
+    if(abs(gs->target_pos - gs->initial_pos) > 15) {
+      if(gr->gr_pointer_press != NULL) {
+        glw_path_modify(gr->gr_pointer_press, 0, GLW_IN_PRESSED_PATH, NULL);
+        gr->gr_pointer_press = NULL;
+      }
+    }
+
+    dt = gpe->ts - gs->last_touch_time;
+    if(dt > 100) {
+      v = 1000000.0 * (gs->last_touch_x - gpe->local_x) / dt;
+      gs->touch_velocity = v * 10;
+    }
+    gs->last_touch_time = gpe->ts;
+    gs->last_touch_x = gpe->local_x;
+    gs->last_touch_y = gpe->local_y;
+    w->glw_flags |= GLW_UPDATE_METRICS;
+    glw_schedule_refresh(w->glw_root, 0);
+    break;
+
+  default:
+    return 0;
+  }
+  return 0;
+}
 
 /**
  *

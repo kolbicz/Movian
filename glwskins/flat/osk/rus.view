@@ -1,0 +1,127 @@
+#import "skin://osk/common.view"
+
+widget(container_y, {
+
+	spacing: 4;
+
+	widget(container_x, {
+	spacing: 4;
+	height: $ui.size * 2.5;
+	KEY("а", "А");
+	KEY("б", "Б");
+	KEY("в", 'В');
+	KEY("г", "Г");
+	KEY("д", "Д");
+	KEY("е", "Е");
+	KEY("ё", "Ё");	
+
+	space(0.2);
+	KEY("!", '!');
+	KEY("@", "@");
+	KEY("#", "#");
+	KEY("$", "$");
+	KEY("%", "%");
+	
+	space(0.3);
+	KEY("1", "1");
+	KEY("2", "2");
+	KEY("3", "3");
+//	ACTION_ICON("skin://icons/ic_arrow_back_48px.svg", targetedEvent("input", Backspace), 2);
+	});
+
+	widget(container_x, {
+	spacing: 4;
+	height: $ui.size * 2.5;
+	KEY("ж", "Ж");	
+	KEY("з", "З");	
+	KEY("и", "И");
+	KEY("й", "Й");
+	KEY("к", "К");
+	KEY("л", "Л");	
+	KEY("м", "М");
+
+		space(0.2);
+	KEY("'", '"');
+	KEY("&", "^");
+	KEY("*", "*");
+	KEY("(", "(");
+	KEY(")", ")");
+	
+	space(0.3);
+	KEY("4", "4");
+	KEY("5", "5");
+	KEY("6", "6");
+	});
+
+	widget(container_x, {
+	spacing: 4;
+	height: $ui.size * 2.5;
+	KEY("н", "Н");	
+	KEY("о", 'О');
+	KEY("п", "П");	
+	KEY("р", "Р");
+	KEY("с", "С");
+	KEY("т", "Т");
+	KEY("у", "У");
+
+	space(0.2);
+	KEY("[", "[");
+	KEY("]", "]");
+	KEY("{", "{");
+	KEY("}", "}");
+	KEY("=", '=');
+	
+	space(0.3);
+	KEY("7", "7");
+	KEY("8", "8");
+	KEY("9", "9");
+	});
+
+	widget(container_x, {
+	spacing: 4;
+	height: $ui.size * 2.5;
+	KEY("ф", "Ф");	
+	KEY("х", "Х");
+	KEY("ц", "Ц");
+	KEY("ч", "Ч");
+	KEY("ш", "Ш");
+	KEY("щ", "Щ");
+	KEY("ъ", "Ъ");
+
+	space(0.2);	
+	KEY("-", "_");	
+	
+	KEY("+", "§");
+	KEY("~", "№");
+	KEY("\\", "|");	
+	KEY(":", ":");
+	space(0.3);
+	KEY(".", ".");
+	KEY("0", "0");
+	KEY("/", "/");
+	});
+	
+	widget(container_x, {
+	spacing: 4;
+	height: $ui.size * 2.5;
+	ACTION_ICON("skin://icons/ic_expand_less_48px.svg", {
+		$ui.osk.shift = !$ui.osk.shift;
+	}, 1, $ui.osk.shift);
+	KEY("ы", "Ы");
+	KEY("ь", "Ь");	
+	KEY("э", "Э");	
+	KEY("ю", "Ю");
+	KEY("я", "Я");	
+	KEY(".", ".");	
+		space(0.2);
+	KEY("<", "«");
+	KEY(">", "»");	
+	KEY(",", ",");
+	KEY("?", ";");
+	ACTION_ICON("skin://icons/ic_arrow_drop_up_48px.svg", {
+		$ui.osk.caps = !$ui.osk.caps;
+	}, 1, $ui.osk.caps);	
+	space(0.3);
+	KEY_("Space", " ", 3.05);
+	});
+});

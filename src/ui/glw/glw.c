@@ -140,7 +140,14 @@ glw_update_size(glw_root_t *gr)
 
   int base_size = bs1; // MIN(bs1, bs2);
 
-  val = GLW_CLAMP(base_size + glw_settings.gs_size +
+
+  int scale_size = 0;
+  if(!glw_settings.gs_size)
+	  scale_size = 1;
+
+  scale_size += glw_settings.gs_size;
+
+  val = GLW_CLAMP(base_size + scale_size +
                   gr->gr_skin_scale_adjustment, 8, 80);
 
   if(gr->gr_current_size != val) {
@@ -150,8 +157,8 @@ glw_update_size(glw_root_t *gr)
     glw_icon_flush(gr);
     glw_update_em(gr);
     TRACE(TRACE_DEBUG, "GLW",
-          "UI size scale changed to %d (user adj: %d  skin adj: %d) ",
-          val, glw_settings.gs_size, gr->gr_skin_scale_adjustment);
+          "UI size scale changed to %d (user: %d, skin: %d) ",
+          val, scale_size, gr->gr_skin_scale_adjustment);
   }
   glw_update_underscan(gr);
 }
@@ -303,8 +310,11 @@ glw_init4(glw_root_t *gr,
 
   gr->gr_frontface = GLW_CCW;
 
-
+#if ENABLE_WSL2
   gr->gr_framerate = 60;
+#else
+  gr->gr_framerate = 60;
+#endif
   gr->gr_frameduration = 1000000 / gr->gr_framerate;
   gr->gr_ui_start = arch_get_ts();
   gr->gr_frame_start = gr->gr_ui_start;
@@ -682,8 +692,23 @@ glw_prepare_frame(glw_root_t *gr, int flags)
   gr->gr_time_usec          = gr->gr_frame_start - gr->gr_ui_start;
   gr->gr_time_sec           = gr->gr_time_usec / 1000000.0f;
 
-  if(!(flags & GLW_NO_FRAMERATE_UPDATE)) {
+  if(!(flags & GLW_NO_FRAMERATE_UPDATE))
+  {
+#if ENABLE_WSL2
+    if(( gr->gr_frames >= 60))
+	{
+      int64_t d = gr->gr_frame_start_avtime - gr->gr_framerate_avg[0];//gr->gr_frames & 0x3f];
+	  if(d)
+	  {
+		  double hz = 60 * 1000000.0 / d;
+		  prop_set(gr->gr_prop_ui, "framerate", PROP_SET_FLOAT, hz);
+		  gr->gr_framerate = hz;
+	  }
 
+	  gr->gr_frames = 0;
+      gr->gr_framerate_avg[0] = gr->gr_frame_start_avtime;
+    }
+#else
     if(likely(gr->gr_frames > 16)) {
       int64_t d = gr->gr_frame_start - gr->gr_framerate_avg[gr->gr_frames & 0xf];
       double hz = 16000000.0 / d;
@@ -692,6 +717,7 @@ glw_prepare_frame(glw_root_t *gr, int flags)
     }
 
     gr->gr_framerate_avg[gr->gr_frames & 0xf] = gr->gr_frame_start;
+#endif
   }
   gr->gr_frames++;
 
@@ -2423,7 +2449,7 @@ glw_dispatch_event(glw_root_t *gr, event_t *e)
       return;
     }
   }
-  
+
   if(e->e_type == EVENT_REPAINT_UI) {
     glw_text_flush(gr);
     return;
@@ -2451,6 +2477,8 @@ glw_dispatch_event(glw_root_t *gr, event_t *e)
 
   if(!(event_is_action(e, ACTION_SEEK_BACKWARD) ||
        event_is_action(e, ACTION_SEEK_FORWARD) ||
+	   event_is_action(e, ACTION_SEEK_BACKWARD_FRAME) ||
+       event_is_action(e, ACTION_SEEK_FORWARD_FRAME) ||
        event_is_action(e, ACTION_PLAYPAUSE) ||
        event_is_action(e, ACTION_PLAY) ||
        event_is_action(e, ACTION_PAUSE) ||
@@ -2480,11 +2508,13 @@ glw_dispatch_event(glw_root_t *gr, event_t *e)
          * action but rather "use" the event to do the switch
          */
 
+#ifndef PLATFORM_OSX
         if(event_is_action(e, ACTION_UP) ||
            event_is_action(e, ACTION_DOWN) ||
            event_is_action(e, ACTION_LEFT) ||
            event_is_action(e, ACTION_RIGHT))
           return;
+#endif
 
       }
     }
@@ -3222,13 +3252,13 @@ glw_osk_open(glw_root_t *gr, const char *title, const char *input,
              glw_t *w, int password)
 {
   mystrset(&gr->gr_osk_revert, input);
-  
+
   if(gr->gr_osk_widget != NULL)
     glw_unref(gr->gr_osk_widget);
-  
+
   gr->gr_osk_widget = w;
   glw_ref(w);
-  
+
   gr->gr_open_osk(gr, title, input, w, password);
 }
 
@@ -3241,16 +3271,16 @@ glw_osk_open_default(glw_root_t *gr, const char *title, const char *input,
                      glw_t *w, int password)
 {
   prop_t *osk = prop_create(gr->gr_prop_ui, "osk");
-  
+
   prop_unsubscribe(gr->gr_osk_text_sub);
   prop_unsubscribe(gr->gr_osk_ev_sub);
-  
+
   prop_set(osk, "title", PROP_SET_STRING, title);
   prop_set(osk, "text",  PROP_SET_STRING, input);
   prop_set(osk, "password", PROP_SET_INT, password);
   prop_set(osk, "show", PROP_SET_INT, 1);
-  
-  
+
+
   gr->gr_osk_text_sub =
   prop_subscribe(0,
                  PROP_TAG_CALLBACK_STRING, glw_osk_text, gr,
@@ -3258,7 +3288,7 @@ glw_osk_open_default(glw_root_t *gr, const char *title, const char *input,
                  PROP_TAG_ROOT, gr->gr_prop_ui,
                  PROP_TAG_COURIER, gr->gr_courier,
                  NULL);
-  
+
   gr->gr_osk_ev_sub =
   prop_subscribe(0,
                  PROP_TAG_CALLBACK, glw_osk_event, gr,
@@ -3458,6 +3488,29 @@ glw_set_keyboard_mode(glw_root_t *gr, int on)
     return 0;
 
   gr->gr_keyboard_mode = on;
+
+  /* Mouse hover and keyboard focus are independent paths. Leaving the last
+   * hover path active when keyboard navigation begins paints two selected
+   * rows until the mouse moves again. A later pointer-motion event naturally
+   * establishes hover again when the user returns to the mouse. */
+  if(on) {
+#ifdef PLATFORM_OSX
+    /* Resume keyboard navigation from the item under the pointer. Do this
+     * directly at the mode transition, before removing hover, so the arrow
+     * that caused the transition advances from that item instead of merely
+     * catching an older focus path up to it. */
+    glw_t *hover = gr->gr_pointer_hover;
+    if(hover != NULL) {
+      glw_t *f = glw_is_focusable(hover) ? hover :
+        glw_get_focusable_child(hover);
+      if(f != NULL)
+        glw_focus_set(gr, f, GLW_FOCUS_SET_INTERACTIVE,
+                      "KeyboardFromHover");
+    }
+#endif
+    glw_root_set_hover(gr, NULL);
+  }
+
   prop_set(gr->gr_prop_ui, "keyboard", PROP_SET_INT, on);
 
   if(gr->gr_universe != NULL)

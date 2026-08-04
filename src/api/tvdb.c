@@ -53,7 +53,7 @@ loadxml(const char *fmt, ...)
   char errbuf[256];
 
   va_list ap;
-  snprintf(url, sizeof(url), "http://www.thetvdb.com/api/");
+  snprintf(url, sizeof(url), "https://www.thetvdb.com/api/");
 
   va_start(ap, fmt);
   vsnprintf(url+strlen(url), sizeof(url)-strlen(url), fmt, ap);
@@ -130,7 +130,7 @@ find_season(void *db, struct season_list *list, const char *seriesid, int num,
     md->md_type = METADATA_TYPE_SEASON;
     md->md_parent_id = series_vid;
     md->md_idx = num;
-    
+
     char extid[64];
     snprintf(extid, sizeof(extid), "s%s-e%d", seriesid, num);
     itemid = metadb_insert_videoitem(db, url, tvdb->ms_id, extid, md,
@@ -164,7 +164,7 @@ tvdb_load_actors(void *db, const char *seriesid, int64_t series_vid,
   char url[256];
   if(doc == NULL)
     return METADATA_TEMPORARY_ERROR;
-  
+
   metadb_delete_videocast(db, series_vid);
 
   htsmsg_t *list = htsmsg_get_map(doc, "Actors");
@@ -181,7 +181,7 @@ tvdb_load_actors(void *db, const char *seriesid, int64_t series_vid,
       if(na == NULL || ro == NULL || id == NULL)
 	continue;
 
-      snprintf(url, sizeof(url), "http://www.thetvdb.com/banners/%s", im?:"");
+      snprintf(url, sizeof(url), "https://www.thetvdb.com/banners/%s", im?:"");
 
       metadb_insert_videocast(db, series_vid,
 			      na, ro, "Cast", "Actor", so?atoi(so) : 4,
@@ -209,7 +209,7 @@ tvdb_load_banners(void *db, const char *seriesid, int64_t series_vid,
 
   if(doc == NULL)
     return METADATA_TEMPORARY_ERROR;
-  
+
   metadb_delete_videoart(db, series_vid);
 
   htsmsg_t *list = htsmsg_get_map(doc, "Banners");
@@ -230,13 +230,13 @@ tvdb_load_banners(void *db, const char *seriesid, int64_t series_vid,
       if(la != NULL && strcasecmp(la, tvdb_language))
 	continue;
 
-      snprintf(url, sizeof(url), "http://www.thetvdb.com/banners/%s", bp);
-      
+      snprintf(url, sizeof(url), "https://www.thetvdb.com/banners/%s", bp);
+
       //      printf("%-60s %-15s %-15s %-10s %-10s\n", url, t1, t2, se, ra);
 
       if(se != NULL && *se) {
 	int season = atoi(se);
-	
+
 	season_t *s = NULL;
 	int64_t season_vid = find_season(db, seasons, seriesid, season, qtype,
 					 series_vid, &s);
@@ -295,7 +295,7 @@ tvdb_load_banners(void *db, const char *seriesid, int64_t series_vid,
 /**
  *
  */
-static int64_t 
+static int64_t
 tvdb_find_series(void *db, const char *id, int qtype,
 		 struct season_list *seasons)
 {
@@ -303,13 +303,13 @@ tvdb_find_series(void *db, const char *id, int qtype,
   int64_t series_vid;
 
   snprintf(url, sizeof(url), "tvdb:series:%s", id);
-  
+
   series_vid = metadb_get_videoitem(db, url);
   if(series_vid > 0)
     return series_vid;
 
-  htsmsg_t *ser = loadxml("%s/series/%s/%s.xml", TVDB_APIKEY, id,
-			  tvdb_language);
+  htsmsg_t *ser = loadxml("%s/series/%s/%s", TVDB_APIKEY, id,
+			  tvdb_language); // remove .xml
   if(ser == NULL)
     return METADATA_TEMPORARY_ERROR;
 
@@ -317,7 +317,7 @@ tvdb_find_series(void *db, const char *id, int qtype,
 
   metadata_t *md = metadata_create();
   md->md_type = METADATA_TYPE_SERIES;
-    
+
   md->md_title = rstr_alloc(htsmsg_get_str(tags, "SeriesName"));
   md->md_description = rstr_alloc(htsmsg_get_str(tags, "Overview"));
 
@@ -328,7 +328,7 @@ tvdb_find_series(void *db, const char *id, int qtype,
 
   if((s = htsmsg_get_str(tags, "RatingCount")) != NULL)
     md->md_rating_count = atoi(s);
-  
+
 
   md->md_imdb_id = rstr_alloc(htsmsg_get_str(tags, "IMDB_ID"));
 
@@ -351,8 +351,8 @@ tvdb_find_series(void *db, const char *id, int qtype,
 /**
  *
  */
-static int64_t 
-tvdb_query_by_episode(void *db, const char *item_url, 
+static int64_t
+tvdb_query_by_episode(void *db, const char *item_url,
 		      const char *title, int season, int episode,
 		      int qtype, const char *initiator)
 {
@@ -364,7 +364,7 @@ tvdb_query_by_episode(void *db, const char *item_url,
                         "initiator", initiator));
 
 
-  result = fa_load("http://www.thetvdb.com/api/GetSeries.php",
+  result = fa_load("https://www.thetvdb.com/api/GetSeries.php",
                    FA_LOAD_ERRBUF(errbuf, sizeof(errbuf)),
                    FA_LOAD_QUERY_ARG("seriesname", title),
                    FA_LOAD_QUERY_ARG("language", "all"),
@@ -375,7 +375,7 @@ tvdb_query_by_episode(void *db, const char *item_url,
     TRACE(TRACE_INFO, "TVDB", "Unable to search for %s -- %s", title, errbuf);
     return METADATA_TEMPORARY_ERROR;
   }
-  
+
   htsmsg_t *gs = htsmsg_xml_deserialize_buf(result, errbuf, sizeof(errbuf));
   if(gs == NULL) {
     TRACE(TRACE_ERROR, "TVDB", "Unable to parse XML -- %s", errbuf);
@@ -398,8 +398,8 @@ tvdb_query_by_episode(void *db, const char *item_url,
   // --------------------------------------------------------------------
   // Get episode
 
-  
-  htsmsg_t *epi = loadxml("%s/series/%s/default/%d/%d/%s.xml",
+
+  htsmsg_t *epi = loadxml("%s/series/%s/default/%d/%d/%s", // remove .xml
 			  TVDB_APIKEY, series_id, season, episode,
 			  tvdb_language);
   if(epi == NULL)
@@ -425,7 +425,7 @@ tvdb_query_by_episode(void *db, const char *item_url,
       goto out;
 
     int season = atoi(se);
-	
+
     season_t *ses = NULL;
     int64_t season_vid = find_season(db, &seasons, series_id, season, qtype,
 				     series_vid, &ses);
@@ -465,7 +465,7 @@ tvdb_query_by_episode(void *db, const char *item_url,
       const char *thumb = htsmsg_get_str(tags, "filename");
       if(thumb) {
 	char url[256];
-	snprintf(url, sizeof(url), "http://www.thetvdb.com/banners/%s", thumb);
+	snprintf(url, sizeof(url), "https://www.thetvdb.com/banners/%s", thumb);
 
 	metadb_insert_videoart(db, itemid, url, METADATA_IMAGE_THUMB, 0, 0,
 			       1, NULL, 0);
@@ -537,7 +537,8 @@ tvdb_init(void)
   setting_create(SETTING_STRING, tvdb->ms_settings, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Language (ISO 639-1 code)")),
                  SETTING_STORE("tvdb", "language"),
-                 SETTING_VALUE_PROP(globallang),
+                 //SETTING_VALUE_PROP(globallang),
+				 SETTING_VALUE("en"),
                  SETTING_CALLBACK(set_lang, NULL),
                  NULL);
 

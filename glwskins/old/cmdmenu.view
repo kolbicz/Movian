@@ -81,15 +81,15 @@ $view.sizer = $ui.size / 5;
 #define BUTTONTOGGLE(ICON, STATE, ENABLED) {
   widget(displacement, {
     SquareButtonDisplacement();
-    
+
     widget(backdrop, {
-      
+
       focusable: select(ENABLED, 0.5, false);
       onEvent(activate, { (STATE) = !STATE; });
       alpha: iir(select(ENABLED, 1, 0.2), 4);
       color: iir(0.6 + (isFocused() || isPressed() || isHovered()), 4);
       SquareButtonBack();
-      
+
       widget(frontdrop, {
 	SquareButtonFront();
 	widget(icon, {
@@ -157,12 +157,12 @@ widget(list_y, {
       effect: flipHorizontal;
       noInitialTransform: true;
       time: 0.2;
-      
+
       BUTTON("Play", event(Play), true);
       BUTTON("Pause", event(Pause), true);
       page: $core.media.current.playstatus == "play";
     });
-    
+
     BUTTON("SeekFwd", event(SeekForward), $core.media.current.canSeek);
   });
 
@@ -179,7 +179,7 @@ widget(list_y, {
   widget(container_x, {
     hidden: !$core.media.current.canShuffle &&
       !$core.media.current.canRepeat;
-      
+
     widget(dummy, {
       width: SquareButtonSize();
     });
@@ -225,9 +225,9 @@ widget(list_y, {
       alpha: 0.4;
       widget(list_x, {
 	spacing: 5;
-	
+
 	$self.focused <- focusedChild();
-	
+
 	cloner($core.media.current.seekindex.positions, container_z, {
 	  width: $ui.size * 14.2222;
 
@@ -239,7 +239,7 @@ widget(list_y, {
 	  widget(backdrop, {
 	    alpha: select($clone.ready, 0, 1);
 	    align: bottom;
-	  
+
 	    source: "skin://graphics/white.png";
 	    stencil: "skin://graphics/stencil.png";
 	    stencilBorder: 16;

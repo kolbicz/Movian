@@ -112,9 +112,9 @@ void
 audio_init(void)
 {
   prop_t *asettings =
-    settings_add_dir(NULL, _p("Audio settings"), "sound", NULL,
+    settings_add_dir(NULL, _p("Audio"), "sound", NULL,
                      _p("Setup audio output"),
-                     "settings:audio");
+                     "settings:audio", "02");
 
   audio_mastervol_init();
   audio_class = audio_driver_init(asettings);

@@ -62,7 +62,7 @@ audio_play_zipfile(fa_handle_t *fh, media_pipe_t *mp,
     snprintf(errbuf, errlen, "Load error");
     return NULL;
   }
-  
+
   int id = memfile_register(b->b_ptr, b->b_size);
   snprintf(url, sizeof(url), "zip://memfile://%d", id);
   fa_dir_t *fd = fa_scandir(url, errbuf, sizeof(errbuf));
@@ -109,7 +109,7 @@ static void
 seekflush(media_pipe_t *mp, media_buf_t **mbp)
 {
   mp_flush(mp);
-  
+
   if(*mbp != NULL && *mbp != MB_SPECIAL_EOF)
     media_buf_free_unlocked(mp, *mbp);
   *mbp = NULL;
@@ -217,7 +217,7 @@ be_file_playaudio(const char *url, media_pipe_t *mp,
     mp->mp_audio.mq_stream = i;
     break;
   }
-  
+
   if(cw == NULL) {
     media_format_deref(fw);
     snprintf(errbuf, errlen, "Unable to open codec");
@@ -228,7 +228,7 @@ be_file_playaudio(const char *url, media_pipe_t *mp,
   mq = &mp->mp_audio;
 
   prop_set(mp->mp_prop_root, "format", PROP_SET_STRING,
-           fctx->iformat->long_name);
+           fctx->iformat->name);//long_name);
 
   while(1) {
 
@@ -236,18 +236,18 @@ be_file_playaudio(const char *url, media_pipe_t *mp,
      * Need to fetch a new packet ?
      */
     if(mb == NULL) {
-      
+
       mp->mp_eof = 0;
       r = av_read_frame(fctx, &pkt);
       if(r == AVERROR(EAGAIN))
 	continue;
-      
+
       if(r == AVERROR_EOF || r == AVERROR(EIO)) {
 	mb = MB_SPECIAL_EOF;
 	mp->mp_eof = 1;
 	continue;
       }
-      
+
       if(r != 0) {
 	char msg[100];
 	fa_libav_error_to_txt(r, msg, sizeof(msg));
@@ -303,7 +303,7 @@ be_file_playaudio(const char *url, media_pipe_t *mp,
     if(mb == MB_SPECIAL_EOF) {
       // We have reached EOF, drain queues
       e = mp_wait_for_empty_queues(mp);
-      
+
       if(e == NULL) {
 	e = event_create_type(EVENT_EOF);
 	break;
@@ -312,7 +312,7 @@ be_file_playaudio(const char *url, media_pipe_t *mp,
     } else if((e = mb_enqueue_with_events(mp, mq, mb)) == NULL) {
       mb = NULL; /* Enqueue succeeded */
       continue;
-    }      
+    }
 
     if(event_is_type(e, EVENT_PLAYQUEUE_JUMP)) {
 
@@ -341,7 +341,7 @@ be_file_playaudio(const char *url, media_pipe_t *mp,
       }
       av_seek_frame(fctx, -1, ts, AVSEEK_FLAG_BACKWARD);
       seekflush(mp, &mb);
-      
+
     } else if(event_is_action(e, ACTION_SKIP_BACKWARD)) {
 
       if(mp->mp_seek_base < 1500000)

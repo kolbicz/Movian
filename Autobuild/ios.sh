@@ -6,7 +6,7 @@ ROOTDIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUILDDIR="${ROOTDIR}/build.ios"
 DERIVED_DATA="${BUILDDIR}/DerivedData"
 APP="${DERIVED_DATA}/Build/Products/Release-iphoneos/Movian-iOS.app"
-IPA="${BUILDDIR}/Movian.ipa"
+IPA="${BUILDDIR}/Movian-iOS-7.0.272-unsigned.ipa"
 
 rm -rf "${BUILDDIR}"
 mkdir -p "${BUILDDIR}/Payload"
@@ -31,5 +31,5 @@ rm -rf "${BUILDDIR}/Payload" "${DERIVED_DATA}"
 echo "Unsigned IPA: ${IPA}"
 
 if command -v artifact >/dev/null 2>&1; then
-    artifact build.ios/Movian.ipa ipa application/octet-stream Movian.ipa
+    artifact build.ios/Movian-iOS-7.0.272-unsigned.ipa ipa application/octet-stream Movian-iOS-7.0.272-unsigned.ipa
 fi

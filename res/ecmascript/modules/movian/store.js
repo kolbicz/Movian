@@ -17,7 +17,7 @@ var storeproxy = {
       clearTimeout(obj.timer);
 
     obj.timer = setTimeout(function() {
-      console.log("Saving store to " + obj.filename);
+      //console.log("Saving store to " + obj.filename);
       fs.writeFileSync(obj.filename, JSON.stringify(obj.keys));
       delete obj.timer;
     }, 5000);
@@ -39,7 +39,7 @@ exports.createFromPath = function(path) {
 
   Duktape.fin(obj, function(obj) {
     if(obj.timer) {
-      console.log("Finalized store to " + obj.filename);
+      //console.log("Finalized store to " + obj.filename);
       fs.writeFileSync(obj.filename, JSON.stringify(obj.keys));
     }
   });

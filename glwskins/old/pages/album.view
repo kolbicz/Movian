@@ -7,7 +7,7 @@ widget(keyintercept, {
     blur:      iir(clamp(getLayer(), 0, 1), 7);
 
     padding: [5,5,5,$ui.playdeckheight];
-    
+
     widget(container_x, {
       padding: 5;
       spacing: 5;
@@ -21,8 +21,8 @@ widget(keyintercept, {
 	  sizeScale: 8;
 	});
       });
-      
-      
+
+
       widget(container_y, {
 	filterConstraintX: true;
 	padding: 8;
@@ -61,7 +61,7 @@ widget(keyintercept, {
 	width: 4;
 	focusable: canScroll();
 	alpha: iir(canScroll(), 16);
-	
+
 	widget(quad, {
 	  alpha: iir(0.3 + 0.3 * (isFocused() || isPressed()), 4) + isHovered();
 	});

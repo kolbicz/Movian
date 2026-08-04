@@ -97,6 +97,7 @@ static const isolang_t langtable[] = {
   {"ceb", "", "Cebuano"},
   {"cel", "", "Celtic (Other)"},
   {"ces", "", "Czech"},
+  {"cfx", "fx", "Clear FX"},
   {"cha", "ch", "Chamorro"},
   {"chb", "", "Chibcha"},
   {"che", "ce", "Chechen"},
@@ -524,7 +525,7 @@ static const isolang_t langtable[] = {
 };
 
 
-// Find ISO 639-2 (2 or 3 char code) 
+// Find ISO 639-2 (2 or 3 char code)
 const isolang_t *
 isolang_find(const char *code)
 {

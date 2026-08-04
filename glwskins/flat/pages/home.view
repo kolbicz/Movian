@@ -122,7 +122,8 @@ widget(container_z, {
               padding: 0.5em;
 
               widget(displacement, {
-                scaling: [1,1,1] - [0.11,0.1,0] * iir(isPressed(), 4, true)
+                //scaling: [1,1,1] - [0.11,0.1,0] * iir(isPressed(), 4, true)
+			    scaling: [1.1 - iir((isNavFocused() || isHovered()) < 1, 5) * 0.1, 1.1 - iir((isNavFocused() || isHovered()) < 1, 5) * 0.1, 1] - [0.11,0.11,0] * iir(isPressed(), 4, true)
                 widget(image, {
                   source: $self.icon ??
 	            "skin://icons/" +
@@ -143,11 +144,14 @@ widget(container_z, {
                 });
               });
 
-              widget(label, {
-                align: center;
-                caption: $self.title;
-                size: 1.2em;
-              });
+              widget(displacement, {
+			    scaling: [1.1 - iir((isNavFocused() || isHovered()) < 1, 5) * 0.1, 1.1 - iir((isNavFocused() || isHovered()) < 1, 5) * 0.1, 1]
+				  widget(label, {
+					align: center;
+					caption: $self.title;
+					size: 1.2em;
+				  });
+			  });
             });
           });
         });

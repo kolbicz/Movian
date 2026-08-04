@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "ext/sqlite/sqlite3.h"
+#include <sqlite3.h>
 
 #include "prop/prop.h"
 #include "prop/prop_concat.h"
@@ -182,7 +182,7 @@ metadata_add_source(const char *name, const char *description,
 
   ms->ms_settings =
     settings_add_dir_cstr(metadata_sources_settings[type],
-			  ms->ms_description, NULL, NULL, NULL, NULL);
+			  ms->ms_description, NULL, NULL, NULL, NULL, "99");
 
   prop_tag_set(ms->ms_settings, &tagkey, ms);
 
@@ -348,7 +348,7 @@ metadata_sources_init(void)
 
   s = settings_add_dir(NULL, _p("Metadata"), "metadata", NULL,
 		       _p("Metadata configuration and provider settings"),
-		       "settings:metadata");
+		       "settings:metadata", "08");
 
   pc = prop_concat_create(prop_create(s, "nodes"));
 

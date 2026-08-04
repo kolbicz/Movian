@@ -1,13 +1,13 @@
 #import "skin://common.view"
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
   focusOnClick: true;
   onEvent(activate, navOpen($self.url, void, $self, $parent.model, void, $parent.url));
-  
+
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 
   widget(container_x, {
@@ -15,8 +15,8 @@ widget(backdrop, {
     widget(icon, {
       align: left;
       color: select(isFocused(), 1.0, 0.6);
-      source: 
-      "dataroot://res/svg/" + 
+      source:
+      "dataroot://res/svg/" +
 	translate($self.type,  "File",
 		  "archive",   "Archive",
 		  "artist",    "User",
@@ -33,8 +33,8 @@ widget(backdrop, {
 		 ) + ".svg";
 	.shadow = true;
     });
-    
-    
+
+
     widget(label, {
       filterConstraintX: true;
       TextStyleItem();

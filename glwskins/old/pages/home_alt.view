@@ -7,25 +7,25 @@ $view.sizer = $ui.size / 3;
     spacing: $ui.size;
     focusable: WEIGHT;
     onEvent(activate, ACTION);
-    
+
     widget(displacement, {
 
       padding: $view.sizer * -1.5 * iir(isHovered() || isFocused(), 3) + $view.sizer * iir(isPressed(), 3);
 
       widget(container_z, {
-      
+
 	widget(backdrop, {
 
 	  color: iir(0.6 + (isFocused() || isPressed() || isHovered()), 4);
 	  SquareButtonBack();
-	  
+
 	  widget(frontdrop, {
 	    SquareButtonFront();
-	  
+
 	    widget(icon, {
 	      color: iir(0.6 + (isFocused() || isPressed() || isHovered()), 4);
 	      source: ICON;
-	      
+
 	      shadow: true;
 	      sizeScale: 3;
 	    });
@@ -51,7 +51,7 @@ $view.sizer = $ui.size / 3;
 	});
       });
     });
-    
+
     widget(label, {
       caption: CAPTION;
       outline: true;
@@ -118,16 +118,16 @@ widget(container_z, {
 
       widget(list_y, {
 	YLIST_PROPS();
-	
+
 	HOMEITEM("Settings", "dataroot://res/svg/Settings.svg",
 		 navOpen("settings:"), false, 0.5);
 	HOMEITEM("Plugins", "dataroot://res/svg/Plugin.svg",
-		 navOpen("plugin:start"), 
+		 navOpen("plugin:start"),
 		 $core.plugins.status.upgradeable, 0.5);
 	HOMEITEM("Showtime", "dataroot://res/showtime/showtime.png",
 		 navOpen("page:about"), false, 0.5);
       });
-      
+
       XITEM_TITLE("System");
     });
 
@@ -140,8 +140,8 @@ widget(container_z, {
 	cloner(propSorter($self.nodes,
 			  sort, "node.title", false, false), container_z, {
 	  HOMEITEM($self.title,
-		   $self.icon ?? 
-		   "dataroot://res/svg/" + 
+		   $self.icon ??
+		   "dataroot://res/svg/" +
 		   translate($self.type, "Folder",
 			     "music",    "Music",
 			     "video",    "Movie",

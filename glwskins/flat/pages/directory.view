@@ -16,6 +16,13 @@ onEvent(defaultInfo, {
   $clone.itemMenu = "default";
 });
 
+onEvent(customInfo, {
+  $clone.itemData := currentEvent("prop");
+  $clone.popupScreenX = currentEvent("screenX");
+  $clone.popupScreenY = currentEvent("screenY");
+  $clone.itemMenu = "custom";
+});
+
 
 style(sidebarBackdrop, {
   color: 0;
@@ -73,6 +80,7 @@ $view.overlay = translate($clone.itemMenu,
                           select($clone.showSidebar, "sidebar", void),
                           "video", "fullscreen",
                           "default", "popup",
+						  "custom", "popup",
                           "plugin", "fullscreen");
 
 

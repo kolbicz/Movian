@@ -60,7 +60,7 @@ static void bookmarks_save(void);
 
 static struct bookmark_list bookmarks;
 
-
+//extern char *plugin_autostart;
 
 
 /**
@@ -163,7 +163,7 @@ typedef struct nav_page {
 typedef struct navigator {
 
   LIST_ENTRY(navigator) nav_link;
-  
+
   struct nav_page_queue nav_pages;
   struct nav_page_queue nav_history;
 
@@ -220,7 +220,7 @@ nav_update_bookmarked(void)
   LIST_FOREACH(nav, &navigators, nav_link) {
     nav_page_t *np;
     TAILQ_FOREACH(np, &nav->nav_pages, np_global_link) {
-      prop_set_int_ex(np->np_bookmarked, 
+      prop_set_int_ex(np->np_bookmarked,
 		      np->np_bookmarked_sub, nav_page_is_bookmarked(np));
     }
   }
@@ -270,6 +270,8 @@ nav_create(void)
 		   NULL);
 
   nav_open0(nav, NAV_HOME, NULL, NULL, NULL, NULL, NULL);
+  //FILE *fpA = fopen ( (char*)"/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "w");
+  //if (fpA) {fputs( (char*)"powersave", fpA); fclose (fpA);}
 
   hts_mutex_unlock(&nav_mutex);
 
@@ -289,6 +291,30 @@ nav_create(void)
                                       );
     prop_send_ext_event(eventsink, e);
     event_release(e);
+  }
+
+  static atomic_t initial_plugin_opened;
+  if(atomic_add_and_fetch(&initial_plugin_opened, 1) == 1 &&
+     gconf.plugin_autostart != NULL) {
+
+    hts_mutex_lock(&gconf.state_mutex);
+    while(gconf.navigator_can_start == 0)
+      hts_cond_wait(&gconf.state_cond, &gconf.state_mutex);
+    hts_mutex_unlock(&gconf.state_mutex);
+
+	TRACE(TRACE_TUN, "navigator", "Auto-start plugin: %s", gconf.plugin_autostart);
+	char plugin_autostart_path[64];
+	if(!strstr(gconf.plugin_autostart, ":"))
+		sprintf(plugin_autostart_path, "%s:start", gconf.plugin_autostart);
+	else
+		sprintf(plugin_autostart_path, "%s", gconf.plugin_autostart);
+
+    event_t *ep = event_create_openurl(
+                                      .url  = plugin_autostart_path,
+                                      .view = gconf.initial_view,
+                                      );
+    prop_send_ext_event(eventsink, ep);
+    event_release(ep);
   }
 
   return nav;
@@ -637,7 +663,7 @@ nav_page_setup_prop(nav_page_t *np, const char *view)
 		      np->np_url);
 
   prop_t *prev = prop_create(np->np_prop_root, "previous");
-  
+
   if(np->np_parent_model_src) {
     np->np_parent_model_dst = prop_create_r(prev, "parentModel");
     prop_link(np->np_parent_model_src, np->np_parent_model_dst);
@@ -654,7 +680,7 @@ nav_page_setup_prop(nav_page_t *np, const char *view)
   prop_set(np->np_prop_root, "how", PROP_SET_STRING, np->np_how);
 
   // XXX Change this into event-style subscription
-  np->np_close_sub = 
+  np->np_close_sub =
     prop_subscribe(0,
 		   PROP_TAG_NAMED_ROOT, np->np_prop_root, "page",
 		   PROP_TAG_NAME("page", "close"),
@@ -665,7 +691,7 @@ nav_page_setup_prop(nav_page_t *np, const char *view)
   prop_set(np->np_prop_root, "url",       PROP_SET_STRING, np->np_url);
   prop_set(np->np_prop_root, "parentUrl", PROP_SET_STRING, np->np_parent_url);
 
-  np->np_direct_close_sub = 
+  np->np_direct_close_sub =
     prop_subscribe(PROP_SUB_NO_INITIAL_UPDATE,
 		   PROP_TAG_NAMED_ROOT, np->np_prop_root, "page",
 		   PROP_TAG_NAME("page", "directClose"),
@@ -673,7 +699,7 @@ nav_page_setup_prop(nav_page_t *np, const char *view)
 		   PROP_TAG_MUTEX, &nav_mutex,
 		   NULL);
 
-  np->np_eventsink_sub = 
+  np->np_eventsink_sub =
     prop_subscribe(0,
 		   PROP_TAG_NAMED_ROOT, np->np_prop_root, "page",
 		   PROP_TAG_NAME("page", "eventSink"),
@@ -687,7 +713,7 @@ nav_page_setup_prop(nav_page_t *np, const char *view)
 
   prop_set_int(np->np_bookmarked, nav_page_is_bookmarked(np));
 
-  np->np_bookmarked_sub = 
+  np->np_bookmarked_sub =
     prop_subscribe(PROP_SUB_NO_INITIAL_UPDATE | PROP_SUB_IGNORE_VOID,
 		   PROP_TAG_ROOT, np->np_bookmarked,
 		   PROP_TAG_CALLBACK_INT, nav_page_bookmarked_set, np,
@@ -760,7 +786,7 @@ nav_open0(navigator_t *nav, const char *url, const char *view,
 {
   nav_page_t *np = calloc(1, sizeof(nav_page_t));
 
-  TRACE(TRACE_INFO, "navigator", "Opening %s", url);
+  TRACE(TRACE_NAV, "navigator", "Opening %s", url);
   np->np_nav = nav;
   np->np_url = strdup(url);
   np->np_parent_url = parent_url ? strdup(parent_url) : NULL;
@@ -806,12 +832,6 @@ nav_back(navigator_t *nav)
 
     if(doclose)
       nav_close(np, 1);
-  } else {
-    event_t *e = event_create_action(ACTION_SYSTEM_HOME);
-    prop_t *eventsink = prop_create_r(nav->nav_prop_root, "eventSink");
-    prop_send_ext_event(eventsink, e);
-    prop_ref_dec(eventsink);
-    event_release(e);
   }
 }
 
@@ -838,7 +858,7 @@ static void
 nav_reload_page(nav_page_t *np)
 {
   navigator_t *nav = np->np_nav;
-  TRACE(TRACE_INFO, "navigator", "Reloading %s", np->np_url);
+  TRACE(TRACE_DEBUG, "navigator", "Reloading %s", np->np_url);
 
   page_unsub(np);
 
@@ -940,7 +960,7 @@ nav_eventsink(void *opaque, event_t *e)
                 ou->item_model, ou->parent_model,
                 ou->how, ou->parent_url);
     else
-      TRACE(TRACE_INFO, "Navigator", "Tried to open NULL URL");
+      TRACE(TRACE_ERROR, "Navigator", "Tried to open NULL URL");
   }
 }
 
@@ -1523,7 +1543,7 @@ bookmarks_init(void)
   prop_t *root = settings_add_dir(NULL, _p("Bookmarks"),
                                   "bookmark", NULL,
                                   _p("Add and remove items on homepage"),
-                                  "settings:bookmarks");
+                                  "settings:bookmarks", "06");
 
   bookmark_nodes = prop_create(root, "nodes");
   prop_set(root, "mayadd", PROP_SET_INT, 1);

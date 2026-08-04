@@ -21,6 +21,8 @@
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 #include <libavutil/pixdesc.h>
+#include <libavfilter/buffersrc.h>
+#include <libavfilter/buffersink.h>
 #include <libavutil/channel_layout.h>
 
 #include "main.h"
@@ -47,6 +49,60 @@ static const int libav_colorspace_tbl[] = {
 
 #define vd_valid_duration(t) ((t) > 10000ULL && (t) < 1000000ULL)
 
+static void init_filter_graph(AVFrame *frame, AVCodecContext *ctx, struct media_codec *mc)
+{
+    mc->filt_inputs  = avfilter_inout_alloc();
+    mc->filt_outputs = avfilter_inout_alloc();
+
+    char args[64];
+    char description[64];
+
+    snprintf(args, sizeof(args),
+         "width=%d:height=%d:pix_fmt=%d:time_base=%d/%d:sar=%d/%d",
+         frame->width,
+         frame->height,
+		 ctx->pix_fmt, ////frame->format,//
+         ctx->time_base.num, //frame->height==480?30000:50,//ctx->time_base.num,
+         ctx->time_base.den, //frame->height==480?1001:1,//ctx->time_base.den,
+         ctx->sample_aspect_ratio.num,
+         ctx->sample_aspect_ratio.den
+		 );
+
+    mc->filt_filter_graph = avfilter_graph_alloc();
+
+    if(avfilter_graph_create_filter(&mc->filt_filter_src_ctx, avfilter_get_by_name("buffer"), "in", args, NULL, mc->filt_filter_graph)) goto leave_err;
+    if(avfilter_graph_create_filter(&mc->filt_filter_sink_ctx, avfilter_get_by_name("buffersink"), "out", NULL, NULL, mc->filt_filter_graph)) goto leave_err;
+
+    mc->filt_inputs->name        = av_strdup("out");
+    mc->filt_inputs->filter_ctx  = mc->filt_filter_sink_ctx;
+    mc->filt_inputs->pad_idx     = 0;
+    mc->filt_inputs->next        = NULL;
+
+    mc->filt_outputs->name       = av_strdup("in");
+    mc->filt_outputs->filter_ctx = mc->filt_filter_src_ctx;
+    mc->filt_outputs->pad_idx    = 0;
+    mc->filt_outputs->next       = NULL;
+
+	// https://ffmpeg.org/ffmpeg-filters.html#yadif-1
+
+	sprintf(description, "bwdif=mode=%i:parity=%i", /*(mc->codec_id != AV_CODEC_ID_H264 && !gconf.disable_yadif_2x)?1:0,*/ 0, !frame->top_field_first);
+
+	//TRACE(TRACE_DEBUG, "VD", "frame->interlaced_frame=%i frame->top_field_first=%i ctx->time_base.num=%i ctx->time_base.den=%i", frame->interlaced_frame, frame->top_field_first, ctx->time_base.num, ctx->time_base.den);
+    //TRACE(TRACE_DEBUG, "avfilter", "Filter: %s %s", description, args);
+
+    if(avfilter_graph_parse(mc->filt_filter_graph, description, mc->filt_inputs, mc->filt_outputs, NULL)) goto leave_err;
+    if(avfilter_graph_config(mc->filt_filter_graph, NULL)) goto leave_err;
+
+	TRACE(TRACE_DEBUG, "avfilter", "Filter graph connected: %s, %s", description, args);
+    TRACE(TRACE_INFO, "avfilter", "Deinterlacer created and configured");
+	mc->filt_filter_frame = av_frame_alloc();
+	return;
+
+leave_err:
+
+	if(mc->filt_filter_graph) avfilter_graph_free(&mc->filt_filter_graph);
+	return;
+}
 
 /**
  *
@@ -111,9 +167,9 @@ libav_deliver_frame(video_decoder_t *vd,
 
     }
   }
-  
+
   duration += frame->repeat_pict * duration / 2;
- 
+
   if(pts != AV_NOPTS_VALUE) {
     vd->vd_prevpts = pts;
     vd->vd_prevpts_cnt = 0;
@@ -169,8 +225,8 @@ libav_deliver_frame(video_decoder_t *vd,
   fi.fi_tff = !!frame->top_field_first;
   fi.fi_prescaled = 0;
 
-  fi.fi_color_space = 
-    ctx->colorspace < ARRAYSIZE(libav_colorspace_tbl) ? 
+  fi.fi_color_space =
+    ctx->colorspace < ARRAYSIZE(libav_colorspace_tbl) ?
     libav_colorspace_tbl[ctx->colorspace] : 0;
 
   fi.fi_type = 'LAVC';
@@ -357,8 +413,45 @@ libav_decode_video(struct media_codec *mc, struct video_decoder *vd,
     return;
 
   const media_buf_meta_t *mbm = &vd->vd_reorder[frame->reordered_opaque];
-  if(!mbm->mbm_skip)
+  if(mbm->mbm_skip) goto leave_d;
+
+	if(frame->interlaced_frame
+		&& (mc->codec_id == AV_CODEC_ID_MPEG2VIDEO || mc->codec_id == AV_CODEC_ID_MPEG1VIDEO || mc->codec_id == AV_CODEC_ID_H264 )
+		&& (frame->width <= 1024)
+		&& (frame->height <= 576)
+	)
+	{
+		if(!mc->filt_filter_frame)
+			init_filter_graph(frame, ctx, mc);
+
+		if(mc->filt_filter_frame)
+		{
+			if(av_buffersrc_add_frame(mc->filt_filter_src_ctx, frame))
+			{
+				;
+			}
+
+			AVFrame *filter_frame2 = mc->filt_filter_frame;
+			if(!av_buffersink_get_frame(mc->filt_filter_sink_ctx, filter_frame2))
+			{
+				libav_deliver_frame(vd, mp, mq, ctx, filter_frame2, mbm, t, mc);
+				av_frame_unref(filter_frame2);
+
+				if(mc->codec_id != AV_CODEC_ID_H264 && /* !gconf.disable_yadif_2x && */ !av_buffersink_get_frame(mc->filt_filter_sink_ctx, filter_frame2))
+				{
+					libav_deliver_frame(vd, mp, mq, ctx, filter_frame2, mbm, t, mc);
+					av_frame_unref(filter_frame2);
+				}
+			}
+
+			av_frame_unref(frame);
+			return;
+		}
+	}
+
     libav_deliver_frame(vd, mp, mq, ctx, frame, mbm, t, mc);
+
+leave_d:
   av_frame_unref(frame);
 }
 
@@ -415,13 +508,13 @@ media_codec_create_lavc(media_codec_t *cw, const media_codec_params_t *mcp,
 
   if(mcp != NULL && mcp->extradata != NULL && !cw->ctx->extradata) {
     cw->ctx->extradata = calloc(1, mcp->extradata_size +
-				FF_INPUT_BUFFER_PADDING_SIZE);
+				AV_INPUT_BUFFER_PADDING_SIZE);
     memcpy(cw->ctx->extradata, mcp->extradata, mcp->extradata_size);
     cw->ctx->extradata_size = mcp->extradata_size;
   }
 
   if(mcp && mcp->cheat_for_speed)
-    cw->ctx->flags2 |= CODEC_FLAG2_FAST;
+    cw->ctx->flags2 |= AV_CODEC_FLAG2_FAST;
 
   if(codec->type == AVMEDIA_TYPE_VIDEO) {
 
@@ -429,9 +522,14 @@ media_codec_create_lavc(media_codec_t *cw, const media_codec_params_t *mcp,
 
     // If we run with vdpau and h264 libav will crash when going
     // back and forth between accelerated and non-accelerated mode
+#if !ENABLE_WSL2
     if(!(video_settings.vdpau && cw->codec_id == AV_CODEC_ID_H264))
       cw->ctx->thread_count = gconf.concurrency;
-
+#else
+	if(cw->codec_id == AV_CODEC_ID_H264)
+		cw->ctx->thread_safe_callbacks = 1;
+	cw->ctx->thread_count = 4;
+#endif
     cw->ctx->opaque = cw;
     cw->ctx->refcounted_frames = 1;
     cw->ctx->get_format = &libav_get_format;
@@ -556,9 +654,68 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   mq->mq_meta_width          = avctx->width;
   mq->mq_meta_height         = avctx->height;
 
+  if(mq->mq_meta_channels==2)
+	  prop_set_string(mq->mq_prop_aq, "2.0");
+  else
+  if(mq->mq_meta_channels==3)
+	  prop_set_string(mq->mq_prop_aq, "2.1");
+  else
+  if(mq->mq_meta_channels==4)
+	  prop_set_string(mq->mq_prop_aq, "4.0");
+  else
+  if(mq->mq_meta_channels==5)
+	  prop_set_string(mq->mq_prop_aq, "5.0");
+  else
+  if(mq->mq_meta_channels==6)
+	  prop_set_string(mq->mq_prop_aq, "5.1");
+  else
+  if(mq->mq_meta_channels==8)
+	  prop_set_string(mq->mq_prop_aq, "7.1");
+
   char buf[128];
   metadata_from_libav(buf, sizeof(buf), codec, avctx);
+
+  if(mq->mq_meta_width && mq->mq_meta_height)
+  {
+	  char buf2[24];
+
+	  sprintf(buf2, "%s%s", ((avctx->field_order > AV_FIELD_PROGRESSIVE)?"i":""), " ");
+
+	  if(strstr(buf, "H264"))
+		  sprintf(buf, "AVC %ix%i%s", mq->mq_meta_width, mq->mq_meta_height, buf2);
+	  else
+	  if(strstr(buf, "HEVC"))
+		  sprintf(buf, "HEVC %ix%i%s", mq->mq_meta_width, mq->mq_meta_height, buf2);
+	  else
+	  if(strstr(buf, "MPEG2"))
+		  sprintf(buf, "MPEG2 %ix%i%s", mq->mq_meta_width, mq->mq_meta_height, buf2);
+	  else
+	  if(strstr(buf, "MPEG1"))
+		  sprintf(buf, "MPEG1 %ix%i%s", mq->mq_meta_width, mq->mq_meta_height, buf2);
+	  else
+	  if(strstr(buf, "MPEG4"))
+		  sprintf(buf, "MPEG4 %ix%i%s", mq->mq_meta_width, mq->mq_meta_height, buf2);
+	  else
+	  if(strstr(buf, "VP8") || strstr(buf, "VP9"))
+		  sprintf(buf, "VP9 %ix%i%s", mq->mq_meta_width, mq->mq_meta_height, buf2);
+  }
+
   prop_set_string(mq->mq_prop_codec, buf);
+
+  if(mq->mq_meta_width && mq->mq_meta_height)
+  {
+	  if(mq->mq_meta_width>1920 || mq->mq_meta_height>1088)
+		  prop_set_string(mq->mq_prop_vq, "4K");
+	  else
+	  if(mq->mq_meta_width>1280 || mq->mq_meta_height>720)
+		  prop_set_string(mq->mq_prop_vq, "HD+");
+	  else
+	  if(mq->mq_meta_width>1024 || mq->mq_meta_height>576)
+		  prop_set_string(mq->mq_prop_vq, "HD");
+	  else
+		  prop_set_string(mq->mq_prop_vq, "SD");
+  }
+
 }
 
 

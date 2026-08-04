@@ -378,6 +378,11 @@ mq_init(media_queue_t *mq, prop_t *p, hts_mutex_t *mutex, media_pipe_t *mp)
 
   mq->mq_prop_codec       = prop_create(p, "codec");
   mq->mq_prop_too_slow    = prop_create(p, "too_slow");
+
+  mq->mq_prop_vq          = prop_create(p, "user_video_q"); // $self.media.video.user_video_q
+  mq->mq_prop_aq          = prop_create(p, "user_audio_q"); // $self.media.audio.user_audio_q
+
+  mq->mq_prop_bw		  = prop_create(p, "bandwidth");
 }
 
 

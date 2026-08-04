@@ -59,7 +59,10 @@ fontconfig_resolve(int uc, uint8_t style, const char *family,
     return 1;
 
   if(family == NULL)
-    family = "Arial";
+  {
+	  TRACE(TRACE_ERROR, "FT", "Font family = NULL");
+    //family = "Arial";
+  }
 
   pat = FcPatternCreate();
 
@@ -108,8 +111,8 @@ fontconfig_resolve(int uc, uint8_t style, const char *family,
     if(FcPatternGetInteger(fp, FC_SLANT, 0, &ival) == FcResultMatch)
       if(ival > 50)
 	*actualstylep |= TR_STYLE_ITALIC;
-    
-    if(FcPatternGetInteger(fp, FC_WEIGHT, 0, &ival) == FcResultMatch) 
+
+    if(FcPatternGetInteger(fp, FC_WEIGHT, 0, &ival) == FcResultMatch)
       if(ival > 150)
 	*actualstylep |= TR_STYLE_BOLD;
 #endif

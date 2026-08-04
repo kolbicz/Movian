@@ -323,7 +323,7 @@ peer_shutdown(peer_t *p, int next_state, int resched)
     to->to_active_peers--;
     btg.btg_active_peers--;
     if(resched)
-      torrent_attempt_more_peers(to);
+      torrent_attempt_more_peers(to, 0);
   }
 
   if(p->p_connection != NULL) {
@@ -397,7 +397,7 @@ peer_shutdown(peer_t *p, int next_state, int resched)
   case PEER_STATE_DISCONNECTED:
     p->p_fail_time = async_current_time();
     p->p_disconnected++;
-    if(p->p_disconnected == 5)
+    if(p->p_disconnected == 15)
       goto destroy;
     TAILQ_INSERT_TAIL(&to->to_disconnected_peers, p, p_queue_link);
     break;
@@ -722,14 +722,16 @@ recv_piece(peer_t *p, const uint8_t *buf, size_t len)
     p->p_block_delay = delay;
     peer_cancel_orphaned_requests(p, tr);
   }
-  p->p_maxq = 10;
+  p->p_maxq = btg.btg_peer_requests;
 
-  assert(tr->tr_qdepth < 10);
+/*
+  assert(tr->tr_qdepth < 20);
   if(p->p_bd[tr->tr_qdepth]) {
     p->p_bd[tr->tr_qdepth] = (p->p_bd[tr->tr_qdepth] * 7 + delay) / 8;
   } else {
     p->p_bd[tr->tr_qdepth] = delay;
   }
+*/
 
   if(tr->tr_block != NULL) {
     LIST_REMOVE(tr, tr_block_link);
@@ -996,13 +998,13 @@ peer_connect(peer_t *p)
   to->to_active_peers++;
   btg.btg_active_peers++;
 
-  char name[64];
+  char name[128];
   snprintf(name, sizeof(name), "BT Peer %s", net_addr_str(&p->p_addr));
 
   p->p_connection = asyncio_connect(name, &p->p_addr,
 				    peer_connect_cb,
 				    peer_read_cb,
-				    p, 5000, NULL, NULL);
+				    p, 5000, NULL, NULL); // 5000
 }
 
 
@@ -1067,7 +1069,7 @@ recv_message(peer_t *p, htsbuf_queue_t *q)
                p->p_am_interested ? "" : "not ");
     p->p_peer_choking = 0;
     LIST_INSERT_HEAD(&p->p_torrent->to_unchoked_peers, p, p_unchoked_link);
-    p->p_maxq = 1;
+    p->p_maxq = 3;
     torrent_io_do_requests(p->p_torrent);
     break;
 
@@ -1391,7 +1393,7 @@ peer_add(torrent_t *to, const net_addr_t *na)
     TAILQ_INSERT_TAIL(&to->to_inactive_peers, p, p_queue_link);
     return;
   }
-  
+
   peer_connect(p);
 }
 
@@ -1540,7 +1542,10 @@ peer_send_extension_handshake(peer_t *p)
   htsmsg_add_u32(m, "ut_metadata", EXTENSION_MSGID_METADATA);
   htsmsg_add_msg(handshake, "m", m);
 
-  snprintf(version, sizeof(version), APPNAMEUSER" %s", appversion);
+  //snprintf(version, sizeof(version), APPNAMEUSER" %s", appversion);
+  //snprintf(version, sizeof(version), "Azureus 2.5.0.4");
+  snprintf(version, sizeof(version), "qBittorrent/5.0.2");
+
   htsmsg_add_str(handshake, "v", version);
   peer_send_extension_msg(p, handshake, EXTENSION_MSGID_HANDSHAKE);
 }

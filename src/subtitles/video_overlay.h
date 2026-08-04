@@ -29,7 +29,7 @@ typedef struct video_overlay {
 
   TAILQ_ENTRY(video_overlay) vo_link;
 
-  enum { 
+  enum {
     VO_BITMAP,
     VO_TEXT,
     VO_FLUSH,
@@ -38,6 +38,7 @@ typedef struct video_overlay {
 
   int64_t vo_start;
   int64_t vo_stop;
+  int64_t vo_start_next;
 
   struct pixmap *vo_pixmap;
   uint32_t *vo_text;
@@ -80,7 +81,7 @@ video_overlay_t *video_overlay_dup(video_overlay_t *vo);
 
 video_overlay_t *video_overlay_render_cleartext(const char *txt, int64_t start,
 						int64_t stop, int tags,
-						int fontdomain);
+						int fontdomain, media_pipe_t *mp);
 
 int calculate_subtitle_duration(int txt_len);
 

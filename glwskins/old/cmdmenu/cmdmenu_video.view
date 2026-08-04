@@ -16,7 +16,7 @@ widget(deck, {
     ITEM(_("Audio tracks"), {
       $clone.menuPage = 1;
     }, "dataroot://res/svg/Music.svg");
-    
+
     ITEM(_("Subtitle tracks"), {
       $clone.menuPage = 2;
     }, "dataroot://res/svg/Script.svg");
@@ -164,7 +164,7 @@ widget(deck, {
 */
       });
     });
-    
+
   );
 
 
@@ -241,34 +241,34 @@ widget(deck, {
 	  scrollThreshold: $ui.width / 10;
 //	  alphaFallOff: 0.1;
 //	  blurFallOff: 0.1;
-	  
+
 	  $self.focused <- focusedChild();
-	  
+
 	  cloner($core.media.current.seekindex.positions, container_z, {
 	    width: $ui.size * 14.2222;
-	    
+
 	    focusable: true;
 	    onEvent(activate, {
 	      $core.media.current.currenttime = $self.timestamp;
 	    });
-	    
+
 	  widget(backdrop, {
 	    alpha: select($clone.ready, 0, 1);
 	    align: bottom;
-	  
+
 	    source: "skin://graphics/white.png";
 	    color: 0;
 	  });
-	    
+
 	    widget(image, {
 	      align: bottom;
-	      
+
 	      $clone.ready = isReady();
 	      source: $self.image;
 	      color: isFocused() + 0.6;
 	    });
-	    
-	    
+
+
 	    widget(label, {
 	      align: bottom;
 	      shadow: true;
@@ -276,14 +276,14 @@ widget(deck, {
 	      caption: value2duration($self.timestamp, true);
 	      color: isFocused() + 0.6;
 	    });
-	    
+
 	    widget(backdrop, {
 	      source: "skin://graphics/border16o.png";
 	      border: 8;
 	      borderOnly: true;
 	      color: isFocused();
 	    });
-	    
+
 	    widget(container_y, {
 	      space(1);
 	      widget(throbber, {
@@ -327,7 +327,7 @@ widget(deck, {
           filterConstraintX: true;
           alpha: iir($parent.media.currenttime > $self.timestamp &&
 		     $parent.media.currenttime < $self.end, 8);
-	  
+
           filterConstraintY: true;
           align: center;
           widget(container_z, {
@@ -336,7 +336,7 @@ widget(deck, {
 	      height: 8;
 	      source: "skin://playdecks/duration-bar-bg.png";
 	    });
-	    
+
 	    widget(clip, {
 	      clipping: [-1, 0, 1 - (($parent.media.currenttime - $self.timestamp) / ($self.end - $self.timestamp)), 0];
 	      widget(backdrop, {
@@ -347,7 +347,7 @@ widget(deck, {
 	    });
           });
 	});
-	
+
 
 	widget(label, {
 	  filterConstraintX: true;

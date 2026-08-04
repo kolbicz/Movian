@@ -171,7 +171,7 @@ typedef struct fa_protocol {
    */
   int (*fap_normalize)(struct fa_protocol *fap, const char *url,
 		       char *dst, size_t dstlen);
-  
+
   /**
    * Extract the last component of the URL (ie. the filename)
    */
@@ -222,7 +222,7 @@ typedef struct fa_protocol {
    *
    * deadline is delta time un µs
    */
-  void (*fap_deadline)(fa_handle_t *fh, int deadline);
+  void (*fap_deadline)(fa_handle_t *fh, int deadline, int probe);
 
   /**
    * Return file system info

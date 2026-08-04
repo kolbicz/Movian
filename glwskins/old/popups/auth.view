@@ -8,10 +8,10 @@ widget(container_x, {
 
   widget(container_y, {
     align: center;
-    
+
     popupGroup(
       filterConstraintX: true;
-      
+
       widget(container_y, {
 	spacing: 4;
 	widget(container_x, {
@@ -37,7 +37,7 @@ widget(container_x, {
 	  hidden: $self.disableUsername;
 	  caption: _("Username");
 	});
-      
+
 	popupInputField(
 	  hidden: $self.disableUsername;
  	  widget(text, {
@@ -55,7 +55,7 @@ widget(container_x, {
 	  hidden: $self.disablePassword;
 	  caption: _("Password");
 	});
-      
+
 	popupInputField(
 	  hidden: $self.disablePassword;
 	  widget(text, {
@@ -74,7 +74,7 @@ widget(container_x, {
           hidden: $self.disableDomain;
 	  caption: _("Domain");
 	});
-      
+
 	popupInputField(
           hidden: $self.disableDomain;
 	  widget(text, {

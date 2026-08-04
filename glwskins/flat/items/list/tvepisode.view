@@ -2,72 +2,73 @@
 
 
 widget(container_z, {
-  height: 3em;
+	height: 3em;
 
-  ListItemBevel();
-  ListItemHighlight();
+	ListItemBevel();
+	ListItemHighlight();
 
-  onEvent(activate, navOpen($self.url, void, $self, $parent.model, void, $parent.url));
+	onEvent(activate, navOpen($self.url, void, $self, $parent.model, void, $parent.url));
 
-  onEvent(itemMenu, eventWithProp(videoInfo, $self));
-  focusable: true;
+	onEvent(itemMenu, eventWithProp(videoInfo, $self));
+	focusable: select($self.metadata.autofocus, 1.5, 1.0);
 
-  widget(container_x, {
-    style: "ListItem";
+	widget(container_x, {
+	style: "ListItem";
 
-    widget(image, {
-      style: "ListItemIcon";
-//      source: "skin://icons/ic_movie_48px.svg";
-      source: $self.metadata.icon ?? ($self.url + "#cover");
-    });
+	widget(image, {
+	style: "ListItemIcon";
+//	source: "skin://icons/ic_movie_48px.svg";
+	source: $self.metadata.icon ?? ($self.url + "#cover");
+	cornerRadius: 0.3em;
+	});
 
-    widget(container_y, {
-      widget(dummy, {
-        height: 1em;
-      });
+	widget(container_y, {
+	widget(dummy, {
+	height: 1em;
+	});
 
-      widget(container_x, {
-        filterConstraintX: true;
+	widget(container_x, {
+	filterConstraintX: true;
 
-        widget(label, {
-          caption: fmt(_("Episode %d - %s"),
-                       $self.metadata.episode.number,
-                       $self.metadata.episode.title);
-          filterConstraintX: true;
-          ellipsize: true;
-        });
+	widget(label, {
+	caption: fmt(_("Episode %d - %s"),
+	 $self.metadata.episode.number,
+	 $self.metadata.episode.title);
+	filterConstraintX: true;
+	ellipsize: true;
+	});
 
-        widget(label, {
-          autohide: true;
-          margin: [1em, 0, 0, 0];
-          caption: value2duration($self.metadata.duration);
-        });
+	widget(label, {
+	autohide: true;
+	margin: [1em, 0, 0, 0];
+	caption: value2duration($self.metadata.duration);
+	});
 
-        widget(icon, {
-          alpha: $self.playcount > 0;
-          margin: [0.3em, 0, 0, 0];
-          source: "skin://icons/ic_check_48px.svg";
-        });
+	widget(icon, {
+	alpha: $self.playcount > 0;
+	margin: [0.3em, 0, 0, 0];
+	source: "skin://icons/ic_check_48px.svg";
+	});
 
-      });
+	});
 
-      widget(container_y, {
-        alpha: select($self.restartpos > 0, 1, 0);
-        height: 1em;
-        align: center;
-        widget(container_z, {
-          height: 3;
-          widget(quad, {
-            color: 0;
-            alpha: 0.7;
-          });
-          widget(bar, {
-            color1: 1;
-            color2: 1;
-            fill: $self.restartpos / $self.metadata.duration;
-          });
-        });
-      });
-    });
-  });
+	widget(container_y, {
+	alpha: select($self.restartpos > 0, 1, 0);
+	height: 1em;
+	align: center;
+	widget(container_z, {
+	height: 3;
+	widget(quad, {
+	color: 0;
+	alpha: 0.7;
+	});
+	widget(bar, {
+	color1: 1;
+	color2: 1;
+	fill: $self.restartpos / $self.metadata.duration;
+	});
+	});
+	});
+	});
+	});
 });

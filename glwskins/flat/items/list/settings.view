@@ -16,6 +16,7 @@ widget(container_z, {
         translate($self.subtype,
 		              "skin://icons/ic_settings_48px.svg",
 		  "about",    "skin://icons/ic_help_48px.svg",
+		  "dev",	  "skin://icons/ic_apps_48px.svg",
 		  "sound",    "skin://icons/ic_speaker_48px.svg",
 		  "audio",    "skin://icons/ic_speaker_48px.svg",
 		  "video",    "skin://icons/ic_videocam_48px.svg",
@@ -23,11 +24,12 @@ widget(container_z, {
 		  "display",  "skin://icons/ic_tv_48px.svg",
 		  "search",   "skin://icons/ic_search_48px.svg",
 		  "subtitle", "skin://icons/ic_subtitles_48px.svg",
-                  "i18n",     "skin://icons/ic_language_48px.svg",
-                  "metadata", "skin://icons/ic_description_48px.svg",
-                  "network",  "skin://icons/ic_settings_ethernet_48px.svg",
+          "i18n",     "skin://icons/ic_language_48px.svg",
+          "metadata", "skin://icons/ic_description_48px.svg",
+          "network",  "skin://icons/ic_settings_ethernet_48px.svg",
 		  "movian",   "skin://icons/movian.svg",
-                  "plugin",   "dataroot://res/svg/Plugin.svg"
+		  "bittorrent", "skin://icons/bittorrent.svg",
+          "plugin",   "dataroot://res/svg/Plugin.svg"
 	         );
       style: "ListItemIcon";
     });

@@ -74,7 +74,7 @@ font_find(const char *title)
       return f;
 
   f = calloc(1, sizeof(font_t));
-  
+
   f->f_title = strdup(title);
   f->f_status = prop_create_root(NULL);
   f->f_prop_installed = prop_create(f->f_status, "installed");
@@ -131,7 +131,7 @@ font_install(font_t *f, const char *url)
 
   f->f_installed_path = rstr_alloc(path);
   prop_set_int(f->f_prop_installed, 1);
-  TRACE(TRACE_DEBUG, "fontstash", "Wrote %s to %s", f->f_title, path);
+  TRACE(TRACE_DEBUG, "fontstash", "Installed %s in %s", f->f_title, path);
   font_make_installed(f);
 }
 
@@ -150,7 +150,7 @@ use_font(font_t *f, const char *url)
   rstr_t *subs = _("Subtitles");
 
   snprintf(tmp, sizeof(tmp), rstr_get(fmt), f->f_title);
-  
+
   msgs[0] = rstr_get(ui);
   msgs[1] = rstr_get(cond);
   msgs[2] = rstr_get(subs);
@@ -166,7 +166,7 @@ use_font(font_t *f, const char *url)
     return;
 
   font_install(f, url);
-  
+
   switch(r) {
   case 1:
     clear_font_prop(0);
@@ -192,7 +192,7 @@ use_font(font_t *f, const char *url)
     break;
   }
 
-  htsmsg_store_save(store, "fontstash");
+  htsmsg_store_save(store, "fontstash_m7");
 }
 
 
@@ -240,7 +240,7 @@ static void
 font_make_installed(font_t *f)
 {
   prop_t *p = f->f_prop_model = prop_create_root(NULL);
-  
+
   prop_set(p, "type", PROP_SET_STRING, "font");
   prop_setv(p, "metadata", "title", NULL, PROP_SET_STRING, f->f_title);
   prop_set(p, "url", PROP_SET_RSTRING, f->f_installed_path);
@@ -299,7 +299,7 @@ reset_font(int id)
     font_subs[0] = 0;
     break;
   }
-  htsmsg_store_save(store, "fontstash");
+  htsmsg_store_save(store, "fontstash_m7");
   hts_mutex_unlock(&font_mutex);
 }
 
@@ -360,7 +360,7 @@ fontstash_init(void)
 
   prop_concat_add_source(pc, top, makesep(_p("Defaults")));
 
-  if((store = htsmsg_store_load("fontstash")) == NULL)
+  if((store = htsmsg_store_load("fontstash_m7")) == NULL)
     store = htsmsg_create_map();
 
   hts_mutex_init(&font_mutex);
@@ -380,37 +380,79 @@ fontstash_init(void)
 
   fa_dir_t *fd = fa_scandir(path, NULL, 0);
 
-  if(fd == NULL)
-    return;
-
   const char *mainfont = htsmsg_get_str(store, "mainfont");
   const char *condfont = htsmsg_get_str(store, "condfont");
   const char *subfont  = htsmsg_get_str(store, "subfont");
 
   fa_dir_entry_t *fde;
-  RB_FOREACH(fde, &fd->fd_entries, fde_link) {
-    font_t *f = font_find(rstr_get(fde->fde_filename));
-    f->f_installed_path = rstr_dup(fde->fde_url);
-    prop_set_int(f->f_prop_installed, 1);
 
-    if(mainfont && !strcmp(f->f_title, mainfont)) {
-      prop_set_rstring(font_prop_main, f->f_installed_path);
-      prop_set_int(f->f_prop_mainfont, 1);
-    }
+  if(fd != NULL)
+  {
+	  RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+		font_t *f = font_find(rstr_get(fde->fde_filename));
+		f->f_installed_path = rstr_dup(fde->fde_url);
+		prop_set_int(f->f_prop_installed, 1);
 
-    if(condfont && !strcmp(f->f_title, condfont)) {
-      prop_set_rstring(font_prop_cond, f->f_installed_path);
-      prop_set_int(f->f_prop_condfont, 1);
-    }
+		if(mainfont && !strcmp(f->f_title, mainfont)) {
+		  prop_set_rstring(font_prop_main, f->f_installed_path);
+		  prop_set_int(f->f_prop_mainfont, 1);
+		}
 
-    if(subfont && !strcmp(f->f_title, subfont)) {
-      prop_set_rstring(font_prop_subs, f->f_installed_path);
-      snprintf(font_subs, sizeof(font_subs), "%s",
-	       rstr_get(f->f_installed_path));
-      prop_set_int(f->f_prop_subfont, 1);
-    }
-    font_make_installed(f);
+		if(condfont && !strcmp(f->f_title, condfont)) {
+		  prop_set_rstring(font_prop_cond, f->f_installed_path);
+		  prop_set_int(f->f_prop_condfont, 1);
+		}
+
+		if(subfont && !strcmp(f->f_title, subfont)) {
+		  prop_set_rstring(font_prop_subs, f->f_installed_path);
+		  snprintf(font_subs, sizeof(font_subs), "%s",
+			   rstr_get(f->f_installed_path));
+		  prop_set_int(f->f_prop_subfont, 1);
+		}
+		font_make_installed(f);
+	  }
+
+      fa_dir_free(fd);
   }
+
+	snprintf(path, sizeof(path), "%s/res/fonts/user",
+	   app_dataroot());
+	fd = fa_scandir(path, NULL, 0);
+
+    if(fd == NULL)
+      return;
+
+  RB_FOREACH(fde, &fd->fd_entries, fde_link) {
+	font_t *f = font_find(rstr_get(fde->fde_filename));
+	f->f_installed_path = rstr_dup(fde->fde_url);
+	prop_set_int(f->f_prop_installed, 1);
+
+	if(mainfont && !strcmp(f->f_title, mainfont)) {
+	  prop_set_rstring(font_prop_main, f->f_installed_path);
+	  prop_set_int(f->f_prop_mainfont, 1);
+	}
+
+	if(condfont && !strcmp(f->f_title, condfont)) {
+	  prop_set_rstring(font_prop_cond, f->f_installed_path);
+	  prop_set_int(f->f_prop_condfont, 1);
+	}
+
+	if(subfont && !strcmp(f->f_title, subfont)) {
+	  prop_set_rstring(font_prop_subs, f->f_installed_path);
+	  snprintf(font_subs, sizeof(font_subs), "%s",
+		   rstr_get(f->f_installed_path));
+	  prop_set_int(f->f_prop_subfont, 1);
+	}
+
+	if(!subfont && !strcmp(f->f_title, (char*)"Arial.ttf")) {
+	  prop_set_rstring(font_prop_subs, f->f_installed_path);
+	  snprintf(font_subs, sizeof(font_subs), "%s",
+		   rstr_get(f->f_installed_path));
+	  prop_set_int(f->f_prop_subfont, 1);
+	}
+	font_make_installed(f);
+  }
+
   fa_dir_free(fd);
 }
 

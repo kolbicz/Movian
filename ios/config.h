@@ -4,7 +4,7 @@
 #define APPNAMEUSER "Movian"
 #define SHOWTIME_DEFAULT_UI "glw"
 #define SHOWTIME_DEFAULT_LOGTARGET ""
-#define PLUGINREPO "https://movian.tv/api/plugins/plugins-v1.json?p=0"
+#define PLUGINREPO "https://repo.movian.eu/plugins-v1.json"
 /* Darwin is default 64 bit */
 #define off64_t off_t
 #define lseek64 lseek
@@ -128,5 +128,5 @@
 #define ENABLE_NETLOG 1
 #define CONFIG_GUMBO 1
 #define ENABLE_GUMBO 1
-#define ENABLE_PLUGINS 0
+#define ENABLE_PLUGINS 1
 #define ENABLE_BOOKMARKS 1

@@ -49,7 +49,7 @@
 
 
 widget(container_y, {
-  
+
   padding: [$ui.size/2,$ui.size,$ui.size/2,0];
 
 
@@ -73,7 +73,7 @@ widget(container_y, {
       outline: true;
     });
   });
-    
+
   widget(container_x, {
     spacing: $ui.size;
     widget(label, {
@@ -244,11 +244,11 @@ widget(container_y, {
 		 translate($core.upgrade.track, $core.upgrade.track,
 			   "testing", _("Testing"),
 			   "stable", _("Stable")));
-			   
+
     shadow: true;
     outline: true;
     align: center;
-    
+
   });
 
   VerticalSeparator();
@@ -290,7 +290,7 @@ widget(container_y, {
       width: 4;
       focusable: canScroll() * 0.01;
       alpha: iir(canScroll(), 16);
-      
+
       widget(quad, {
 	alpha: iir(0.3 + 0.3 * (isFocused() || isPressed()), 4) + isHovered();
       });

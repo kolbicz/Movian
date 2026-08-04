@@ -38,6 +38,8 @@ static asyncio_fd_t *tracker_udp_fd;
 static void
 tracker_udp_send_connect(tracker_t *t)
 {
+  if(btg.btg_tcpudp == 1) return; // TCP ONLY
+
   static uint32_t idgen;
 
   idgen++;
@@ -119,6 +121,8 @@ tracker_udp_timer_cb(void *aux)
 static void
 tracker_udp_torrent_announce(tracker_torrent_t *tt, int event)
 {
+  if(btg.btg_tcpudp == 1) return; // TCP ONLY
+
   uint8_t out[98] = {0};
   tracker_t *t = tt->tt_tracker;
   const torrent_t *to = tt->tt_torrent;
@@ -273,11 +277,9 @@ tracker_udp_handle_error(tracker_t *tr, const uint8_t *data, int size)
 
   size -= 8;
   data += 8;
-  rstr_t *errmsg = rstr_allocl((const char *)data, size);
-  tracker_trace(tr, "Got error for \"%s\" (%s) reconnecting",
-                to->to_title,
-                rstr_get(errmsg));
-  rstr_release(errmsg);
+  //rstr_t *errmsg = rstr_allocl((const char *)data, size);
+  //tracker_trace(tr, "Got error for (%s) (%s) reconnecting", to->to_title, rstr_get(errmsg));
+  //rstr_release(errmsg);
 
   tracker_udp_send_connect(tr);
 }

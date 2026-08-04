@@ -42,6 +42,32 @@ set_torrent_cache_path(void *opaque, const char *str)
 
 
 static void
+set_torrent_max_connections(void *opaque, int v)
+{
+  btg.btg_max_connections = v;
+  btg.btg_max_peers_global = v;
+  btg.btg_max_peers_torrent = v * 4 / 5;
+}
+
+static void
+set_torrent_max_connections_peer(void *opaque, int v)
+{
+  btg.btg_peer_requests = v;
+}
+
+static void
+set_torrent_max_mb_active(void *opaque, int v)
+{
+  btg.btg_max_mb_active = v*1024*1024;
+}
+
+static void
+set_torrent_max_mb_cache_per_torrent(void *opaque, int v)
+{
+  btg.btg_max_mb_cache_per_torrent = v*1024*1024;
+}
+
+static void
 set_torrent_free_percentage(void *opaque, int v)
 {
   btg.btg_free_space_percentage = v;
@@ -60,12 +86,12 @@ set_torrent_upload_speed(void *opaque, int v)
 void
 torrent_settings_init(void)
 {
-  prop_t *dir = setting_get_dir("general:filebrowse");
+  prop_t *dir = setting_get_dir("settings"); // general:filebrowse
   prop_t *s = settings_add_dir(dir, _p("BitTorrent"),
-                               NULL, NULL, NULL, "settings:bittorrent");
+                               "bittorrent", NULL, NULL, "settings:bittorrent", "10");
 
   char defpath[1024];
-  int freespace = 10;
+  int freespace = 66;
 
 #ifdef STOS
   freespace = 75;
@@ -73,6 +99,7 @@ torrent_settings_init(void)
 
   snprintf(defpath, sizeof(defpath), "%s/bittorrentcache", gconf.cache_path);
 
+/*
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Enable bittorrent")),
                  SETTING_MUTEX(&bittorrent_mutex),
@@ -80,15 +107,17 @@ torrent_settings_init(void)
                  SETTING_VALUE(1),
                  SETTING_STORE("bittorrent", "enable"),
                  NULL);
+*/
 
   setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Max upload speed")),
                  SETTING_MUTEX(&bittorrent_mutex),
                  SETTING_CALLBACK(set_torrent_upload_speed, NULL),
-                 SETTING_VALUE(5),
-                 SETTING_RANGE(0, 100),
+                 SETTING_VALUE(20),
+				 SETTING_STEP(5),
+                 SETTING_RANGE(5, 500),
                  SETTING_UNIT_CSTR("Mbit/s"),
-                 SETTING_STORE("bittorrent", "uploadspeed"),
+                 SETTING_STORE("bittorrent", "uploadspeed_104"),
                  NULL);
 
   setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
@@ -96,10 +125,87 @@ torrent_settings_init(void)
                  SETTING_MUTEX(&bittorrent_mutex),
                  SETTING_CALLBACK(set_torrent_free_percentage, NULL),
                  SETTING_VALUE(freespace),
-                 SETTING_RANGE(1, 90),
+                 SETTING_RANGE(0, 95),
                  SETTING_UNIT_CSTR("%"),
-                 SETTING_STORE("bittorrent", "freepercentage"),
+                 SETTING_STORE("bittorrent", "freepercentage_104"),
                  NULL);
+
+  setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Max number of connections")),
+                 SETTING_MUTEX(&bittorrent_mutex),
+                 SETTING_CALLBACK(set_torrent_max_connections, NULL),
+                 SETTING_VALUE(1000),
+				 SETTING_STEP(100),
+                 SETTING_RANGE(100, 2000),
+                 SETTING_UNIT_CSTR(" peers"),
+                 SETTING_STORE("bittorrent", "maxconnections_102"),
+                 NULL);
+
+  setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Max concurrent requests per peer")),
+                 SETTING_MUTEX(&bittorrent_mutex),
+                 SETTING_CALLBACK(set_torrent_max_connections_peer, NULL),
+                 SETTING_VALUE(15),
+				 SETTING_STEP(1),
+                 SETTING_RANGE(5, 50),
+                 //SETTING_UNIT_CSTR(" peers"),
+                 SETTING_STORE("bittorrent", "maxconnectionspeer_110"),
+                 NULL);
+
+  setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Max memory for active transfers")),
+                 SETTING_MUTEX(&bittorrent_mutex),
+                 SETTING_CALLBACK(set_torrent_max_mb_active, NULL),
+                 SETTING_VALUE(112),
+				 SETTING_STEP(4),
+                 SETTING_RANGE(96, 384),
+                 SETTING_UNIT_CSTR(" MB"),
+                 SETTING_STORE("bittorrent", "maxactivemb_115"),
+                 NULL);
+
+  setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Max cache size per torrent")),
+                 SETTING_MUTEX(&bittorrent_mutex),
+                 SETTING_CALLBACK(set_torrent_max_mb_cache_per_torrent, NULL),
+                 SETTING_VALUE(512),
+				 SETTING_STEP(16),
+                 SETTING_RANGE(160, 4000),
+                 SETTING_UNIT_CSTR(" MB"),
+                 SETTING_STORE("bittorrent", "maxcachepertorrent_107"),
+                 NULL);
+
+
+  setting_create(SETTING_MULTIOPT, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Inject additional trackers")),
+                 SETTING_MUTEX(&bittorrent_mutex),
+                 SETTING_WRITE_INT(&btg.btg_add_trackers),
+                 SETTING_VALUE("1"),
+                 SETTING_OPTION("0",  _p("Off")),
+				 SETTING_OPTION("1",  _p("Best")),
+				 SETTING_OPTION("2",  _p("Best (IP)")),
+				 SETTING_OPTION("3",  _p("All")),
+				 SETTING_OPTION("4",  _p("All (IP)")),
+                 SETTING_STORE("bittorrent", "injecttrackers_120"),
+                 NULL);
+
+  setting_create(SETTING_MULTIOPT, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Tracker protocols")),
+				 SETTING_MUTEX(&bittorrent_mutex),
+				 SETTING_VALUE("0"),
+                 SETTING_STORE("bittorrent", "tcpudp"),
+                 SETTING_WRITE_INT(&btg.btg_tcpudp),
+                 SETTING_OPTION_CSTR("0",  "TCP & UDP"),
+                 SETTING_OPTION_CSTR("1",  "TCP"),
+                 SETTING_OPTION_CSTR("2",  "UDP"),
+                 NULL);
+
+  settings_create_separator(s, _p("Status"));
+
+  btg.btg_torrent_status = prop_create_root(NULL);
+  settings_create_info(s, NULL, btg.btg_torrent_status);
+
+  btg.btg_disk_status = prop_create_root(NULL);
+  settings_create_info(s, NULL, btg.btg_disk_status);
 
   setting_create(SETTING_STRING, s, SETTINGS_INITIAL_UPDATE | SETTINGS_DIR,
                  SETTING_TITLE(_p("Torrent cache path")),
@@ -116,13 +222,6 @@ torrent_settings_init(void)
                  NULL);
 
 
-  settings_create_separator(s, _p("Status"));
-
-  btg.btg_torrent_status = prop_create_root(NULL);
-  settings_create_info(s, NULL, btg.btg_torrent_status);
-
-  btg.btg_disk_status = prop_create_root(NULL);
-  settings_create_info(s, NULL, btg.btg_disk_status);
 
   allow_update = 1;
   torrent_diskio_scan(0);

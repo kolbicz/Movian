@@ -27,6 +27,7 @@
 #include "sub.h"
 #include "subtitles/subtitles.h"
 
+
 void
 video_overlay_enqueue(media_pipe_t *mp, video_overlay_t *vo)
 {
@@ -56,6 +57,8 @@ video_subtitles_lavc(media_pipe_t *mp, media_buf_t *mb,
   vo = calloc(1, sizeof(video_overlay_t));
   vo->vo_type = VO_TIMED_FLUSH;
   vo->vo_start = mb->mb_pts;
+  vo->vo_start_next = 0;
+
   video_overlay_enqueue(mp, vo);
 
   if(avcodec_decode_subtitle2(ctx, &sub, &got_sub, &avpkt) < 1 || !got_sub)
@@ -128,13 +131,42 @@ video_subtitles_lavc(media_pipe_t *mp, media_buf_t *mb,
 
 extern char font_subs[];
 
+static int
+get_txt_layout(const char *txt, int olen)
+{
+  if(olen<4) return 0;
+  int i=0;
+  for(i=0; i<olen-4; i++)
+  {
+	if(txt[i] != '\\') continue;
+
+    if(!(txt[i+1] == 'a' && txt[i+2] == 'n')) continue;
+
+	if(txt[i+3] == '1') return LAYOUT_ALIGN_BOTTOM_LEFT;
+	if(txt[i+3] == '2') return LAYOUT_ALIGN_BOTTOM;
+	if(txt[i+3] == '3') return LAYOUT_ALIGN_BOTTOM_RIGHT;
+
+	if(txt[i+3] == '4') return LAYOUT_ALIGN_LEFT;
+	if(txt[i+3] == '5') return LAYOUT_ALIGN_CENTER;
+	if(txt[i+3] == '6') return LAYOUT_ALIGN_RIGHT;
+
+	if(txt[i+3] == '7') return LAYOUT_ALIGN_TOP_LEFT;
+	if(txt[i+3] == '8') return LAYOUT_ALIGN_TOP;
+	if(txt[i+3] == '9') return LAYOUT_ALIGN_TOP_RIGHT;
+  }
+
+  return 0;
+}
+
 /**
  *
  */
 video_overlay_t *
 video_overlay_render_cleartext(const char *txt, int64_t start, int64_t stop,
-			       int tags, int fontdomain)
+			       int tags, int fontdomain, media_pipe_t *mp)
 {
+  //static int64_t pstart = -1;
+  static int64_t pstop = -1;
   uint32_t *uc;
   int len, txt_len;
   video_overlay_t *vo;
@@ -145,20 +177,21 @@ video_overlay_render_cleartext(const char *txt, int64_t start, int64_t stop,
     vo = calloc(1, sizeof(video_overlay_t));
   } else {
 
-    uint32_t pfx[6];
+    uint32_t pfx[7];
 
     pfx[0] = TR_CODE_COLOR | subtitle_settings.color;
     pfx[1] = TR_CODE_SHADOW | subtitle_settings.shadow_displacement;
     pfx[2] = TR_CODE_SHADOW_COLOR | subtitle_settings.shadow_color;
     pfx[3] = TR_CODE_OUTLINE | subtitle_settings.outline_size;
     pfx[4] = TR_CODE_OUTLINE_COLOR | subtitle_settings.outline_color;
-    int pfxlen = 5;
+    pfx[5] = TR_CODE_BBOX | subtitle_settings.bounding_box;
+    int pfxlen = 6;
 
     if(font_subs[0])
       pfx[pfxlen++] = TR_CODE_FONT_FAMILY |
 	freetype_family_id(font_subs, fontdomain);
 
-    uc = text_parse(txt, &len, tags, pfx, pfxlen, fontdomain);
+    uc = text_parse_subtitles(txt, &len, tags, pfx, pfxlen, fontdomain);
     if(uc == NULL)
       return NULL;
 
@@ -167,6 +200,32 @@ video_overlay_render_cleartext(const char *txt, int64_t start, int64_t stop,
     vo->vo_text = uc;
     vo->vo_text_length = len;
     vo->vo_padding_left = -1;  // auto padding
+
+	if(!subtitle_settings.style_override)
+	{
+		vo->vo_alignment = get_txt_layout(txt, txt_len);
+
+		switch(vo->vo_alignment)
+		{
+			/*case LAYOUT_ALIGN_LEFT:
+			case LAYOUT_ALIGN_CENTER:
+			case LAYOUT_ALIGN_RIGHT:
+				vo->vo_padding_top    = (subtitle_settings.vdisplace) + 200;
+				break;
+			*/
+
+			case LAYOUT_ALIGN_TOP:
+			case LAYOUT_ALIGN_TOP_LEFT:
+			case LAYOUT_ALIGN_TOP_RIGHT:
+				//vo->vo_padding_top    = 53;
+				vo->vo_padding_left   = -2; //glw_video_overlay.c @ 834
+				break;
+
+			default:
+				break;
+		}
+
+	}
   }
 
   if(stop == PTS_UNSET) {
@@ -174,9 +233,34 @@ video_overlay_render_cleartext(const char *txt, int64_t start, int64_t stop,
     vo->vo_stop_estimated = 1;
   }
 
-  vo->vo_start = start;
-  vo->vo_stop = stop;
-  return vo;
+	if(mp != NULL)
+	{
+		if((stop - start) < 3000000) stop = start + 3000000;
+		if((stop - start) > 14000000) stop = start + 14000000;
+		if((stop - start) < (txt_len*82000)) stop = start + (txt_len*82000) + 410000;
+
+		if(pstop > -1 && start - pstop < 100000 && start > 100000)
+		{
+			video_overlay_t *vo2;
+			vo2 = calloc(1, sizeof(video_overlay_t));
+			vo2->vo_type = VO_TIMED_FLUSH;
+			vo2->vo_start = start - 100000;
+			video_overlay_enqueue(mp, vo2);
+			//TRACE(TRACE_DEBUG, "Subtitles", "FLSH: %lld %lld", pstop, start);
+		}
+	}
+
+	vo->vo_start = start;
+	vo->vo_stop = stop;
+	vo->vo_start_next = 0;
+
+	//TRACE(TRACE_INFO, "Subtitles", "PREV: %lld %lld", pstart, pstop);
+	//TRACE(TRACE_INFO, "Subtitles", "NOW : %lld %lld", vo->vo_start, vo->vo_stop);
+
+	//pstart = start;
+	pstop = stop;
+
+	return vo;
 }
 
 /**
@@ -186,7 +270,7 @@ video_overlay_render_cleartext(const char *txt, int64_t start, int64_t stop,
 int
 calculate_subtitle_duration(int txt_len)
 {
-  return 2 + (txt_len / 74.0F) * 5; //74 is the maximum amount of characters a subtitler may fit on 2 lines of text.
+  return 3 + (txt_len / 74.0F) * 8; //74 is the maximum amount of characters a subtitler may fit on 2 lines of text.
 }
 
 
@@ -203,16 +287,17 @@ video_overlay_decode(media_pipe_t *mp, media_buf_t *mb)
     int offset = 0;
     char *str;
 
-    if(mb->mb_codecid == AV_CODEC_ID_MOV_TEXT) {
+    if(mb->mb_codecid == AV_CODEC_ID_MOV_TEXT)
+	{
       if(mb->mb_size < 2)
-	return;
+		return;
       offset = 2;
     }
 
     str = malloc(mb->mb_size + 1 - offset);
     memcpy(str, mb->mb_data + offset, mb->mb_size - offset);
     str[mb->mb_size - offset] = 0;
-
+	//TRACE(TRACE_ERROR, "Video", "MB SUBTITLE ID: %i-%s", mb->mb_codecid, str);
     video_overlay_t *vo;
     vo = video_overlay_render_cleartext(str, mb->mb_pts,
 					mb->mb_duration ?
@@ -221,7 +306,7 @@ video_overlay_decode(media_pipe_t *mp, media_buf_t *mb)
                                         TEXT_PARSE_HTML_TAGS |
                                         TEXT_PARSE_HTML_ENTITIES |
                                         TEXT_PARSE_SLOPPY_TAGS,
-					mb->mb_font_context);
+					mb->mb_font_context, mp);
 
     if(vo != NULL)
       video_overlay_enqueue(mp, vo);

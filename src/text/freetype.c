@@ -51,7 +51,7 @@ static FT_Stroker text_stroker;
 static hts_mutex_t text_mutex;
 static int font_domain_tally = 10;
 
-#define GLYPH_HASH_SIZE 128
+#define GLYPH_HASH_SIZE 65536 //128
 #define GLYPH_HASH_MASK (GLYPH_HASH_SIZE-1)
 TAILQ_HEAD(glyph_queue, glyph);
 LIST_HEAD(glyph_list, glyph);
@@ -184,6 +184,9 @@ glyph_destroy(glyph_t *g)
 static void
 face_destroy(face_t *f)
 {
+	//TRACE(TRACE_INFO, "Freetype", "Will NOT unload '%s' [%s] originally from %s",	f->face->family_name, f->face->style_name, f->url);
+	//return;
+
   glyph_t *g;
   while((g = LIST_FIRST(&f->glyphs)) != NULL)
     glyph_destroy(g);
@@ -204,6 +207,8 @@ face_destroy(face_t *f)
 /**
  *
  */
+
+#if 0
 static void
 faces_purge(void)
 {
@@ -215,7 +220,7 @@ faces_purge(void)
       face_destroy(f);
   }
 }
-
+#endif
 
 /**
  *
@@ -402,7 +407,8 @@ face_create_from_uri(const char *path, struct face_list *faces,
   face_t *face;
 
   LIST_FOREACH(face, faces, link) {
-    if(!strcmp(face->url, path) && face->font_domain == font_domain) {
+    if(!strcmp(face->url, path) /*&& face->font_domain == font_domain*/) {
+		//if(face->font_domain != font_domain) TRACE(TRACE_ERROR, "Freetype", "Already loaded font: %s", path);
       return face;
     }
   }
@@ -440,6 +446,8 @@ face_resolve(int uc, uint8_t style, const char *name, int font_domain)
       if(f != NULL && FT_Get_Char_Index(f->face, uc))
 	return f;
     }
+
+#if 0
 
     face_t *best = NULL;
     int best_score = 0; // Higher is better
@@ -500,8 +508,11 @@ face_resolve(int uc, uint8_t style, const char *name, int font_domain)
 
     if(best)
       return best;
+#endif
   }
 
+
+#if 0
 
   LIST_FOREACH(f, &static_faces, link) {
     if(f->style == style && FT_Get_Char_Index(f->face, uc))
@@ -526,6 +537,7 @@ face_resolve(int uc, uint8_t style, const char *name, int font_domain)
   LIST_FOREACH(f, &dynamic_faces, link)
     if(FT_Get_Char_Index(f->face, uc))
       return f;
+#endif
   return NULL;
 }
 
@@ -655,6 +667,7 @@ glyph_get(int uc, int size, uint8_t style, const char *font,
 /**
  *
  */
+#if 0
 static void
 glyph_flush_one(void)
 {
@@ -662,7 +675,7 @@ glyph_flush_one(void)
   assert(g != NULL);
   glyph_destroy(g);
 }
-
+#endif
 
 /**
  *
@@ -717,6 +730,7 @@ typedef struct item {
   int16_t adv_x;
   uint16_t outline;
   uint16_t shadow;
+  uint16_t bbox;
   char set_margin;
 } item_t;
 
@@ -958,6 +972,8 @@ text_render0(const uint32_t *uc, const int len,
   int need_shadow_pass = 0;
   int need_outline_pass = 0;
 
+  int current_bbox = 0;
+
   const char *current_font = default_font;
   int current_domain = default_domain;
   idmap_t *im;
@@ -1129,6 +1145,10 @@ text_render0(const uint32_t *uc, const int len,
       current_outline = 64 * (uc[i] & 0xffff) * scale;
       break;
 
+    case TR_CODE_BBOX ... TR_CODE_BBOX + 0xffff:
+      current_bbox = ((uc[i] & 0xffff)*255) / 100;
+      break;
+
     case TR_CODE_SHADOW_US ... TR_CODE_SHADOW_US + 0xffff:
       current_shadow = (uc[i] & 0xffff);
       break;
@@ -1174,6 +1194,8 @@ text_render0(const uint32_t *uc, const int len,
     items[out].outline = current_outline;
     items[out].outline_color = current_outline_color | current_outline_alpha;
 
+    items[out].bbox = current_bbox;
+
     need_outline_pass |= items[out].outline;
 
     if(current_shadow == -1)
@@ -1196,6 +1218,9 @@ text_render0(const uint32_t *uc, const int len,
   lines = 0;
   siz_x = 0;
   int wrap_margin = 0;
+
+  int bb_height[64];
+  int bb_width[64];
 
   line_t *next;
   for(li = TAILQ_FIRST(&lq); li != NULL ; li = next) {
@@ -1293,6 +1318,16 @@ text_render0(const uint32_t *uc, const int len,
 
     li->width = w;
     siz_x = MAX(w, siz_x);
+
+	if(lines < 64)
+	{
+		w += 512;
+		if(max_width && w > max_width)
+			bb_width[lines] = max_width / 64;
+		else
+			bb_width[lines] = w / 64;
+	}
+
     lines++;
 
   }
@@ -1332,6 +1367,9 @@ text_render0(const uint32_t *uc, const int len,
     bbox.xMax = max_width;
 
   int margin = MAX(-MIN(bbox.xMin, 0), MAX(0, bbox.xMax - siz_x));
+  int need_bbox = 0;
+  int t_lines = 0;
+  int bb_align = TR_ALIGN_CENTER;
 
   TAILQ_FOREACH(li, &lq, link) {
 
@@ -1351,6 +1389,8 @@ text_render0(const uint32_t *uc, const int len,
 	height = MAX(g->size, height);
 	descender = MIN(descender,
 			64 * f->descender * g->size / f->units_per_EM);
+	//if(items[i].shadow>6) { need_bbox = items[i].shadow; items[i].shadow = 3; }
+	need_bbox = items[i].bbox;
 	shadow = MAX(items[i].shadow, shadow);
 	outline = MAX(items[i].outline, outline);
 
@@ -1361,6 +1401,7 @@ text_render0(const uint32_t *uc, const int len,
       li->descender = descender;
       li->shadow = shadow;
       li->outline = outline;
+
 
       if(li == TAILQ_FIRST(&lq))
 	margin = MAX(margin, 2 * li->outline + topspill);
@@ -1385,6 +1426,14 @@ text_render0(const uint32_t *uc, const int len,
     }
 
     target_height += li->height;
+	if(t_lines<64)
+	{
+		bb_height[t_lines] = li->height;
+		t_lines++;
+	}
+
+	bb_align = li->alignment;
+
   }
 
   int origin_y = target_height * 64;
@@ -1424,6 +1473,7 @@ text_render0(const uint32_t *uc, const int len,
 
   if(pm != NULL) {
 
+	/*
     if(flags & TR_RENDER_DEBUG) {
       uint8_t *data = pm->pm_data;
       for(i = 0; i < pm->pm_height; i+=3)
@@ -1435,17 +1485,75 @@ text_render0(const uint32_t *uc, const int len,
         for(y = 0; y < pm->pm_height; y++)
           memset(data + y * pm->pm_linesize + i * l, 0xc0, l);
     }
+	*/
 
-    if(need_shadow_pass) {
+	if(need_bbox)
+	{
+		//TRACE(TRACE_DEBUG, "bbox", "To draw bg for %i lines", t_lines);
+		uint8_t *data = pm->pm_data;
+		uint8_t bb_color = (need_bbox & 0xff);
+		memset(data, 0x00, pm->pm_linesize * pm->pm_height);
+
+		int l = color_output ? 4 : 2;
+
+		if(t_lines > 1)
+		{
+			int bb_total_width = (siz_x + margin * 2 + 128) / 64;
+			int bb_start_y = 4; //margin / 64;
+			int bb_start_x = 0;
+			int bb_size = (pm->pm_linesize * pm->pm_height);
+
+			for(int bb_line = 0; bb_line < t_lines; bb_line++)
+			{
+				switch(bb_align) {
+				case TR_ALIGN_LEFT:
+				case TR_ALIGN_JUSTIFIED:
+				  bb_start_x = 0;
+				  break;
+				case TR_ALIGN_CENTER:
+				  bb_start_x = (bb_total_width - bb_width[bb_line]) / 2;
+				  break;
+				case TR_ALIGN_RIGHT:
+				  bb_start_x = (bb_total_width - bb_width[bb_line]);
+				  break;
+				}
+
+				if(bb_start_x < 0) bb_start_x = 0;
+
+				for(int bx = 0; bx < bb_width[bb_line]; bx++)
+				{
+					for(int by = 0; by < bb_height[bb_line] + 4; by++)
+					{
+						int offset = (by + bb_start_y) * pm->pm_linesize + (bx + bb_start_x)*l + l - 1;
+						if(offset >= 0 && offset < bb_size)
+							data[offset] = (bb_color);
+					}
+				}
+
+				bb_start_y += bb_height[bb_line];
+			}
+		}
+		else
+		{
+			for(int bx = 0; bx < pm->pm_width * l; bx+=l)
+			{
+				for(int by = 0; by < pm->pm_height; by++)
+				{
+					data[by * pm->pm_linesize + bx + l - 1] = (bb_color);
+				}
+			}
+		}
+	}
+
+    if(need_shadow_pass && need_bbox < 65) {
       draw_glyphs(pm, &lq, target_height, siz_x, items, start_x, start_y,
                   origin_y, margin, 0, NULL);
-      pixmap_box_blur(pm, 4, 4);
+	      pixmap_box_blur(pm, 4, 4);
     }
 
     if(need_outline_pass)
       draw_glyphs(pm, &lq, target_height, siz_x, items, start_x, start_y,
                   origin_y, margin, 1, NULL);
-
 
     draw_glyphs(pm, &lq, target_height, siz_x, items, start_x, start_y,
                 origin_y, margin, 2, ti);
@@ -1473,10 +1581,13 @@ text_render(const uint32_t *uc, const int len, int flags, int default_size,
 
   im = text_render0(uc, len, flags, default_size, scale, alignment,
 		    max_width, max_lines, family, context, min_size);
-  while(num_glyphs > 512)
+
+  /*
+  while(num_glyphs > 65500)
     glyph_flush_one();
 
   faces_purge();
+  */
 
   hts_mutex_unlock(&text_mutex);
 
@@ -1503,7 +1614,7 @@ static void
 freetype_init(void)
 {
   int error;
-  char url[512];
+  //char url[512];
 
   error = FT_Init_FreeType(&text_library);
   if(error) {
@@ -1514,11 +1625,16 @@ freetype_init(void)
   TAILQ_INIT(&allglyphs);
   hts_mutex_init(&text_mutex);
 
+/*
   snprintf(url, sizeof(url),
-	   "%s/res/fonts/liberation/LiberationSans-Regular.ttf",
-	   app_dataroot());
+	   //"%s/res/fonts/liberation/LiberationSans-Regular.ttf",
+	   //"%s/res/fonts/user/Arial.ttf",
+	   "%s/res/fonts/RobotoCondensed-Regular.ttf",
 
-  freetype_load_default_font(url, 0);
+	   app_dataroot());
+*/
+  //snprintf(url, sizeof(url), "bundle:///glwskins/flat/fonts/RobotoCondensed-Regular.ttf");
+  //freetype_load_default_font(url, 0);
 
 #ifdef __APPLE__
   freetype_load_default_font("file:///Library/Fonts/Arial Unicode.ttf", 1);
@@ -1572,6 +1688,7 @@ freetype_load_dynamic_font_buf(buf_t *b, int font_domain,
 void
 freetype_unload_font(void *ref)
 {
+	return;
   face_t *f = ref;
   hts_mutex_lock(&text_mutex);
   if(--f->refcount == 0)

@@ -201,7 +201,7 @@ void *fa_open_resolver(const char *url, char *errbuf, size_t errsize,
 void fa_close(void *fh);
 void fa_close_with_park(fa_handle_t *fh, int park);
 int fa_read(void *fh, void *buf, size_t size);
-void fa_deadline(void *fh_, int deadline);
+void fa_deadline(void *fh_, int deadline, int probe);
 int fa_write(void *fh, const void *buf, size_t size);
 
 int64_t fa_seek4(void *fh, int64_t pos, int whence, int lazy);
@@ -218,7 +218,7 @@ int fa_stat_ex(const char *url, struct fa_stat *buf, char *errbuf,
 
 #define fa_stat(a, b, c, d) fa_stat_ex(a, b, c, d, 0)
 
-int fa_findfile(const char *path, const char *file, 
+int fa_findfile(const char *path, const char *file,
 		char *fullpath, size_t fullpathlen);
 void fa_set_read_timeout(void *fh_, int ms);
 
@@ -257,7 +257,7 @@ void fa_sanitize_filename(char *filename);
 
 fa_handle_t *fa_notify_start(const char *url, void *opaque,
                              void (*change)(void *opaque,
-                                            fa_notify_op_t op, 
+                                            fa_notify_op_t op,
                                             const char *filename,
                                             const char *url,
                                             int type));
@@ -266,7 +266,7 @@ void fa_notify_stop(fa_handle_t *fh);
 
 void fa_libav_error_to_txt(int err, char *buf, size_t buflen);
 
-void fa_scanner_page(const char *url, time_t mtime, 
+void fa_scanner_page(const char *url, time_t mtime,
                      prop_t *model, const char *playme,
                      prop_t *direct_close, rstr_t *title);
 

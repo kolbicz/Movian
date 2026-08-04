@@ -2,22 +2,22 @@
 
 commandMenuChrome(
   SEP($nav.currentpage.model.metadata.title);
-      
+
   ITEMTOGGLE(fmt(_("Add '%s' to home screen"), $nav.currentpage.model.metadata.title),
 	     fmt(_("Remove '%s' from home screen"), $nav.currentpage.model.metadata.title),
 	     $nav.currentpage.bookmarked,
 	     { $nav.currentpage.bookmarked = !$nav.currentpage.bookmarked;},
 	     $nav.currentpage.url != "page:home"
 	    );
-  
-  
+
+
   widget(loader, {
     hidden: count($clone.settings.options) < 2;
     self: $clone.settings;
     source: "skin://pages/listitems/multiopt.view";
   });
 
-      
+
   cloner($nav.currentpage.model.options, loader, {
     time: 0.1;
     noInitialTransform: true;

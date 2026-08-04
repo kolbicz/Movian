@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "ext/sqlite/sqlite3.h"
+#include <sqlite3.h>
 
 #include "prop/prop.h"
 
@@ -157,7 +157,7 @@ metadb_get(void)
 /**
  *
  */
-void 
+void
 metadb_close(void *db)
 {
   db_pool_put(metadb_pool, db);
@@ -270,7 +270,7 @@ metadb_artist_get_by_title(void *db, const char *title, int ds_id,
 
     sqlite3_stmt *ins;
 
-    rc = db_prepare(db, &ins, 
+    rc = db_prepare(db, &ins,
 		    "INSERT INTO artist "
 		    "(title, ds_id, ext_id) "
 		    "VALUES "
@@ -383,7 +383,7 @@ metadb_insert_albumart(void *db, int64_t album_id, const char *url,
 
   if(rc != SQLITE_OK)
     return;
-  
+
   sqlite3_bind_int64(ins, 1, album_id);
   sqlite3_bind_text(ins, 2, url, -1, SQLITE_STATIC);
   if(width) sqlite3_bind_int64(ins, 3, width);
@@ -411,7 +411,7 @@ metadb_insert_artistpic(void *db, int64_t artist_id, const char *url,
 
   if(rc != SQLITE_OK)
     return;
-  
+
   sqlite3_bind_int64(ins, 1, artist_id);
   sqlite3_bind_text(ins, 2, url, -1, SQLITE_STATIC);
   if(width) sqlite3_bind_int64(ins, 3, width);
@@ -440,7 +440,7 @@ metadb_insert_videoart(void *db, int64_t videoitem_id, const char *url,
 
   if(rc != SQLITE_OK)
     return;
-  
+
   sqlite3_bind_int64(ins, 1, videoitem_id);
   sqlite3_bind_text(ins, 2, url, -1, SQLITE_STATIC);
   if(width) sqlite3_bind_int(ins, 3, width);
@@ -469,7 +469,7 @@ metadb_delete_videoart(void *db, int64_t videoitem_id)
 
   if(rc != SQLITE_OK)
     return;
-  
+
   sqlite3_bind_int64(ins, 1, videoitem_id);
   db_step(ins);
   sqlite3_finalize(ins);
@@ -504,7 +504,7 @@ metadb_insert_videocast(void *db, int64_t videoitem_id,
 
   if(rc != SQLITE_OK)
     return;
-  
+
   sqlite3_bind_int64(ins, 1, videoitem_id);
   sqlite3_bind_text(ins, 2, name, -1, SQLITE_STATIC);
   sqlite3_bind_text(ins, 3, character, -1, SQLITE_STATIC);
@@ -534,7 +534,7 @@ metadb_delete_videocast(void *db, int64_t videoitem_id)
 
   if(rc != SQLITE_OK)
     return;
-  
+
   sqlite3_bind_int64(ins, 1, videoitem_id);
   db_step(ins);
   sqlite3_finalize(ins);
@@ -558,7 +558,7 @@ metadb_insert_videogenre(void *db, int64_t videoitem_id, const char *title)
 
   if(rc != SQLITE_OK)
     return;
-  
+
   sqlite3_bind_int64(ins, 1, videoitem_id);
   sqlite3_bind_text(ins, 2, title, -1, SQLITE_STATIC);
   db_step(ins);
@@ -598,7 +598,7 @@ metadb_insert_audioitem(sqlite3 *db, int64_t item_id, const metadata_t *md,
     sqlite3_stmt *stmt;
 
     rc = db_prepare(db, &stmt,
-		    i == 0 ? 
+		    i == 0 ?
 		    "INSERT OR FAIL INTO audioitem "
 		    "(item_id, title, album_id, artist_id, duration, ds_id, track) "
 		    "VALUES "
@@ -805,7 +805,7 @@ metadb_get_video_cast(sqlite3 *db, int64_t videoitem_id, metadata_t *md)
     mp->mp_department = db_rstr(sel, 2);
     mp->mp_job        = db_rstr(sel, 3);
     mp->mp_portrait   = db_rstr(sel, 4);
-    
+
     if(mp->mp_department && !strcmp(rstr_get(mp->mp_department), "Cast"))
       TAILQ_INSERT_TAIL(&md->md_cast, mp, mp_link);
     else
@@ -816,13 +816,13 @@ metadb_get_video_cast(sqlite3 *db, int64_t videoitem_id, metadata_t *md)
 }
 
 
-		     
+
 
 /**
  *
  */
 int
-metadb_get_artist_pics(void *db, const char *artist, 
+metadb_get_artist_pics(void *db, const char *artist,
 		       void (*cb)(void *opaque, const char *url,
 				  int width, int height),
 		       void *opaque)
@@ -986,7 +986,7 @@ metadb_insert_videoitem0(sqlite3 *db, int64_t item_id, int ds_id,
 
 
     rc = db_prepare(db, &stmt,
-		    i == 0 ? 
+		    i == 0 ?
 		    "INSERT OR FAIL INTO videoitem "
 		    "(item_id, ds_id, ext_id, "
 		    "title, duration, format, type, tagline, description, "
@@ -1056,7 +1056,7 @@ metadb_insert_videoitem0(sqlite3 *db, int64_t item_id, int ds_id,
     } else {
       sqlite3_bind_int(stmt, 8, 0);
     }
-    
+
     sqlite3_bind_int(stmt, 15, status);
     sqlite3_bind_int64(stmt, 16, weight);
     sqlite3_bind_int(stmt, 17, qtype);
@@ -1108,7 +1108,7 @@ metadb_insert_videoitem(void *db, const char *url, int ds_id,
     if(item_id < 0)
       return item_id;
   }
-  
+
   return metadb_insert_videoitem0(db, item_id, ds_id, ext_id, md, status,
 				  weight, qtype, cfgid);
 }
@@ -1125,7 +1125,7 @@ metadb_insert_imageitem(sqlite3 *db, int64_t item_id, const metadata_t *md)
     sqlite3_stmt *stmt;
 
     rc = db_prepare(db, &stmt,
-		    i == 0 ? 
+		    i == 0 ?
 		    "INSERT OR FAIL INTO imageitem "
 		    "(item_id, original_time, manufacturer, equipment) "
 		    "VALUES "
@@ -1151,7 +1151,7 @@ metadb_insert_imageitem(sqlite3 *db, int64_t item_id, const metadata_t *md)
 
     sqlite3_bind_text(stmt, 4, rstr_get(md->md_equipment),
 		      -1, SQLITE_STATIC);
-    
+
     rc = db_step(stmt);
     sqlite3_finalize(stmt);
     if(rc == SQLITE_CONSTRAINT && i == 0)
@@ -1289,10 +1289,10 @@ metadb_metadata_write(void *db, const char *url, time_t mtime,
   while(1) {
     if(db_begin(db))
       return;
-    
+
     int r = metadb_metadata_writex(db, url, mtime, md, parent, parent_mtime,
                                    indexstatus);
-    
+
     if(r == METADATA_DEADLOCK) {
       db_rollback_deadlock(db);
       continue;
@@ -1510,7 +1510,7 @@ metadb_videoitem_set_preferred(void *db, const char *url, int64_t vid)
 		  "SET preferred = (CASE WHEN id=?2 THEN 1 ELSE 0 END) "
 		  "WHERE item_id = (SELECT id FROM item WHERE url = ?1)"
 		  );
-  
+
   if(rc != SQLITE_OK)
     return METADATA_PERMANENT_ERROR;
 
@@ -1539,7 +1539,7 @@ metadb_videoitem_delete_from_ds(void *db, const char *url, int ds)
 		  "WHERE item_id = (SELECT id FROM item WHERE url = ?1) AND "
 		  "ds_id = ?2"
 		  );
-  
+
   if(rc != SQLITE_OK)
     return METADATA_PERMANENT_ERROR;
 
@@ -1574,13 +1574,13 @@ metadb_videoitem_alternatives0(void *db, prop_t *p, const char *url, int dsid,
 		  "AND v.ds_id = ?2 "
 		  "ORDER BY v.weight DESC"
 		  );
-  
+
   if(rc != SQLITE_OK)
     return 0;
 
   sqlite3_bind_text(sel, 1, url, -1, SQLITE_STATIC);
   sqlite3_bind_int(sel, 2, dsid);
-  
+
   while(db_step(sel) == SQLITE_ROW) {
     char str[128];
 
@@ -1593,7 +1593,7 @@ metadb_videoitem_alternatives0(void *db, prop_t *p, const char *url, int dsid,
     prop_t *c = prop_create_root(str);
 
 
-    if(sqlite3_column_int(sel, 3) && active == NULL) 
+    if(sqlite3_column_int(sel, 3) && active == NULL)
       active = prop_ref_inc(c);
 
     const char *title = (const char *)sqlite3_column_text(sel, 1);
@@ -1607,7 +1607,7 @@ metadb_videoitem_alternatives0(void *db, prop_t *p, const char *url, int dsid,
     prop_set_string(prop_create(c, "title"), str);
     pv = prop_vec_append(pv, c);
   }
-  
+
   prop_destroy_childs(p);
   prop_set_parent_vector(pv, p, NULL, NULL);
 
@@ -1643,7 +1643,7 @@ metadb_videoitem_alternatives(prop_t *p, const char *url, int dsid,
 
   if(metadb_videoitem_alternatives0(db, p, url, dsid, skipme))
     goto again;
-  
+
   db_rollback(db);
   metadb_close(db);
 }
@@ -1729,7 +1729,7 @@ metadb_item_get_user_title(const char *url)
   if((db = metadb_get()) == NULL)
     return NULL;
 
-  rc = db_prepare(db, &stmt, 
+  rc = db_prepare(db, &stmt,
 		  "SELECT usertitle "
 		  "FROM item "
 		  "WHERE url=?1"
@@ -1766,7 +1766,7 @@ metadb_item_set_user_title(const char *url, const char *str)
   if((db = metadb_get()) == NULL)
     return;
 
-  rc = db_prepare(db, &stmt, 
+  rc = db_prepare(db, &stmt,
 		  "UPDATE item "
 		  "SET usertitle=?2 "
 		  "WHERE url=?1"
@@ -1864,7 +1864,7 @@ metadb_get_videoitem(void *db, const char *url)
   int64_t rval = METADATA_PERMANENT_ERROR;
   sqlite3_stmt *stmt;
 
-  rc = db_prepare(db, &stmt, 
+  rc = db_prepare(db, &stmt,
 		  "SELECT videoitem.id "
 		  "FROM videoitem,item "
 		  "WHERE videoitem.item_id = item.id "
@@ -2021,12 +2021,12 @@ metadb_get_videoinfo(void *db, const char *url,
 
     md->md_genre = metadb_get_video_genre(db, vid);
     md->md_qtype = qtype;
-    
+
     md->md_idx = db_posint(sel, 16);
 
     md->md_parent_id = sqlite3_column_int64(sel, 18);
     md->md_id = vid;
-    
+
     if(md->md_parent_id)
       metadb_get_videoinfo2(db, md->md_parent_id, &md->md_parent);
   }
@@ -2078,7 +2078,7 @@ metadb_metadata_get_streams(sqlite3 *db, metadata_t *md, int64_t videoitem_id)
     } else {
       continue;
     }
-    metadata_add_stream(md, 
+    metadata_add_stream(md,
 			(const char *)sqlite3_column_text(sel, 3),
 			type,
 			sqlite3_column_int(sel, 0),
@@ -2137,7 +2137,7 @@ metadata_get(void *db, int item_id, int contenttype, get_cache_t *gc)
   int64_t vi_id;
   metadata_t *md = metadata_create();
   md->md_contenttype = contenttype;
-  
+
   int r;
   switch(md->md_contenttype) {
   case CONTENT_AUDIO:
@@ -2211,15 +2211,15 @@ metadb_metadata_get(void *db, const char *url, time_t mtime)
 
   get_cache_t gc = {0};
 
-  metadata_t *md = metadata_get(db, 
+  metadata_t *md = metadata_get(db,
 				sqlite3_column_int64(sel, 0),
 				sqlite3_column_int(sel, 1),
 				&gc);
   get_cache_release(&gc);
 
   if(md != NULL)
-    md->md_cache_status = 
-      sqlite3_column_int(sel, 2) ? 
+    md->md_cache_status =
+      sqlite3_column_int(sel, 2) ?
       METADATA_CACHE_STATUS_FULL :
       METADATA_CACHE_STATUS_UNPARENTED;
 
@@ -2327,11 +2327,11 @@ metadb_unparent_item(void *db, const char *url)
     return;
 
   sqlite3_stmt *stmt;
-    
+
   rc = db_prepare(db, &stmt,
 		  "UPDATE item SET parent = NULL WHERE url=?1"
 		  );
-  
+
   if(rc != SQLITE_OK) {
     db_rollback(db);
     return;
@@ -2367,10 +2367,10 @@ metadb_parent_item(void *db, const char *url, const char *parent_url)
     goto again;
   }
   sqlite3_stmt *stmt;
-    
+
   rc = db_prepare(db, &stmt,
 		  "UPDATE item SET parent = ?2 WHERE url=?1");
-  
+
   if(rc != SQLITE_OK) {
     db_rollback(db);
     return;
@@ -2405,5 +2405,3 @@ metadata_get_video_data(const char *url)
     return NULL;
   return md;
 }
-
-

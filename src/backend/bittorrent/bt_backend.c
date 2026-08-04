@@ -37,7 +37,7 @@
 // http://www.bittorrent.org/beps/bep_0009.htm
 
 /**
- * 
+ *
  */
 static torrent_t *
 torrent_create_from_uri(const char *url, char *errbuf, size_t errlen)
@@ -89,13 +89,37 @@ torrent_open_url(const char **urlp, char *errbuf, size_t errlen)
 
     *urlp = NULL;
 
-    char *u = mystrdupa(url);
+	if(url)
+	{
+		if(!strstr(url, ";base64"))
+		{
+			//TRACE(TRACE_INFO, "navigator", "Torrent URL is NOT base64 encoded, modified!");
+			char *u = mystrdupa(url);
+			if(u)
+			{
+				int n = strlen(u);
+				while(n > 0 && u[n - 1] == '/')
+				  u[--n] = 0;
 
-    int n = strlen(u);
-    while(n > 0 && u[n - 1] == '/')
-      u[--n] = 0;
-
-    to = torrent_create_from_uri(u, errbuf, errlen);
+				to = torrent_create_from_uri(u, errbuf, errlen);
+			}
+			else
+			{
+				to = NULL;
+				TRACE(TRACE_ERROR, "navigator", "Bad torrent URL");
+			}
+		}
+		else
+		{
+			//TRACE(TRACE_INFO, "navigator", "Torrent URL is base64 encoded, not modifying it...");
+			to = torrent_create_from_uri(url, errbuf, errlen);
+		}
+	}
+	else
+	{
+		to = NULL;
+		TRACE(TRACE_ERROR, "navigator", "Bad torrent URL");
+	}
   }
   return to;
 }
@@ -138,7 +162,7 @@ torrent_browse_open(prop_t *page, const char *url, int sync)
   prop_t *model = prop_create_r(page, "model");
   prop_set(model, "loading", PROP_SET_INT, 1);
 
-  usage_page_open(sync, "Torrent browse");
+  //usage_page_open(sync, "Torrent browse");
 
   to = torrent_open_url(&url, errbuf, sizeof(errbuf));
   if(to == NULL) {

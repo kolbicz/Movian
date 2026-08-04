@@ -1,6 +1,6 @@
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
@@ -19,10 +19,10 @@ widget(backdrop, {
     widget(label, {
       shadow: true;
       outline: true;
-      color: select(isFocused(), 1.0, 0.6) * 
+      color: select(isFocused(), 1.0, 0.6) *
 	select($self.value, [0.8, 1, 0.8], [1,0.8,0.8]);
-      
-      caption: $self.metadata.title + ": " + 
+
+      caption: $self.metadata.title + ": " +
 	select($self.value, _("Yes"), _("No"));
       ellipsize: true;
     });

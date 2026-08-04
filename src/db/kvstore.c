@@ -22,7 +22,7 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "ext/sqlite/sqlite3.h"
+#include <sqlite3.h>
 
 #include "config.h"
 #include "main.h"

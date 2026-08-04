@@ -32,14 +32,14 @@
     .focusable = true;
     .spacing = 40;
     AUTOFADE();
-    
+
     widget(image, {
       .width = $ui.size * 6;
       .height = $ui.size * (2 + isFocused() * 4);
       .source = ICON;
       .shadow = true;
     });
-    
+
     widget(container_y, {
       .align = center;
       widget(label, {
@@ -69,7 +69,7 @@
 
 
 #define TYPED_ITEM(ICON, TYPE, TITLE, URL) {
-  ITEM(ICON ?? "dataroot://res/svg/" + 
+  ITEM(ICON ?? "dataroot://res/svg/" +
        translate(TYPE, "Folder",
 		 "music",    "Music",
 		 "video",    "Movie",
@@ -175,14 +175,14 @@ widget(container_x, {
 	  .source = "skin://graphics/shadedplate.png";
 	  .border =  [4, 4, 4, 4];
 	  .padding = [0, -2, -2, -2];
-	  
+
           widget(backdrop, {
             .filterConstraintX = true;
             .color = [0.0, 0.0, 0.0];
             .source = "skin://graphics/shadedplate.png";
             .border =  [4, 4, 4, 4];
             .padding = [0, -2, 0, -2];
-	    
+
             widget(text, {
 	      .focusable = true;
               bind($view.searchQuery);
@@ -218,15 +218,15 @@ widget(container_x, {
     $view.other  = propSorter($core.services.enabled,
 			      sort,   "node.title", false, false,
 			      filter, "node.type", neq, "other", exclude);
-    
+
 
 
     DIVIDER("Video", !count($view.video) );
-    
+
     cloner($view.video, container_z, {
       TYPED_ITEM($self.icon, $self.type, $self.title, $self.url);
     });
-    
+
     DIVIDER("Music", !count($view.music));
 
     cloner($view.music, container_z, {

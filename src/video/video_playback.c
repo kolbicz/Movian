@@ -95,7 +95,7 @@ vs_cmp(const vsource_t *a, const vsource_t *b)
  *
  */
 static void
-vsource_insert(struct vsource_list *list, 
+vsource_insert(struct vsource_list *list,
 	       const char *url, const char *mimetype, int bitrate, int flags)
 {
   if(backend_canhandle(url) == NULL)
@@ -207,7 +207,7 @@ play_video(const char *url, struct media_pipe *mp,
       rstr_t *source = NULL;
       event_t *e = NULL;
 
-      if(type != NULL && !strcmp(rstr_get(type), "video")) {
+      if(type != NULL && (!strcmp(rstr_get(type), "video") || !strcmp(rstr_get(type), "raw"))) {
 	TRACE(TRACE_DEBUG, "vp",
               "Page %s is a video page. Waiting for source\n", url);
 
@@ -230,7 +230,7 @@ play_video(const char *url, struct media_pipe *mp,
                          NULL);
         int64_t deadline = arch_get_ts() + 10000000;
 
-        while(type != NULL && !strcmp(rstr_get(type), "video") &&
+        while(type != NULL && (!strcmp(rstr_get(type), "video") || !strcmp(rstr_get(type), "raw")) &&
               source == NULL && arch_get_ts() < deadline) {
           struct prop_notify_queue q;
           prop_courier_wait(pc, &q, 1000);
@@ -299,11 +299,36 @@ play_video(const char *url, struct media_pipe *mp,
       flags |= BACKEND_VIDEO_SET_TITLE;
     }
 
+    if((str = htsmsg_get_str(m, "title2")) != NULL) {
+      prop_set(mp->mp_prop_metadata, "title2", PROP_SET_STRING, str);
+	}
+    if((str = htsmsg_get_str(m, "title3")) != NULL) {
+      prop_set(mp->mp_prop_metadata, "title3", PROP_SET_STRING, str);
+	}
+
     if((str = htsmsg_get_str(m, "icon")) != NULL) {
       prop_set(mp->mp_prop_metadata, "icon", PROP_SET_STRING, str);
     }
 
+    if((str = htsmsg_get_str(m, "description")) != NULL) {
+      prop_set(mp->mp_prop_metadata, "description", PROP_SET_STRING, str);
+    }
+    if((str = htsmsg_get_str(m, "description2")) != NULL) {
+      prop_set(mp->mp_prop_metadata, "description2", PROP_SET_STRING, str);
+    }
+    if((str = htsmsg_get_str(m, "description3")) != NULL) {
+      prop_set(mp->mp_prop_metadata, "description3", PROP_SET_STRING, str);
+    }
+
+    if((str = htsmsg_get_str(m, "image")) != NULL) {
+      prop_set(mp->mp_prop_metadata, "image", PROP_SET_STRING, str);
+    }
+
     uint32_t u32;
+    if(!htsmsg_get_u32(m, "trackinfo", &u32)) {
+      prop_set(mp->mp_prop_metadata, "trackinfo", PROP_SET_INT, u32);
+    }
+
     if(!htsmsg_get_u32(m, "year", &u32)) {
       prop_set(mp->mp_prop_metadata, "year", PROP_SET_INT, u32);
       va.year = u32;
@@ -317,10 +342,62 @@ play_video(const char *url, struct media_pipe *mp,
       va.episode = u32;
     }
 
+    if(!htsmsg_get_u32(m, "startts", &u32)) {
+      prop_set(mp->mp_prop_metadata, "startts", PROP_SET_INT, u32);
+    }
+    if(!htsmsg_get_u32(m, "startts2", &u32)) {
+      prop_set(mp->mp_prop_metadata, "startts2", PROP_SET_INT, u32);
+    }
+    if(!htsmsg_get_u32(m, "startts3", &u32)) {
+      prop_set(mp->mp_prop_metadata, "startts3", PROP_SET_INT, u32);
+    }
+    if(!htsmsg_get_u32(m, "endts", &u32)) {
+      prop_set(mp->mp_prop_metadata, "endts", PROP_SET_INT, u32);
+    }
+    if(!htsmsg_get_u32(m, "endts2", &u32)) {
+      prop_set(mp->mp_prop_metadata, "endts2", PROP_SET_INT, u32);
+    }
+    if(!htsmsg_get_u32(m, "endts3", &u32)) {
+      prop_set(mp->mp_prop_metadata, "endts3", PROP_SET_INT, u32);
+    }
+
 
     if((str = htsmsg_get_str(m, "imdbid")) != NULL)
       va.imdb = str;
 
+	htsmsg_t *epgs;
+	prop_set(mp->mp_prop_metadata, "epgs", PROP_SET_INT, 0);
+	prop_t *epg_list = prop_create(mp->mp_prop_metadata, "epg");
+	prop_destroy_childs(epg_list);
+	int epg_cnt = 0;
+
+    if((epgs = htsmsg_get_list(m, "epg")) != NULL)
+	{
+		HTSMSG_FOREACH(f, epgs)
+		{
+			htsmsg_t *src = f->hmf_childs;
+			const char *t      = htsmsg_get_str(src, "t");
+			const char *d      = htsmsg_get_str(src, "d");
+			uint32_t s	= htsmsg_get_u32_or_default(src, "s", 0);
+			uint32_t e	= htsmsg_get_u32_or_default(src, "e", 0);
+
+			if(t == NULL || d == NULL || !s || !e)
+				continue;
+
+			// TRACE(TRACE_DEBUG, "VP", "Adding %i-%i: %s (%s)", s, e, t, d);
+
+			prop_t *p = prop_create_root(NULL);
+			prop_set(p, "t", PROP_SET_STRING, t);
+			prop_set(p, "d", PROP_SET_STRING, d);
+			prop_set(p, "s", PROP_SET_INT, s);
+			prop_set(p, "e", PROP_SET_INT, e);
+
+			if(prop_set_parent(p, epg_list))
+				prop_destroy(p);
+			else
+				prop_set(mp->mp_prop_metadata, "epgs", PROP_SET_INT, ++epg_cnt);
+		}
+	}
 
     // Sources
 
@@ -348,7 +425,7 @@ play_video(const char *url, struct media_pipe *mp,
       vsource_cleanup(&vsources);
       return NULL;
     }
-  
+
 
     // Subtitles
 
@@ -360,7 +437,7 @@ play_video(const char *url, struct media_pipe *mp,
         const char *lang = htsmsg_get_str(sub, "language");
         const char *source = htsmsg_get_str(sub, "source");
 
-        mp_add_track(mp->mp_prop_subtitle_tracks, title, url, 
+        mp_add_track(mp->mp_prop_subtitle_tracks, title, url,
                      NULL, NULL, lang, source, NULL, 90000, 1);
       }
     }
@@ -374,11 +451,11 @@ play_video(const char *url, struct media_pipe *mp,
       flags |= BACKEND_VIDEO_NO_SUBTITLE_SCAN;
 
     vs = LIST_FIRST(&vsources);
-  
+
     if(canonical_url == NULL)
       canonical_url = vs->vs_url;
 
-    TRACE(TRACE_DEBUG, "Video", "Playing %s", vs->vs_url);
+    //TRACE(TRACE_DEBUG, "Video", "Playing %s", vs->vs_url);
 
     vs = vsource_dup(vs);
 
@@ -403,7 +480,7 @@ play_video(const char *url, struct media_pipe *mp,
         break;
       }
 
-      TRACE(TRACE_DEBUG, "Video", "Playing %s", vs->vs_url);
+      //TRACE(TRACE_DEBUG, "Video", "Playing %s", vs->vs_url);
 
       vs = vsource_dup(vs);
 
@@ -455,7 +532,7 @@ vq_update_metadata(video_queue_t *vq)
   if(vqe != NULL) {
     while((vqe = TAILQ_NEXT(vqe, vqe_link)) != NULL) {
       const char *t = rstr_get(vqe->vqe_type);
-      if(t != NULL && (!strcmp(t, "video") || !strcmp(t, "tvchannel")))
+      if(t != NULL && (!strcmp(t, "video") || !strcmp(t, "tvchannel") || !strcmp(t, "raw")))
         break;
     }
   }
@@ -466,7 +543,7 @@ vq_update_metadata(video_queue_t *vq)
   if(vqe != NULL) {
     while((vqe = TAILQ_PREV(vqe, video_queue_entry_queue, vqe_link)) != NULL) {
       const char *t = rstr_get(vqe->vqe_type);
-      if(t != NULL && (!strcmp(t, "video") || !strcmp(t, "tvchannel")))
+      if(t != NULL && (!strcmp(t, "video") || !strcmp(t, "tvchannel") || !strcmp(t, "raw")))
         break;
     }
   }
@@ -534,7 +611,7 @@ vq_add_node(video_queue_t *vq, prop_t *p, video_queue_entry_t *before)
 
   vqe->vqe_root = prop_ref_inc(p);
 
-  vqe->vqe_url_sub = 
+  vqe->vqe_url_sub =
     prop_subscribe(0,
 		   PROP_TAG_NAME("self", "url"),
 		   PROP_TAG_CALLBACK_RSTR, vqe_set_url, vqe,
@@ -542,7 +619,7 @@ vq_add_node(video_queue_t *vq, prop_t *p, video_queue_entry_t *before)
 		   PROP_TAG_NAMED_ROOT, p, "self",
 		   NULL);
 
-  vqe->vqe_type_sub = 
+  vqe->vqe_type_sub =
     prop_subscribe(0,
 		   PROP_TAG_NAME("self", "type"),
 		   PROP_TAG_CALLBACK_RSTR, vqe_set_type, vqe,
@@ -697,7 +774,7 @@ video_queue_create(prop_t *model, media_pipe_t *mp)
 		   PROP_TAG_NAME("self", "nodes"),
 		   PROP_TAG_CALLBACK, vq_entries_callback, vq,
 		   PROP_TAG_MUTEX, &video_queue_mutex,
-		   PROP_TAG_NAMED_ROOT, model, "self", 
+		   PROP_TAG_NAMED_ROOT, model, "self",
 		   NULL);
   return vq;
 }
@@ -758,13 +835,13 @@ video_queue_find_next(video_queue_t *vq, prop_t *current, int reverse,
     } else {
       vqe = TAILQ_NEXT(vqe, vqe_link);
     }
-    
+
     if(vqe == NULL)
       break;
 
     const char *t = rstr_get(vqe->vqe_type);
     if(t != NULL) {
-      if(strcmp(t, "video") && strcmp(t, "tvchannel"))
+      if(strcmp(t, "video") && strcmp(t, "tvchannel") && strcmp(t, "raw"))
 	continue;
     }
     break;
@@ -774,7 +851,7 @@ video_queue_find_next(video_queue_t *vq, prop_t *current, int reverse,
     hts_mutex_unlock(&video_queue_mutex);
     return NULL;
   }
-  
+
   prop_t *p = prop_follow(vqe->vqe_root);
   hts_mutex_unlock(&video_queue_mutex);
   return p;
@@ -831,6 +908,7 @@ video_player_idle(void *aux)
 
       resume_ctrl = RESUME_NO; // For next item during continuous play
 
+/*
       TRACE(TRACE_DEBUG, "vp", "Playing '%s'%s%s, resume:%s%s",
             rstr_get(play_url),
             play_flags & BACKEND_VIDEO_PRIMARY  ? ", primary" : "",
@@ -838,7 +916,7 @@ video_player_idle(void *aux)
             resume_mode == VIDEO_RESUME_YES ? "yes" :
             resume_mode == VIDEO_RESUME_NO  ? "no" : "ask user",
             resume_ctrl == RESUME_AS_GLOBAL_SETTING ? "" : " (overridden)");
-
+*/
       prop_set(mp->mp_prop_metadata, "title", PROP_SET_VOID);
       if(vq != NULL)
         video_queue_set_current(vq, item_model);
@@ -857,7 +935,7 @@ video_player_idle(void *aux)
     }
 
     if(e == NULL) {
-      TRACE(TRACE_DEBUG, "vp", "Waiting for event");
+      //TRACE(TRACE_DEBUG, "vp", "Waiting for event");
       rstr_set(&play_url, NULL);
       e = mp_dequeue_event(mp);
     }

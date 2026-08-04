@@ -54,7 +54,7 @@
   widget(quad, {
     fhpSpill: true;
     additive: true;
-    alpha: 0.1 * isHovered() + 0.2 * isNavFocused();
+    alpha: 0.1 * isHovered() * !$ui.keyboard + 0.2 * isNavFocused();
   });
 
 }
@@ -63,7 +63,8 @@
   widget(quad, {
     fhpSpill: true;
     additive: true;
-    alpha: 0.1 * isHovered() + 0.2 * iir(isNavFocused(), 4, true);
+    alpha: 0.1 * isHovered() * !$ui.keyboard +
+           0.2 * iir(isNavFocused(), 4, true);
   });
 }
 
@@ -72,12 +73,12 @@
   widget(quad, {
     fhpSpill: true;
     additive: true;
-    alpha: 0.1 * isHovered() + 0.2 * isNavFocused();
+    alpha: 0.1 * isHovered() * !$ui.keyboard + 0.2 * isNavFocused();
   });
   widget(container_x, {
     filterConstraintX: true;
     fhpSpill: true;
-    alpha: isHovered() * 0.5;
+    alpha: isHovered() * !$ui.keyboard * 0.5;
     widget(quad, {
       width: 1;
       color: 0;
@@ -120,8 +121,10 @@
   widget(container_y, {
     align: center;
     width: 4em;
-    clickable: $ui.pointerVisible || ($ui.touch && ENABLED);
-    alpha: iir($ui.pointerVisible || ($ui.touch && ENABLED), 4);
+    clickable: !$ui.playbackSelectorOpen &&
+               ($ui.pointerVisible || ($ui.touch && ENABLED));
+    alpha: iir(!$ui.playbackSelectorOpen &&
+               ($ui.pointerVisible || ($ui.touch && ENABLED)), 4);
     onEvent(activate, EVENT);
     navFocusable: false;
     widget(icon, {
@@ -235,3 +238,54 @@
   });
 }
 
+#define SearchBarHome(URLPREFIX, TEXT=void, ICON=void) {
+  widget(container_x, {
+    hidden: !$core.home.searchbar;
+    style: "ListItem";
+    divider: true;
+    widget(container_z, {
+
+      filterConstraintX: true;
+      widget(quad, {
+        color: 0;
+      });
+
+      widget(container_x, {
+        height: 2em;
+        padding: [0.5em, 0];
+        spacing: 0.5em;
+        widget(icon, {
+          fhpSpill: true;
+          size: 1.2em;
+          source: "skin://icons/ic_search_48px.svg";
+          alpha: 0.3 + isNavFocused();
+        });
+
+        zbox({
+          filterConstraintX: true;
+          label({
+            hidden: $view.searchQuery ? true : false;
+            caption: TEXT;
+            size: 1.2em;
+            font: "skin://fonts/RobotoCondensed-Regular.ttf";
+            color: 0.5;
+          });
+
+          widget(text, {
+            filterConstraintX: true;
+            padding: [0, 0.4em];
+            size: 1.2em;
+            font: "skin://fonts/RobotoCondensed-Regular.ttf";
+            focusable: 0.1;
+
+            bind($view.searchQuery);
+            onEvent(enter, navOpen(URLPREFIX + $view.searchQuery),
+	            $view.searchQuery);
+            onEvent(submit, navOpen(URLPREFIX + $view.searchQuery),
+	            $view.searchQuery);
+          });
+        });
+      });
+    });
+  });
+}

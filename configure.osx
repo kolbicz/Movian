@@ -158,5 +158,6 @@ EOF
 # Finalize
 #
 echo >>${CONFIG_MAK} LDFLAGS_cfg += -lpthread
+echo >>${CONFIG_MAK} LDFLAGS_cfg += -liconv
 
 finalize

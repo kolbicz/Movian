@@ -41,7 +41,7 @@ lexer_link_token(token_t *prev, rstr_t *f, int line, token_t *t,
  *
  */
 static token_t *
-lexer_add_token_simple(glw_root_t *gr, 
+lexer_add_token_simple(glw_root_t *gr,
 		       token_t *prev, rstr_t *f, int line, token_type_t type)
 {
   token_t *t = glw_view_token_alloc(gr);
@@ -83,7 +83,7 @@ lexer_add_token_float(glw_root_t *gr, token_t *prev, rstr_t *f, int line,
     start++;
     sign = -1.0;
   }
-  
+
   if(start == end) {
     // A bit strange
     t->t_float = -1.0;
@@ -97,7 +97,7 @@ lexer_add_token_float(glw_root_t *gr, token_t *prev, rstr_t *f, int line,
       break;
     n = n * 10 + s - '0';
   }
-  
+
   t->t_float = n;
   if(start == end || s != '.') {
     t->t_float *= sign;
@@ -184,7 +184,7 @@ glw_view_lexer(glw_root_t *gr, const char *src, errorinfo_t *ei,
   token_t *t;
 
   while(*src != 0) {
-      
+
     if(*src == '\n') {
       /* newline */
       /* TODO: DOS CR support ? */
@@ -349,7 +349,7 @@ glw_view_lexer(glw_root_t *gr, const char *src, errorinfo_t *ei,
       while(lex_isalnum(*src))
 	src++;
 
-      prev = lexer_add_token_string(gr, prev, f, line, start, src, 
+      prev = lexer_add_token_string(gr, prev, f, line, start, src,
 				    TOKEN_IDENTIFIER);
       continue;
     }
@@ -369,7 +369,7 @@ glw_view_lexer(glw_root_t *gr, const char *src, errorinfo_t *ei,
       if(*src == 'f')
 	/* we support having the 'f' postfix around too */
 	src++;
-      
+
       prev = lexer_add_token_float(gr, prev, f, line, start, src);
       continue;
     }
@@ -396,7 +396,7 @@ glw_view_load1(glw_root_t *gr, rstr_t *url, errorinfo_t *ei, token_t *prev,
                int may_unlock)
 {
   token_t *last;
-  char errbuf[256];
+  char errbuf[64];
 
   rstr_t *p = glw_resolve_path(url, prev->file, gr, NULL);
 

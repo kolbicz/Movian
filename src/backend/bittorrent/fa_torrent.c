@@ -75,7 +75,7 @@ torrent_scandir(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
     }
 
     if(tf == NULL || tf->tf_size) {
-      snprintf(errbuf, errlen, "Not such directory");
+      snprintf(errbuf, errlen, "Directory does not exist");
       hts_mutex_unlock(&bittorrent_mutex);
       return -1;
     }
@@ -98,6 +98,7 @@ torrent_scandir(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
 }
 
 
+#if 0
 /**
  *
  */
@@ -114,7 +115,7 @@ mkinfo(prop_t *p, prop_t *title)
   prop_ref_dec(node);
   return info;
 }
-
+#endif
 
 /**
  *
@@ -149,15 +150,37 @@ torrent_open(fa_protocol_t *fap, const char *url, char *errbuf, size_t errlen,
 
     prop_set(tfh->tfh_fa_stats, "bitrateValid", PROP_SET_INT, 1);
 
+#if 0
     prop_t *info = prop_create_r(tfh->tfh_fa_stats, "infoNodes");
 
-    tfh->tfh_torrent_seeders  = mkinfo(info, _p("Torrent seeders"));
-    tfh->tfh_torrent_leechers = mkinfo(info, _p("Torrent leechers"));
-    tfh->tfh_known_peers      = mkinfo(info, _p("Known peers"));
-    tfh->tfh_connected_peers  = mkinfo(info, _p("Connected peers"));
+    tfh->tfh_torrent_seeders  = mkinfo(info, _p("Seeders"));
+    tfh->tfh_torrent_leechers = mkinfo(info, _p("Leechers"));
+    tfh->tfh_known_peers      = mkinfo(info, _p("Peers"));
+    tfh->tfh_connected_peers  = mkinfo(info, _p("Connected to"));
     tfh->tfh_recv_peers       = mkinfo(info, _p("Receiving from"));
+	tfh->tfh_recv_speed       = mkinfo(info, _p("Speed (kb/s)"));
+	tfh->tfh_act_pieces       = mkinfo(info, _p("Active pieces"));
+	tfh->tfh_act_memory       = mkinfo(info, _p("Memory use (MB)"));
+	tfh->tfh_act_disk         = mkinfo(info, _p("Cache size (MB)"));
+	prop_ref_dec(info);
+#endif
+    prop_t *info1 = prop_create_r(tfh->tfh_fa_stats, "infoNodes1");
+	prop_t *info2 = prop_create_r(tfh->tfh_fa_stats, "infoNodes2");
+	//prop_t *info3 = prop_create_r(tfh->tfh_fa_stats, "infoNodes3");
 
-    prop_ref_dec(info);
+    tfh->tfh_torrent_seeders  = prop_create_r(info1, "seed");
+    //tfh->tfh_torrent_leechers = prop_create_r(info1, "leechers");
+    tfh->tfh_known_peers      = prop_create_r(info1, "peer");
+    tfh->tfh_connected_peers  = prop_create_r(info1, "conn");
+    //tfh->tfh_recv_peers       = prop_create_r(info1, "rcvf");
+
+	tfh->tfh_recv_speed       = prop_create_r(info2, "spd");
+	tfh->tfh_act_pieces       = prop_create_r(info2, "pcs");
+	//tfh->tfh_act_memory       = prop_create_r(info2, "mem");
+	tfh->tfh_act_disk         = prop_create_r(info2, "cch");
+
+    prop_ref_dec(info1);
+	prop_ref_dec(info2);
   }
   tfh->tfh_file = tf;
   torrent_t *to = tf->tf_torrent;
@@ -206,7 +229,9 @@ torrent_read(fa_handle_t *fh, void *buf, size_t size)
 		       tfh);
 
   hts_mutex_unlock(&bittorrent_mutex);
-  tfh->tfh_fpos += r;
+  if(r>0)
+	  tfh->tfh_fpos += r;
+
   return r;
 }
 
@@ -318,10 +343,11 @@ torrent_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
  *
  */
 static void
-torrent_deadline(fa_handle_t *fh, int deadline)
+torrent_deadline(fa_handle_t *fh, int deadline, int probe)
 {
   torrent_fh_t *tfh = (torrent_fh_t *)fh;
   tfh->tfh_deadline = arch_get_ts() + deadline;
+  tfh->tfh_probe = probe;
 }
 
 

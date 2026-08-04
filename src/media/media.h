@@ -54,6 +54,7 @@ enum codec_id {
   AV_CODEC_ID_DVB_SUBTITLE,
   AV_CODEC_ID_MOV_TEXT,
   AV_CODEC_ID_DVD_SUBTITLE,
+  AV_CODEC_ID_DVB_TELETEXT,
 };
 
 #define MEDIA_TYPE_VIDEO      0
@@ -193,6 +194,7 @@ typedef struct media_pipe {
                                     */
 
   int mp_hold_gate;
+  int mp_hls_source;
 
   /*
    * Prebuffer logic
@@ -221,7 +223,7 @@ typedef struct media_pipe {
 
   hts_cond_t mp_backpressure;
 
-  media_queue_t mp_video, mp_audio;
+  media_queue_t mp_video, mp_audio, mp_subtitle;
 
   void *mp_video_frame_opaque;
   video_frame_deliver_t *mp_video_frame_deliver;
@@ -297,6 +299,8 @@ typedef struct media_pipe {
 
   prop_t *mp_prop_video;
   prop_t *mp_prop_audio;
+
+  prop_t *mp_prop_video_track_current;
 
   prop_t *mp_prop_audio_track_current;
   prop_t *mp_prop_audio_track_current_manual;
@@ -540,10 +544,20 @@ void mp_underrun(media_pipe_t *mp);
 static inline void
 mp_check_underrun(media_pipe_t *mp)
 {
-  if(mp->mp_flags & MP_PRE_BUFFERING &&
+  if( /*mp->mp_flags & MP_PRE_BUFFERING && */
      unlikely(TAILQ_FIRST(&mp->mp_video.mq_q_data) == NULL) &&
      unlikely(TAILQ_FIRST(&mp->mp_audio.mq_q_data) == NULL))
-    mp_underrun(mp);
+	 {
+		 if(likely(mp->mp_buffer_limit > 16 * 1024 * 1024))
+		 {
+			 //if(likely(!(mp->mp_flags & MP_PRE_BUFFERING)))
+				 mp->mp_pre_buffer_delay = 10 * 1000000;
+
+			 //mp->mp_flags |= MP_PRE_BUFFERING;
+			 prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 1);
+			 mp_underrun(mp);
+		 }
+	 }
 }
 
 void media_discontinuity_debug(media_discontinuity_aux_t *aux,

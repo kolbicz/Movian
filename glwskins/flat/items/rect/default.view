@@ -1,7 +1,7 @@
 #import "skin://theme.view"
 
 widget(container_y, {
-  focusable: true;
+  focusable: select($self.metadata.autofocus, 1.5, 1.0);
   onEvent(activate, navOpen($self.url, void, $self, $parent.model, void, $parent.url));
 
   widget(container_z, {

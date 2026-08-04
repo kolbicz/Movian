@@ -50,10 +50,12 @@ widget(container_z, {
     widget(container_x, {
       style: "ListItem";
 
-      height: 14em;
+      height: 10em;
       widget(image, {
+	    hidden: isVoid($args.metadata.icon);
         align: top;
-        width: 7em;
+        width: 4em;
+		cornerRadius: 0.3em;
         source: $args.metadata.icon;
       });
 
@@ -63,15 +65,16 @@ widget(container_z, {
           autohide: true;
           size: 1.5em;
           caption: $args.metadata.tagline;
-          padding: [0,0,0,1em];
+          padding: [0,0,0,0em];
         });
 
 
         widget(label, {
           autohide: true;
-          maxlines: 5;
+          maxlines: 10;
+		  size: 0.9em;
           caption: $args.metadata.description;
-          padding: [0,0,0,1em];
+          padding: [0,0,0,0.3em];
         });
 
 

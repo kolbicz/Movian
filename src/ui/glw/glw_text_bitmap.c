@@ -671,8 +671,33 @@ glw_text_bitmap_event(glw_t *w, event_t *e)
 
     event_int_t *eu = (event_int_t *)e;
 
+#ifdef PLATFORM_OSX
+    /* Keyboard input starts a native edit session below. Make its first
+     * character append to the current value even if the dormant bitmap
+     * cursor was left at its constructor position. */
+    if((e->e_flags & EVENT_KEYPRESS) && !gtb->gtb_native_editor &&
+       w->glw_root->gr_osk_widget != w) {
+      gtb->gtb_edit_ptr = gtb->gtb_uc_len;
+      gtb->gtb_update_cursor = 1;
+    }
+#endif
     if(insert_char(gtb, eu->val))
       gtb_notify(gtb);
+#ifdef PLATFORM_OSX
+    /* Keyboard focus historically edited the bitmap widget directly, while
+     * mouse activation opened Cocoa's native editor. After applying the first
+     * character, promote keyboard editing to the same native control using the
+     * refreshed value so no input is lost. Merely focusing the widget remains
+     * passive. */
+    if((e->e_flags & EVENT_KEYPRESS) && !gtb->gtb_native_editor &&
+       w->glw_root->gr_osk_widget != w) {
+      gtb_caption_refresh(gtb);
+      glw_osk_open(w->glw_root,
+                   gtb->gtb_description,
+                   gtb->gtb_caption, w,
+                   gtb->gtb_flags & GTB_PASSWORD);
+    }
+#endif
     return 1;
 
   } else if(event_is_type(e, EVENT_INSERT_STRING)) {
@@ -705,7 +730,7 @@ glw_text_bitmap_event(glw_t *w, event_t *e)
     return 1;
 
   } else if(event_is_action(e, ACTION_ACTIVATE)) {
-    
+
     gtb_caption_refresh(gtb);
 
     if(gtb->gtb_flags & (GTB_FILE_REQUEST | GTB_DIR_REQUEST)) {
@@ -726,9 +751,14 @@ glw_text_bitmap_event(glw_t *w, event_t *e)
 
     } else {
 
-      /* Legacy desktop GLW treats a mouse click as focus-only. Cocoa now
-       * provides a native editor overlay, so the same click must be allowed
-       * to enter the OSK hook and create that editor. */
+#ifdef PLATFORM_OSX
+      /* Keep the underlying bitmap cursor aligned with the insertion point
+       * used by the native Cocoa editor while it is being installed. */
+      gtb->gtb_edit_ptr = gtb->gtb_uc_len;
+      gtb->gtb_update_cursor = 1;
+#endif
+
+      /* Cocoa uses the click to create and position its native text editor. */
 #ifndef PLATFORM_OSX
       if(event_is_action(e, ACTION_ACTIVATE) && e->e_flags & EVENT_MOUSE)
         return 1;
@@ -856,11 +886,6 @@ glw_gtb_set_caption_raw(glw_t *w, uint32_t *uc, int len)
 }
 
 
-/**
- * Replace an editable text widget's contents from a native platform editor
- * and keep Movian's cursor and bound property in sync. The caller must hold
- * the GLW root lock.
- */
 void
 glw_gtb_set_edit_text(glw_t *w, const char *text, int cursor)
 {
@@ -873,10 +898,6 @@ glw_gtb_set_edit_text(glw_t *w, const char *text, int cursor)
 }
 
 
-/**
- * Hide this editable widget while a platform-native editor is overlaid.
- * The caller must hold the GLW root lock.
- */
 void
 glw_gtb_set_native_editor(glw_t *w, int active)
 {

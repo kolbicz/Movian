@@ -285,11 +285,11 @@ Page.prototype.appendItem = function(url, type, metadata) {
               break;
             }
           }
-        }
+		}
       } catch(e) {
       }
     }
-    require('native/metadata').bindPlayInfo(root, metabind_url);
+    if(!metadata.no_meta_bind) require('native/metadata').bindPlayInfo(root, metabind_url);
   }
 
   prop.setParent(root, this.model.nodes);
@@ -347,6 +347,12 @@ Page.prototype.redirect = function(url) {
   } else {
     prop.sendEvent(this.root.eventSink, "redirect", url);
   }
+}
+
+Page.prototype.openurl = function(url) {
+
+    //Core.resourceDestroy(this.nodesub);
+    prop.sendEvent(this.root.eventSink, "redirect2", url);
 }
 
 Page.prototype.onEvent = function(type, callback) {

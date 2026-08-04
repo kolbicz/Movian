@@ -50,9 +50,12 @@ static const uint8_t gif87sig[6] = {'G', 'I', 'F', '8', '7', 'a'};
 static const uint8_t svgsig1[5] = {'<', '?', 'x', 'm', 'l'};
 static const uint8_t svgsig2[4] = {'<', 's', 'v', 'g'};
 
+static const uint8_t riffsig[4] = {'R', 'I', 'F', 'F'};
+static const uint8_t webpsig[4] = {'W', 'E', 'B', 'P'};
+
 #if ENABLE_LIBAV
 static hts_mutex_t image_from_video_mutex[2];
-static AVCodecContext *thumbctx;
+//static AVCodecContext *thumbctx;
 static AVCodec *thumbcodec;
 static callout_t thumb_flush_callout;
 
@@ -120,6 +123,9 @@ fa_imageloader_buf(buf_t *buf, char *errbuf, size_t errlen)
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
 	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;
+  } else if(!memcmp(riffsig, p, 4) && buf->b_size >= 12 &&
+        !memcmp(webpsig, p + 8, 4)){
+	  fmt = IMAGE_WEBP;
   } else {
   bad:
     snprintf(errbuf, errlen, "Unknown format");
@@ -150,6 +156,7 @@ fa_imageloader2(const char *url, char *errbuf, size_t errlen,
 {
   buf_t *buf;
 
+  //TRACE(TRACE_DEBUG, "imageloader2", "fa_load: %s", url);
   buf = fa_load(url,
                 FA_LOAD_ERRBUF(errbuf, errlen),
                 FA_LOAD_CACHE_CONTROL(cache_control),
@@ -157,11 +164,15 @@ fa_imageloader2(const char *url, char *errbuf, size_t errlen,
                 FA_LOAD_FLAGS(FA_NON_INTERACTIVE | FA_CONTENT_ON_ERROR),
                 FA_LOAD_NO_FALLBACK(),
                 NULL);
+  //TRACE(TRACE_DEBUG, "imageloader2", "fa_load done: %s %s", (buf == NULL ? "NULL" : (buf == NOT_MODIFIED ? "NOT_MODIFIED" : "NO_LOAD")), errbuf);
   if(buf == NULL || buf == NOT_MODIFIED || buf == NO_LOAD_METHOD)
     return (image_t *)buf;
 
+  //TRACE(TRACE_DEBUG, "imageloader2", "fa_imageloader_buf: %s", url);
   image_t *img = fa_imageloader_buf(buf, errbuf, errlen);
+  //TRACE(TRACE_DEBUG, "imageloader2", "fa_imageloader_buf done: %s", url);
   buf_release(buf);
+  //TRACE(TRACE_DEBUG, "imageloader2", "buf_release done: %s", url);
   return img;
 }
 
@@ -215,7 +226,7 @@ fa_imageloader(const char *url, const struct image_meta *im,
   }
 
   if((fh = fa_open_resolver(url, errbuf, errlen,
-                            FA_BUFFERED_SMALL | FA_NON_INTERACTIVE,
+                            /*FA_BUFFERED_SMALL |*/ FA_NON_INTERACTIVE,
                             &foe)) == NULL)
     return NULL;
 
@@ -228,9 +239,9 @@ fa_imageloader(const char *url, const struct image_meta *im,
   /* Probe format */
 
   if(p[0] == 0xff && p[1] == 0xd8 && p[2] == 0xff) {
-      
+
     jpeginfo_t ji;
-    
+
     if(jpeg_info(&ji, jpeginfo_reader, fh,
 		 JPEG_INFO_DIMENSIONS |
 		 JPEG_INFO_ORIENTATION |
@@ -254,7 +265,7 @@ fa_imageloader(const char *url, const struct image_meta *im,
       if(pm != NULL) {
         image_t *im = image_create_from_pixmap(pm);
         im->im_origin_coded_type = IMAGE_JPEG;
-        im->im_origin_coded_type = ji.ji_orientation;
+        im->im_orientation  = ji.ji_orientation;
         pixmap_release(pm);
         return im;
       } else {
@@ -281,6 +292,9 @@ fa_imageloader(const char *url, const struct image_meta *im,
   } else if(!memcmp(svgsig1, p, sizeof(svgsig1)) ||
 	    !memcmp(svgsig2, p, sizeof(svgsig2))) {
     fmt = IMAGE_SVG;
+  } else if(!memcmp(riffsig, p, 4) && sizeof(p) >= 12 &&
+        !memcmp(webpsig, p + 8, 4)) {
+    fmt = IMAGE_WEBP;
   } else {
     snprintf(errbuf, errlen, "Unknown format");
     fa_close(fh);
@@ -328,7 +342,8 @@ int ifv_stream;
 static void
 ifv_close(void)
 {
-  free(ifv_url);
+  if(ifv_url != NULL)
+	free(ifv_url);
   ifv_url = NULL;
 
   if(ifv_ctx != NULL) {
@@ -348,33 +363,44 @@ ifv_close(void)
 static void
 ifv_autoclose(callout_t *c, void *aux)
 {
+	static int tries = 0;
   if(hts_mutex_trylock(&image_from_video_mutex[1])) {
-    callout_arm(&thumb_flush_callout, ifv_autoclose, NULL, 5);
+    callout_arm(&thumb_flush_callout, ifv_autoclose, aux, 2);
+	tries++;
+	if(tries>=10) TRACE(TRACE_DEBUG, "Thumb", "Still locked (in ifv_autoclose): %i seconds", tries*2);
+	if(tries==10 && aux!=NULL) cancellable_cancel(aux);
+
   } else {
-    TRACE(TRACE_DEBUG, "Thumb", "Closing movie for thumb sources"); 
+    TRACE(TRACE_DEBUG, "Thumb", "Closing thumb sources (ifv_autoclose)");
     ifv_close();
+	tries = 0;
     hts_mutex_unlock(&image_from_video_mutex[1]);
   }
 }
 
+static int image_encode(AVCodecContext *ctx, AVFrame *frame, AVPacket *pkt);
 /**
  *
  */
 static void
-write_thumb(const AVCodecContext *src, const AVFrame *sframe, 
+write_thumb(const AVCodecContext *src, const AVFrame *sframe,
             int width, int height, const char *cacheid, time_t mtime)
 {
   if(thumbcodec == NULL)
     return;
 
-  AVCodecContext *ctx = thumbctx;
+  //AVCodecContext *thumbctx = NULL;
+  AVCodecContext *ctx = NULL; //thumbctx;
 
-  if(ctx == NULL || ctx->width  != width || ctx->height != height) {
-    
-    if(ctx != NULL) {
+  //if(ctx == NULL || ctx->width  != width || ctx->height != height)
+  {
+
+    /*
+	if(ctx != NULL) {
       avcodec_close(ctx);
       free(ctx);
     }
+	*/
 
     ctx = avcodec_alloc_context3(thumbcodec);
     ctx->pix_fmt = AV_PIX_FMT_YUVJ420P;
@@ -385,18 +411,38 @@ write_thumb(const AVCodecContext *src, const AVFrame *sframe,
     ctx->width  = width;
     ctx->height = height;
 
+	ctx->thread_count = 1;
+
     if(avcodec_open2(ctx, thumbcodec, NULL) < 0) {
       TRACE(TRACE_ERROR, "THUMB", "Unable to open thumb encoder");
-      thumbctx = NULL;
+      //thumbctx = NULL;
+	  if(ctx != NULL) { avcodec_close(ctx); free(ctx); }
       return;
     }
-    thumbctx = ctx;
+    //thumbctx = ctx;
   }
 
   AVFrame *oframe = av_frame_alloc();
+  if(!oframe)
+  {
+	  //TRACE(TRACE_INFO, "IMAGE", "av_frame_alloc: err");
+	  return;
+  }
 
-  avpicture_alloc((AVPicture *)oframe, ctx->pix_fmt, width, height);
-      
+	oframe->format = ctx->pix_fmt;
+	oframe->width = ctx->width;
+	oframe->height = ctx->height;
+
+	int ret = 0;
+	ret = av_frame_get_buffer(oframe, 0);
+	if(ret<0) { if(ctx != NULL) { avcodec_close(ctx); free(ctx); } return; }
+	//TRACE(TRACE_INFO, "IMAGE", "av_frame_get_buffer: %i", ret);
+	ret = av_frame_make_writable(oframe);
+	if(ret<0) { if(ctx != NULL) { avcodec_close(ctx); free(ctx); } return; }
+	//TRACE(TRACE_INFO, "IMAGE", "av_frame_make_writable: %i", ret);
+
+  //avpicture_alloc((AVPicture *)oframe, ctx->pix_fmt, width, height);
+
   struct SwsContext *sws;
   sws = sws_getContext(src->width, src->height, src->pix_fmt,
                        width, height, ctx->pix_fmt, SWS_BILINEAR,
@@ -407,20 +453,73 @@ write_thumb(const AVCodecContext *src, const AVFrame *sframe,
   sws_freeContext(sws);
 
   oframe->pts = AV_NOPTS_VALUE;
+  /*
   AVPacket out;
   memset(&out, 0, sizeof(AVPacket));
   int got_packet;
   int r = avcodec_encode_video2(ctx, &out, oframe, &got_packet);
-  if(r >= 0 && got_packet) {
-    buf_t *b = buf_create_and_adopt(out.size, out.data, &av_free);
+  */
+
+	AVPacket *out = av_packet_alloc();
+	int r = image_encode(ctx, oframe, out);
+	if(oframe)
+	{
+		//TRACE(TRACE_INFO, "THUMB", "Frame av_frame_free(oframe)");
+		av_frame_unref(oframe);
+		av_frame_free(&oframe);	// av_free(oframe->data[0]);
+	}
+
+  if(r >= 0 /* && got_packet*/) {
+    //buf_t *b = buf_create_and_adopt(out->size, out->data, NULL); //&av_free
+	buf_t *b = buf_create_and_copy(out->size, out->data);
     blobcache_put(cacheid, "videothumb", b, INT32_MAX, NULL, mtime, 0);
+	//TRACE(TRACE_ERROR, "THUMB", "blobcache_put OK: %i", r);
     buf_release(b);
   } else {
-    assert(out.data == NULL);
+	  TRACE(TRACE_ERROR, "Thumb", "Error encoding video frame to jpeg: %i", r);
+    //assert(out->data == NULL);
   }
-  av_frame_free(&oframe);
+
+	av_packet_unref(out);
+	av_packet_free(&out);
+
+    if(ctx != NULL) {
+      avcodec_close(ctx);
+      free(ctx);
+    }
+  // FIX-ME!: MEMORY LEAK!!!
+  //av_packet_unref(out);
+  //av_packet_free(&out);
+  //if(r>=0 && oframe) av_frame_free(&oframe);
 }
 
+static int image_encode(AVCodecContext *ctx, AVFrame *frame, AVPacket *pkt)
+{
+    int ret;
+	ret = av_frame_make_writable(frame);
+	if(ret < 0) return ret;
+	//TRACE(TRACE_INFO, "Thumb", "frame_writable: %i", ret);
+    ret = avcodec_send_frame(ctx, frame);
+    if (ret < 0) {
+		//TRACE(TRACE_DEBUG, "Thumb", "Error sending frame: %i", ret);
+        return ret;
+    }
+
+    while (ret >= 0) {
+        ret = avcodec_receive_packet(ctx, pkt);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+		{
+			//TRACE(TRACE_ERROR, "Thumb", "Error receiving frame: %i", ret);
+            return ret;
+		}
+        else if (ret < 0) {
+            return ret;
+        }
+
+        return ret;
+    }
+	return ret;
+}
 
 /**
  *
@@ -471,20 +570,48 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
 {
   image_t *img = NULL;
 
+  //TRACE(TRACE_INFO, "video2", "%s", url);
+
+  if(cancellable_is_cancelled(c))
+  {
+	  //TRACE(TRACE_INFO, "fa_image_from_video2", "[1] Cancelled: %s", url);
+	  return NULL;
+  }
+
   if(ifv_url == NULL || strcmp(url, ifv_url)) {
     // Need to open
     int i;
     AVFormatContext *fctx;
     fa_handle_t *fh = fa_open_ex(url, errbuf, errlen,
-                                 FA_BUFFERED_BIG | FA_NON_INTERACTIVE,
+                                 /*FA_BUFFERED_BIG |*/ FA_NON_INTERACTIVE,
                                  NULL);
 
     if(fh == NULL)
       return NULL;
 
+  if(cancellable_is_cancelled(c))
+  {
+	  //TRACE(TRACE_INFO, "fa_image_from_video2", "Cancelled: %s", url);
+	  return NULL;
+  }
+
+	//fa_deadline(fh, 1000000);
+
     int strategy = fa_libav_get_strategy_for_file(fh);
 
+  if(cancellable_is_cancelled(c))
+  {
+	  //TRACE(TRACE_INFO, "strategy", "[4] Cancelled: %s", url);
+	  return NULL;
+  }
+
     AVIOContext *avio = fa_libav_reopen(fh, 0);
+
+  if(cancellable_is_cancelled(c))
+  {
+	  //TRACE(TRACE_INFO, "fa_libav_reopen", "[5] Cancelled: %s", url);
+	  return NULL;
+  }
 
     if((fctx = fa_libav_open_format(avio, url, NULL, 0, NULL,
                                     strategy)) == NULL) {
@@ -493,20 +620,30 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
       return NULL;
     }
 
+  if(cancellable_is_cancelled(c))
+  {
+	  //TRACE(TRACE_INFO, "fa_libav_open_format", "[3a] Cancelled: %s", url);
+	  fa_libav_close_format(fctx, 0);
+	  //TRACE(TRACE_INFO, "fa_libav_open_format", "Cancelled: %s", url);
+	  return NULL;
+  }
+
     if(!strcmp(fctx->iformat->name, "avi"))
       fctx->flags |= AVFMT_FLAG_GENPTS;
+
+	fctx->flags |= AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS;
 
     AVCodecContext *ctx = NULL;
     int vstream = 0;
     for(i = 0; i < fctx->nb_streams; i++) {
       AVStream *st = fctx->streams[i];
-      AVCodecContext *c = st->codec;
+      //AVCodecContext *c = st->codec;
       AVDictionaryEntry *mt;
 
-      if(c == NULL)
+      if(st->codec == NULL)
         continue;
 
-      switch(c->codec_type) {
+      switch(st->codec->codec_type) {
       case AVMEDIA_TYPE_VIDEO:
         if(ctx == NULL) {
           vstream = i;
@@ -518,7 +655,8 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
         mt = av_dict_get(st->metadata, "mimetype", NULL, AV_DICT_IGNORE_SUFFIX);
         if(sec == -1 && mt != NULL &&
            (!strcmp(mt->value, "image/jpeg") ||
-            !strcmp(mt->value, "image/png"))) {
+            !strcmp(mt->value, "image/png") ||
+			!strcmp(mt->value, "image/webp"))) {
 #if ENABLE_LIBAV_ATTACHMENT_POINTER
           int64_t offset = st->attached_offset;
           int size = st->attached_size;
@@ -555,6 +693,8 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
       return NULL;
     }
 
+	ctx->thread_count = 4;
+
     if(avcodec_open2(ctx, codec, NULL) < 0) {
       fa_libav_close_format(fctx, 0);
       snprintf(errbuf, errlen, "Unable to open codec");
@@ -573,7 +713,7 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
   AVFrame *frame = av_frame_alloc();
   int got_pic;
 
-#define MAX_FRAME_SCAN 500
+#define MAX_FRAME_SCAN 30
 
   int cnt = MAX_FRAME_SCAN;
 
@@ -585,8 +725,8 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
     int duration_in_seconds = ifv_fctx->duration / 1000000;
 
 
-    sec = MAX(1, duration_in_seconds * 0.05); // 5% of duration
-    sec = MIN(sec, 150); // , buy no longer than 2:30 in
+    sec = MAX(1, duration_in_seconds/8); // 5% of duration
+    //sec = MIN(sec, 150); // but no longer than 2:30 in
 
     sec = MAX(0, MIN(sec, duration_in_seconds - 1));
     cnt = 1;
@@ -595,27 +735,64 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
 
   int64_t ts = av_rescale(sec, st->time_base.den, st->time_base.num);
   int delayed_seek = 0;
+  int seek_flag = AVSEEK_FLAG_BACKWARD;
+  int discard = AVDISCARD_NONKEY; //AVDISCARD_NONKEY; // want_pic ? AVDISCARD_DEFAULT : AVDISCARD_NONKEY; //AVDISCARD_NONREF;
+
+  //if(ifv_ctx->codec_id == AV_CODEC_ID_H264 || ifv_ctx->codec_id == AV_CODEC_ID_HEVC)
+  //	  seek_flag = AVSEEK_FLAG_ANY;
+
+	for (int i = 0; i < ifv_fctx->nb_streams; i++)
+	{
+		st = ifv_fctx->streams[i];
+		if(i!=ifv_stream)
+			st->discard = AVDISCARD_ALL;
+	}
+
+  if(ifv_ctx->codec_id == AV_CODEC_ID_MPEG4)
+	  discard = AVDISCARD_DEFAULT;
 
   if(ifv_ctx->codec_id == AV_CODEC_ID_RV40 ||
      ifv_ctx->codec_id == AV_CODEC_ID_RV30) {
     // Must decode one frame
     delayed_seek = 1;
-  } else {
-    if(av_seek_frame(ifv_fctx, ifv_stream, ts, AVSEEK_FLAG_BACKWARD) < 0) {
-      ifv_close();
-      snprintf(errbuf, errlen, "Unable to seek to %"PRId64, ts);
-      return NULL;
-    }
+  }
+  else
+  {
+	if(ifv_ctx->codec_id == AV_CODEC_ID_MPEG4)
+	{
+		if(av_seek_frame(ifv_fctx, ifv_stream, ts, seek_flag /*AVSEEK_FLAG_BACKWARD*/) < 0)
+		{
+		  ifv_close();
+		  snprintf(errbuf, errlen, "Unable to seek to %"PRId64, ts);
+		  //TRACE(TRACE_ERROR, "Thumb", "Unable to av_seek_frame to %"PRId64, ts);
+		  return NULL;
+		}
+	}
+	else
+	{
+		//if(avformat_seek_file(ifv_fctx, ifv_stream, ts, ts, ts, 0 /*AVSEEK_FLAG_BACKWARD*/) < 0)
+		{
+			//TRACE(TRACE_ERROR, "Thumb", "Unable to avformat_seek_file to %"PRId64, ts);
+			if(av_seek_frame(ifv_fctx, ifv_stream, ts, AVSEEK_FLAG_BACKWARD) < 0)
+			{
+			  /*ifv_close();
+			  snprintf(errbuf, errlen, "Unable to seek to %"PRId64, ts);
+			  return NULL;
+			  */
+			  ;
+			}
+		}
+	}
   }
 
   avcodec_flush_buffers(ifv_ctx);
-  
+
   int i = 0;
   while(1) {
     int r;
 
     i++;
-    
+
     r = av_read_frame(ifv_fctx, &pkt);
 
     if(r == AVERROR(EAGAIN))
@@ -626,7 +803,9 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
 
     if(cancellable_is_cancelled(c)) {
       snprintf(errbuf, errlen, "Cancelled");
+	  av_packet_unref(&pkt);
       av_free_packet(&pkt);
+	  ifv_close();
       break;
     }
 
@@ -636,20 +815,23 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
     }
 
     if(pkt.stream_index != ifv_stream) {
+	  av_packet_unref(&pkt);
       av_free_packet(&pkt);
       continue;
     }
     cnt--;
-    int want_pic = pkt.pts >= ts || cnt <= 0;
+    //int want_pic = pkt.pts >= ts || cnt <= 0;
+	if(cnt<-120) discard = AVDISCARD_DEFAULT;
 
-    ifv_ctx->skip_frame = want_pic ? AVDISCARD_DEFAULT : AVDISCARD_NONREF;
+    ifv_ctx->skip_frame = discard;
 
     avcodec_decode_video2(ifv_ctx, frame, &got_pic, &pkt);
+	av_packet_unref(&pkt);
     av_free_packet(&pkt);
 
     if(delayed_seek) {
       delayed_seek = 0;
-      if(av_seek_frame(ifv_fctx, ifv_stream, ts, AVSEEK_FLAG_BACKWARD) < 0) {
+      if(av_seek_frame(ifv_fctx, ifv_stream, ts, seek_flag /*AVSEEK_FLAG_BACKWARD*/) < 0) {
         ifv_close();
         break;
       }
@@ -657,14 +839,19 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
     }
 
     // libav seems to have problems seeking on AVC videos encoded with Baseline@L4.0, 1 Ref Frame, (Variable Framerate?), prevent slowdown by endless loop.
-    if (i >= 100){
+	/*
+    if (i >= 120){
       TRACE(TRACE_DEBUG, "Thumb", "Couldn't generate thumbnail for %s", url);
       break;
     }
+	*/
 
-    if(got_pic == 0 || !want_pic) {
+    if(got_pic == 0 /* || !want_pic*/) {
       continue;
     }
+
+	//TRACE(TRACE_INFO, "Thumb", "got_pic: %i | cnt: %i", got_pic, cnt);
+
     int w,h;
 
     if(im->im_req_width != -1 && im->im_req_height != -1) {
@@ -682,11 +869,15 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
       h = im->im_req_height;
     }
 
+	//TRACE(TRACE_DEBUG, "Thumb", "SRC WxH =  %i x %i", ifv_ctx->width, ifv_ctx->height);
+	//TRACE(TRACE_DEBUG, "Thumb", "DST WxH =  %i x %i", w, h);
+
     pixmap_t *pm = pixmap_create(w, h, PIXMAP_BGR32, 0);
 
     if(pm == NULL) {
       ifv_close();
       snprintf(errbuf, errlen, "Out of memory");
+	  av_frame_unref(frame);
       av_free(frame);
       return NULL;
     }
@@ -699,10 +890,11 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
       ifv_close();
       snprintf(errbuf, errlen, "Scaling failed");
       pixmap_release(pm);
+	  av_frame_unref(frame);
       av_free(frame);
       return NULL;
     }
-    
+
     uint8_t *ptr[4] = {0,0,0,0};
     int strides[4] = {0,0,0,0};
 
@@ -722,14 +914,18 @@ fa_image_from_video2(const char *url, const image_meta_t *im,
     break;
   }
 
+  av_frame_unref(frame);
   av_frame_free(&frame);
+  //av_free(frame);
+
   if(img == NULL)
-    snprintf(errbuf, errlen, "Frame not found (scanned %d)", 
+    snprintf(errbuf, errlen, "Frame not found (scanned %d)",
 	     MAX_FRAME_SCAN - cnt);
 
   if(ifv_ctx != NULL) {
     avcodec_flush_buffers(ifv_ctx);
-    callout_arm(&thumb_flush_callout, ifv_autoclose, NULL, 5);
+
+    callout_arm(&thumb_flush_callout, ifv_autoclose, c, 2);
   }
   return img;
 }
@@ -743,8 +939,15 @@ fa_image_from_video(const char *url0, const image_meta_t *im,
 		    char *errbuf, size_t errlen, int *cache_control,
 		    cancellable_t *c)
 {
-  static char *stated_url;
-  static fa_stat_t fs;
+
+  //TRACE(TRACE_DEBUG, "fa_image_from_video", "%s", url0);
+
+  if(cancellable_is_cancelled(c)) return NULL;
+  //int is_torrent = (!strncmp(url0, "torrentfile://", 14) ? 1 : 0);
+
+
+  /*static char *stated_url; */
+  /*static fa_stat_t fs; */
   time_t stattime = 0;
   time_t mtime = 0;
   image_t *img = NULL;
@@ -760,19 +963,33 @@ fa_image_from_video(const char *url0, const image_meta_t *im,
   else
     secs = atoi(tim);
 
-  hts_mutex_lock(&image_from_video_mutex[0]);
-
-  if(strcmp(url, stated_url ?: "")) {
-    free(stated_url);
-    stated_url = NULL;
+  /*
+  //if(strcmp(url, stated_url ?: ""))
+  if(0)
+  {
+	//TRACE(TRACE_INFO, "fa_stat", "url: %s", url);
+    //free(stated_url);
+    //stated_url = NULL;
     if(fa_stat_ex(url, &fs, errbuf, errlen, FA_NON_INTERACTIVE)) {
-      hts_mutex_unlock(&image_from_video_mutex[0]);
+      //hts_mutex_unlock(&image_from_video_mutex[0]);
+	  //if(is_torrent) hts_mutex_unlock(&image_from_video_mutex[1]);
       return NULL;
     }
-    stated_url = strdup(url);
+    //stated_url = strdup(url);
   }
-  stattime = fs.fs_mtime;
-  hts_mutex_unlock(&image_from_video_mutex[0]);
+  */
+
+  if(cancellable_is_cancelled(c))
+  {
+	  //TRACE(TRACE_INFO, "fa_stat", "Cancelled: %s", url);
+	  //if(is_torrent) hts_mutex_unlock(&image_from_video_mutex[1]);
+	  return NULL;
+  }
+
+  //if(ONLY_CACHED(cache_control) && is_torrent) return NULL;
+  //if(is_torrent) hts_mutex_lock(&image_from_video_mutex[1]);
+
+  //stattime = fs.fs_mtime;
 
   if(im->im_req_width < 100 && im->im_req_height < 100) {
     siz = "min";
@@ -782,24 +999,45 @@ fa_image_from_video(const char *url0, const image_meta_t *im,
     siz = "max";
   }
 
+  hts_mutex_lock(&image_from_video_mutex[0]);
+
   snprintf(cacheid, sizeof(cacheid), "%s-%s", url0, siz);
   buf_t *b = blobcache_get(cacheid, "videothumb", 0, 0, NULL, &mtime);
-  if(b != NULL && mtime == stattime) {
+  if(b != NULL)// && (1 || mtime == stattime || is_torrent))
+  {
     img = image_coded_create_from_buf(b, IMAGE_JPEG);
     buf_release(b);
+    hts_mutex_unlock(&image_from_video_mutex[0]);
+    //if(is_torrent) hts_mutex_unlock(&image_from_video_mutex[1]);
     return img;
   }
   buf_release(b);
 
+  hts_mutex_unlock(&image_from_video_mutex[0]);
+
   if(ONLY_CACHED(cache_control)) {
-    snprintf(errbuf, errlen, "Not cached");
-    return NULL;
+
+	/*if(is_torrent)
+		TRACE(TRACE_INFO, "cache_control", "cache_control ONLY CACHED - IGNORE");
+	else
+	*/
+	{
+		snprintf(errbuf, errlen, "Not cached");
+		//if(is_torrent) hts_mutex_unlock(&image_from_video_mutex[1]);
+		return NULL;
+	}
   }
 
+
+  //if(!is_torrent)
   hts_mutex_lock(&image_from_video_mutex[1]);
+
   img = fa_image_from_video2(url, im, cacheid, errbuf, errlen,
                              secs, stattime, c);
+
+
   hts_mutex_unlock(&image_from_video_mutex[1]);
+
   if(img != NULL)
     img->im_flags |= IMAGE_ADAPTED;
   return img;

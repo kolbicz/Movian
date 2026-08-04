@@ -17,13 +17,13 @@ widget(container_y, {
       source: "skin://icons/movian.svg";
     });
     widget(label, {
-      caption: $core.app.name;
+      caption: $core.app.nameM;
       size: 3em;
     });
   });
 
   widget(label, {
-    caption: $core.app.version;
+    caption: $core.app.versionDisplay;
     alpha: 0.5;
     align: center;
   });
@@ -43,8 +43,8 @@ widget(container_y, {
   });
 
   widget(label, {
-    caption: "https://movian.tv";
-    alpha: 0.5;
+    caption: $core.app.copyright2;
+    alpha: 0.6;
     align: center;
   });
 
@@ -53,10 +53,18 @@ widget(container_y, {
   });
 
   widget(label, {
-    caption: "https://twitter.com/movianplayer";
-    alpha: 0.5;
+    caption: "https://movian.eu";
+    alpha: 0.7;
     align: center;
   });
 
+  widget(dummy, {
+    height: 0.5em;
+  });
 
+  widget(label, {
+    caption: "https://paypal.me/webpluginsBG";
+    alpha: 0.6;
+    align: center;
+  });
 });

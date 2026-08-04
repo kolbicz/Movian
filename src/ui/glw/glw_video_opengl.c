@@ -40,8 +40,11 @@
   (((w) * (c) + PIXMAP_ROW_ALIGN - 1) & ~(PIXMAP_ROW_ALIGN - 1))
 
 #define PBO_RELEASE_BEFORE_MAP
-
+#if ENABLE_WSL2
+#define NUM_SURFACES 10
+#else
 #define NUM_SURFACES 4
+#endif
 
 #include "video/video_decoder.h"
 #include "video/video_playback.h"
@@ -49,7 +52,7 @@
 
 typedef struct reap_task {
   glw_video_reap_task_t hdr;
-  
+
   GLuint pbo[3];
   GLuint tex[3];
 
@@ -228,8 +231,13 @@ yuvp_init(glw_video_t *gv)
 static void
 gv_set_tex_meta(void)
 {
+#if ENABLE_WSL2
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); // GL_LINEAR is slower
+#else
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+#endif
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
@@ -238,7 +246,7 @@ gv_set_tex_meta(void)
 /**
  *
  */
-static GLuint 
+static GLuint
 gv_tex_get(glw_video_surface_t *gvs, int plane)
 {
   return gvs->gvs_texture.textures[plane];
@@ -313,7 +321,7 @@ gv_surface_pixmap_release(glw_video_t *gv, glw_video_surface_t *gvs,
 static const float cmatrix_ITUR_BT_601[16] = {
   1.164400,   1.164400, 1.164400, 0,
   0.000000,  -0.391800, 2.017200, 0,
-  1.596000,  -0.813000, 0.000000, 0, 
+  1.596000,  -0.813000, 0.000000, 0,
  -0.874190,   0.531702,-1.085616, 1
 };
 
@@ -476,6 +484,7 @@ yuvp_blackout(glw_video_t *gv)
 static int
 yuvp_deliver(const frame_info_t *fi, glw_video_t *gv, glw_video_engine_t *gve)
 {
+  //TRACE(TRACE_DEBUG, "GLW", "yuvp_deliver");
   int hvec[3], wvec[3];
   int i, h, w;
   const uint8_t *src;
@@ -518,19 +527,21 @@ yuvp_deliver(const frame_info_t *fi, glw_video_t *gv, glw_video_engine_t *gve)
       }
     }
 
+	gconf.f_in_video_duration = fi->fi_duration;
     glw_video_put_surface(gv, s, pts, fi->fi_epoch, fi->fi_duration, 0, 0);
 
   } else {
 
     int duration = fi->fi_duration >> 1;
+	gconf.f_in_video_duration = duration;
 
     tff = fi->fi_tff ^ parity;
 
     for(i = 0; i < 3; i++) {
       w = wvec[i];
       h = hvec[i];
-      
-      src = fi->fi_data[i]; 
+
+      src = fi->fi_data[i];
       dst = s->gvs_data[i];
       const int linesize = LINESIZE(w, 1);
       while(h--) {
@@ -547,7 +558,7 @@ yuvp_deliver(const frame_info_t *fi, glw_video_t *gv, glw_video_engine_t *gve)
     for(i = 0; i < 3; i++) {
       w = wvec[i];
       h = hvec[i];
-      
+
       src = fi->fi_data[i] + fi->fi_pitch[i];
       dst = s->gvs_data[i];
       const int linesize = LINESIZE(w, 1);
@@ -563,6 +574,7 @@ yuvp_deliver(const frame_info_t *fi, glw_video_t *gv, glw_video_engine_t *gve)
 
     glw_video_put_surface(gv, s, pts, fi->fi_epoch, duration, 1, tff);
   }
+
   return 0;
 }
 

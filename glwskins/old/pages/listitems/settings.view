@@ -1,12 +1,12 @@
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
   focusOnClick: true;
   onEvent(activate, navOpen($self.url));
-  
+
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 
   widget(container_x, {
@@ -14,7 +14,7 @@ widget(backdrop, {
     widget(icon, {
       align: left;
       color: select(isFocused(), 1.0, 0.6);
-      source: $self.metadata.icon ?? 
+      source: $self.metadata.icon ??
 	translate($self.subtype,
 		  "dataroot://res/svg/Settings.svg",
 		  "sound", "dataroot://res/svg/Sound.svg",
@@ -31,14 +31,14 @@ widget(backdrop, {
       sizeScale: 2;
       shadow: isVoid($self.metadata.icon);
     });
-      
+
     widget(container_y, {
       align: center;
       widget(label, {
 	shadow: true;
 	outline: true;
 	color: select(isFocused(), 1.0, 0.6);
-	
+
 	caption: $self.metadata.title;
 	sizeScale: 1.2;
       });

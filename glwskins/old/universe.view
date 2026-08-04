@@ -1,6 +1,6 @@
 setDefaultFont($core.fonts.main);
 $ui.monofont = "dataroot://res/fonts/UbuntuMono-Regular.ttf";
-$ui.condensedfont = $core.fonts.condensed ?? 
+$ui.condensedfont = $core.fonts.condensed ??
   "skin://fonts/OpenSans-CondBold.ttf";
 $ui.background = "skin://graphics/background.jpg";
 
@@ -48,7 +48,7 @@ widget(container_z, {
 	widget(playfield, {
 	  effect: blend;
 	  noInitialTransform: true;
-    
+
 	  cloner($nav.pages, layer, {
 
 	    $clone.pageMenu = 0;
@@ -162,7 +162,7 @@ widget(container_z, {
 	shadow: true;
 	sizeScale: 2;
       });
-      
+
 
       widget(label, {
 	alpha: iir($core.audio.mastermute, 7);

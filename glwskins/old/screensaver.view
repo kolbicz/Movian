@@ -5,8 +5,8 @@ widget(container_z, {
       alphaEdges: 3;
     });
   });
-  
-  
+
+
   widget(displacement, {
     translation: [0, sinewave(10) * 0.3, 0];
     hidden: select($core.media.current.type, true, false);

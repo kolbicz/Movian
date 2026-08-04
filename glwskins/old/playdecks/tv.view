@@ -17,11 +17,11 @@ widget(container_z, {
     widget(container_x, {
       padding: [$ui.size,5];
       spacing: $ui.size / 2;
-      
+
       widget(container_y, {
 	width: $ui.size * 3;
 	align: center;
-	
+
 	widget(image, {
           aspectConstraint: true;
           source: $core.media.current.metadata.icon ??

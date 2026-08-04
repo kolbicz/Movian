@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "ext/sqlite/sqlite3.h"
+#include <sqlite3.h>
 
 #include "prop/prop.h"
 #include "prop/prop_concat.h"

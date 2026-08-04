@@ -41,6 +41,7 @@ struct video_settings {
   enum {
     VIDEO_DPAD_MASTER_VOLUME = 0,
     VIDEO_DPAD_PER_FILE_VOLUME = 1,
+    VIDEO_DPAD_CH_UPDN = 2,
   } dpad_up_down_mode;
 
   int played_threshold;
@@ -48,11 +49,22 @@ struct video_settings {
   int vdpau_deinterlace_resolution_limit;
   int continuous_playback;
   int video_accel;
+  int video_accel_mpeg4;
+
+#if ENABLE_WSL2
+  int mesa_driver;
+  int mesa_adapter;
+#endif
+  int mesa_double_fps;
 
   int seek_back_step;
   int seek_fwd_step;
 
   int video_buffer_size;
+  int video_prebuffer_size;
+  int hls_live_mode;
+  int hls_best_quality;
+  int hls_limit;
 };
 
 extern struct video_settings video_settings;

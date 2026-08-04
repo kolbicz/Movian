@@ -55,7 +55,7 @@
 	    height: 8;
 	    source: "skin://playdecks/duration-bar-bg.png";
 	  });
-      
+
 	  widget(clip, {
 	    clipping: [-1, 0, 1 - ($self.model.percentage / 100), 0];
 	    widget(backdrop, {
@@ -78,7 +78,7 @@
 
 
 
-#define SquareButtonSize() { 
+#define SquareButtonSize() {
   13 * 2 + $ui.size * 1.5
 }
 

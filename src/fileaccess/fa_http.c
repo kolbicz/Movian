@@ -49,21 +49,23 @@
 LIST_HEAD(http_request_inspector_list, http_request_inspector);
 static struct http_request_inspector_list http_request_inspectors;
 
+#define HTTP_MAX_CONCURRENT	5
+#define HTTP_MAX_PARKED		8
+
 /**
  * If we are reading data as a constant pushed stream and we get a
  * seek request forward in the file it might be better to just
  * continue to read and drop the data if the seek offset is below a
  * certain limit. SEEK_BY_READ_THRES is this limit.
  */
-#define SEEK_BY_READ_THRES (256*1024)
+#define SEEK_BY_READ_THRES (1024*1024) // 256
 
 
 /**
  * If we read more than this in a sequence, we switch to a continous
  * HTTP stream (instead of ranges)
  */
-#define STREAMING_LIMIT 128000
-
+#define STREAMING_LIMIT 16*1024*1024 //65536 // 128000
 
 
 static int http_tokenize(char *buf, char **vec, int vecsize, int delimiter);
@@ -294,8 +296,8 @@ http_connection_lockmgr(void *ptr, lockmgr_op_t op)
 static void
 http_connection_destroy(http_connection_t *hc, int dbg, const char *reason)
 {
-  HTTP_TRACE(dbg, "Disconnected from %s:%d (cid=%d) %s",
-	     hc->hc_hostname, hc->hc_port, hc->hc_id, reason);
+//  HTTP_TRACE(dbg, "Disconnected from %s:%d (cid=%d) %s",
+//	     hc->hc_hostname, hc->hc_port, hc->hc_id, reason);
   tcp_close(hc->hc_tc);
   hc->hc_tc = NULL;
   http_connection_release(hc);
@@ -352,8 +354,8 @@ http_connection_get(const char *hostname, int port, int ssl,
         TAILQ_INSERT_TAIL(&http_active_connections, hc, hc_link);
         callout_disarm(&hc->hc_callout);
         hts_mutex_unlock(&http_connections_mutex);
-        HTTP_TRACE(dbg, "Reusing connection to %s:%d (cid=%d)",
-                   hc->hc_hostname, hc->hc_port, hc->hc_id);
+//        HTTP_TRACE(dbg, "Reusing connection to %s:%d (cid=%d)",
+//                   hc->hc_hostname, hc->hc_port, hc->hc_id);
         hc->hc_reused = 1;
         tcp_set_cancellable(hc->hc_tc, c);
         return hc;
@@ -386,17 +388,24 @@ http_connection_get(const char *hostname, int port, int ssl,
   if(verify_ssl)
     tcp_connect_flags |= TCP_SSL_VERIFY;
 
-  HTTP_TRACE(dbg, "Connecting to %s:%d", hostname, port);
+/*
+  if(strstr(hostname, "formula1.com") || strstr(hostname, "footprint.net") || strstr(hostname, "deanbg.com") || strstr(hostname, ".gledane.") || strstr(hostname, "bgtv.stream") || strstr(hostname, "83.228.88.81") || strstr(hostname, "77.85.196."))
+	{;}
+  else
+	{
+	  HTTP_TRACE(dbg, "Connecting to %s:%d", hostname, port);
 
-  if(ssl)
-    TRACE(TRACE_INFO, "HTTP", "Connect to %s:%d",
-          hostname, port);
+	  if(ssl)
+		TRACE(TRACE_INFO, "HTTP", "Connect to %s:%d",
+			  hostname, port);
+	}
 
+*/
   if((tc = tcp_connect(hostname, port, errbuf, errlen,
                        timeout, tcp_connect_flags, c)) == NULL) {
-    HTTP_TRACE(dbg, "Connection to %s:%d failed -- %s%s",
-               hostname, port, errbuf,
-               cancellable_is_cancelled(c) ? ", Cancelled by user" : "");
+//    HTTP_TRACE(dbg, "Connection to %s:%d failed -- %s%s",
+//               hostname, port, errbuf,
+//               cancellable_is_cancelled(c) ? ", Cancelled by user" : "");
     goto bad;
   }
   if(cancellable_is_cancelled(c)) {
@@ -405,7 +414,10 @@ http_connection_get(const char *hostname, int port, int ssl,
     goto bad;
   }
 
-  HTTP_TRACE(dbg, "Connected to %s:%d (cid=%d)", hostname, port, id);
+///  if(strstr(hostname, "formula1.com") || strstr(hostname, "footprint.net") || strstr(hostname, "deanbg.com") || strstr(hostname, "bgtv.stream") || strstr(hostname, "83.228.88.81") || strstr(hostname, "77.85.196."))
+//	{;}
+//  else
+//    HTTP_TRACE(dbg, "Connected to %s:%d (cid=%d)", hostname, port, id);
 
   hc->hc_tc = tc;
   hc->hc_id = id;
@@ -447,8 +459,8 @@ http_connection_park(http_connection_t *hc, int dbg, int max_age,
   tcp_set_read_timeout(hc->hc_tc, 0);
   tcp_set_cancellable(hc->hc_tc, NULL);
 
-  HTTP_TRACE(dbg, "Parking connection to %s:%d (cid=%d) (expire in %ds) -- %s",
-	     hc->hc_hostname, hc->hc_port, hc->hc_id, max_age, reason);
+//  HTTP_TRACE(dbg, "Parking connection to %s:%d (cid=%d) (expire in %ds) -- %s",
+//	     hc->hc_hostname, hc->hc_port, hc->hc_id, max_age, reason);
 
   hts_mutex_lock(&http_connections_mutex);
 
@@ -459,7 +471,7 @@ http_connection_park(http_connection_t *hc, int dbg, int max_age,
   hts_cond_broadcast(&http_connections_cond);
   TAILQ_INSERT_TAIL(&http_parked_connections, hc, hc_link);
 
-  while(http_num_parked_connections > 5) {
+  while(http_num_parked_connections > HTTP_MAX_PARKED) {
     hc = TAILQ_FIRST(&http_parked_connections);
     assert(hc != NULL);
     TAILQ_REMOVE(&http_parked_connections, hc, hc_link);
@@ -571,6 +583,9 @@ validate_cookie(const char *req_host, const char *req_path,
    * The value for the request-host does not domain-match the Domain
    * attribute.
    */
+
+  //if(strstr(req_host, "deanbg.com")) return 0;
+
   const char *s = strstr(req_host, domain);
 
   if(s == NULL && *domain == '.' && !strcmp(req_host, domain + 1))
@@ -692,20 +707,22 @@ http_cookie_set(char *cookie, http_file_t *hf)
   for(i = 1; i < argc; i++) {
     if(!strncasecmp(argv[i], "domain=", strlen("domain=")))
       domain = argv[i] + strlen("domain=");
-    
+
     if(!strncasecmp(argv[i], "path=", strlen("path=")))
       path = argv[i] + strlen("path=");
-    
+
     if(!strncasecmp(argv[i], "expires=", strlen("expires="))) {
       http_ctime(&expire, argv[i] + strlen("expires="));
     }
   }
 
-  int r;
-  if((r = validate_cookie(req_host, req_path, domain, path))) {
-    HF_TRACE(hf, "Rejected cookie name=%s path=%s domain=%s value=%s error=%d",
-             name, path, domain, value, r);
-    return;
+  {
+	  int r;
+	  if((r = validate_cookie(req_host, req_path, domain, path))) {
+		HF_TRACE(hf, "Rejected cookie name=%s path=%s domain=%s value=%s error=%d",
+				 name, path, domain, value, r);
+		return;
+	  }
   }
 
   HF_TRACE(hf, "Updating cookie name=%s path=%s domain=%s value=%s expires in %d seconds",
@@ -860,7 +877,7 @@ http_auth_cache_set(http_file_t *hf)
       hac = calloc(1, sizeof(http_auth_cache_t));
       hac->hac_hostname = strdup(hostname);
       hac->hac_port = port;
-      
+
       LIST_INSERT_HEAD(&http_auth_caches, hac, hac_link);
     }
     mystrset(&hac->hac_credentials, credentials);
@@ -937,8 +954,8 @@ http_send_verb(htsbuf_queue_t *q, http_file_t *hf, const char *method)
     }
   }
 
-  htsbuf_qprintf(q, "%s %s HTTP/1.%d\r\n", method, 
-		 path, hf->hf_version);
+  htsbuf_qprintf(q, "%s %s HTTP/1.%d\r\n", method,
+                 path, hf->hf_version);
 
   if(path != hf->hf_path)
     free(path);
@@ -967,11 +984,29 @@ http_headers_init(struct http_header_list *l, const http_file_t *hf)
     http_header_add(l, "Accept-Encoding", "identity", 0);
 
   http_header_add(l, "Accept", "*/*", 0);
-  
+
   http_header_add(l, "Connection",
 		  hf->hf_want_close ? "close" : "keep-alive", 0);
-  snprintf(str, sizeof(str), APPNAMEUSER" %s %s",
-	   arch_get_system_type(), appversion);
+
+	if(
+		strstr(hc->hc_hostname, "formula1.")
+		|| strstr(hc->hc_hostname, "neterra.")
+		//|| strstr(hc->hc_hostname, "glebul")
+		|| strstr(hc->hc_hostname, "elemental.")
+		|| strstr(hc->hc_hostname, "discomax.")
+	)
+	{ snprintf(str, sizeof(str), "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.154 Safari/537.36"); }
+	else
+	{ snprintf(str, sizeof(str), APPNAMEUSER" %s %s",	arch_get_system_type(), appversion); }
+
+  /*else
+  if(strstr(hc->hc_hostname, "invivo.bg"))
+	  snprintf(str, sizeof(str), "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.5) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/3.0 Chrome/69.0.3497.106 TV Safari/537.36");
+  else
+  if(strstr(hc->hc_hostname, "83.228.88.") || strstr(hc->hc_hostname, "77.85.196.") || strstr(hc->hc_hostname, "212.39.72."))
+	  snprintf(str, sizeof(str), "okhttp/2.5.0");
+  */
+
   http_header_add(l, "User-Agent", str, 0);
 }
 
@@ -1075,7 +1110,7 @@ http_read_content(http_file_t *hf)
     while(1) {
       if(tcp_read_line(hc->hc_tc, chunkheader, sizeof(chunkheader)) < 0)
 	break;
- 
+
       csize = strtol(chunkheader, NULL, 16);
 
       if(csize > 0) {
@@ -1108,7 +1143,7 @@ http_read_content(http_file_t *hf)
   if(buf == NULL)
     return NULL;
   buf[s] = 0;
-  
+
   if(tcp_read_data(hc->hc_tc, buf, s, NULL, 0)) {
     free(buf);
     return NULL;
@@ -1134,11 +1169,11 @@ http_drain_content(http_file_t *hf)
   if((buf = http_read_content(hf)) == NULL)
     return -1;
 
-  if(hf->hf_debug) {
-    char subsys[64];
-    snprintf(subsys, sizeof(subsys), "HTTP-%d", hf->hf_id);
-    hexdump(subsys, buf_cstr(buf), buf_size(buf));
-  }
+  //if(hf->hf_debug) {
+  //  char subsys[64];
+  //  snprintf(subsys, sizeof(subsys), "HTTP-%d", hf->hf_id);
+  //  hexdump(subsys, buf_cstr(buf), buf_size(buf));
+  //}
 
   buf_release(buf);
 
@@ -1259,7 +1294,7 @@ http_read_response(http_file_t *hf, struct http_header_list *headers)
   hf->hf_chunked_transfer = 0;
   free(hf->hf_content_type);
   hf->hf_content_type = NULL;
-  hf->hf_max_age = 5;
+  hf->hf_max_age = 70;
 
   int first_line = 1;
   char *line = NULL;
@@ -1313,18 +1348,18 @@ http_read_response(http_file_t *hf, struct http_header_list *headers)
 
       if(http_tokenize(argv[1], argv, 2, -1) != 2)
 	continue;
-      
+
       if(strcasecmp(argv[0], "Basic"))
 	continue;
 
       if(strncasecmp(argv[1], "realm=\"", strlen("realm=\"")))
 	continue;
       q = c = argv[1] + strlen("realm=\"");
-      
+
       if((q = strrchr(c, '"')) == NULL)
 	continue;
       *q = 0;
-      
+
       free(hf->hf_auth_realm);
       hf->hf_auth_realm = strdup(c);
       continue;
@@ -1357,14 +1392,20 @@ http_read_response(http_file_t *hf, struct http_header_list *headers)
       else
 	hf->hf_content_encoding = HTTP_CE_IDENTITY;
     }
-    if(!strcasecmp(argv[0], "Content-Length")) {
-      i64 = strtoll(argv[1], NULL, 0);
-      hf->hf_rsize = i64;
+    if(!strcasecmp(argv[0], "Content-Length") || !strcasecmp(argv[0], "X-Content-Length"))
+	{
+		i64 = strtoll(argv[1], NULL, 0);
+		hf->hf_rsize = i64;
 
-      if(code == 200)
-	hf->hf_filesize = i64;
+		if(code == 200) hf->hf_filesize = i64;
+
+		if(!strcasecmp(argv[0], "X-Content-Length"))
+		{
+			//TRACE(TRACE_INFO, "HTTP-XCL", "%10lli bytes - %s", hf->hf_rsize, hf->hf_url);
+			hf->hf_filesize_is_final = 1;
+		} //else TRACE(TRACE_DEBUG, "HTTP-CL", "%10lli bytes - %s", hf->hf_rsize, hf->hf_url);
     }
-    
+
     if(!strcasecmp(argv[0], "Content-Type")) {
       free(hf->hf_content_type);
       hf->hf_content_type = strdup(argv[1]);
@@ -1447,7 +1488,7 @@ redirect(http_file_t *hf, int *redircount, char *errbuf, size_t errlen,
   HF_TRACE(hf, "%s: Following redirect to %s%s", hf->hf_url, hf->hf_location,
 	   code == 301 ? ", (premanent)" : "");
 
-  
+
   const http_connection_t *hc = hf->hf_connection;
 
   char *newurl =
@@ -1469,7 +1510,7 @@ redirect(http_file_t *hf, int *redircount, char *errbuf, size_t errlen,
 
   free(hf->hf_location);
   hf->hf_location = NULL;
-  
+
   if(expect_content && http_drain_content(hf))
     hf->hf_connection_mode = CONNECTION_MODE_CLOSE;
 
@@ -1484,13 +1525,13 @@ redirect(http_file_t *hf, int *redircount, char *errbuf, size_t errlen,
 /**
  *
  */
-static int 
+static int
 authenticate(http_file_t *hf, char *errbuf, size_t errlen, int *non_interactive,
 	     int expect_content)
 {
   char *username;
   char *password;
-  char buf1[128];
+  char buf1[256];
   char buf2[128];
   int r;
 
@@ -1506,7 +1547,7 @@ authenticate(http_file_t *hf, char *errbuf, size_t errlen, int *non_interactive,
     return 0;
   }
 
-  snprintf(buf1, sizeof(buf1), "%s @ %s", hf->hf_auth_realm, 
+  snprintf(buf1, sizeof(buf1), "%s @ %s", hf->hf_auth_realm,
 	   hf->hf_connection->hc_hostname);
 
   if(expect_content && http_drain_content(hf))
@@ -1537,7 +1578,7 @@ authenticate(http_file_t *hf, char *errbuf, size_t errlen, int *non_interactive,
     HF_TRACE(hf, "%s: Authenticating with %s %s",
 	     hf->hf_url, username, password);
 
-    /* Got auth credentials */  
+    /* Got auth credentials */
     snprintf(buf1, sizeof(buf1), "%s:%s", username, password);
 #if ENABLE_LIBAV
     av_base64_encode(buf2, sizeof(buf2), (uint8_t *)buf1, strlen(buf1));
@@ -1608,9 +1649,9 @@ http_connect(http_file_t *hf, char *errbuf, int errlen, int allow_reuse,
     *hf->hf_ret_location = strdup(url);
   }
 
-  url_split(proto, sizeof(proto), hf->hf_authurl, sizeof(hf->hf_authurl), 
+  url_split(proto, sizeof(proto), hf->hf_authurl, sizeof(hf->hf_authurl),
 	    hostname, sizeof(hostname), &port,
-	    hf->hf_path, sizeof(hf->hf_path), 
+	    hf->hf_path, sizeof(hf->hf_path),
 	    url);
 
   hts_mutex_unlock(&http_redirects_mutex);
@@ -1619,7 +1660,7 @@ http_connect(http_file_t *hf, char *errbuf, int errlen, int allow_reuse,
   if(port < 0)
     port = ssl ? 443 : 80;
 
-  /* empty path, default to "/" */ 
+  /* empty path, default to "/" */
   if(!hf->hf_path[0])
     strcpy(hf->hf_path, "/");
 
@@ -1646,6 +1687,7 @@ http_open0(http_file_t *hf, int probe, char *errbuf, int errlen,
 	   int *non_interactive)
 {
   int code;
+  int count = 0;
   htsbuf_queue_t q;
   int redircount = 0;
   struct http_header_list headers;
@@ -1655,7 +1697,7 @@ http_open0(http_file_t *hf, int probe, char *errbuf, int errlen,
 
   hf->hf_filesize = -1;
 
-  if(http_connect(hf, errbuf, errlen, 1, 0))
+  if(http_connect(hf, errbuf, errlen, 1, HTTP_MAX_CONCURRENT))
     return -1;
 
   if(!probe && hf->hf_filesize != -1)
@@ -1673,7 +1715,7 @@ http_open0(http_file_t *hf, int probe, char *errbuf, int errlen,
     tcp_huge_buffer(hf->hf_connection->hc_tc);
   } else {
     http_send_verb(&q, hf, "GET");
-    htsbuf_qprintf(&q, "Range: bytes=0-4095\r\n");
+    htsbuf_qprintf(&q, "Range: bytes=0-131072\r\n");
   }
 
   if(http_request_inspect(&headers, &cookies, hf, "GET", NULL, errbuf, errlen))
@@ -1739,6 +1781,17 @@ http_open0(http_file_t *hf, int probe, char *errbuf, int errlen,
     }
 
     goto again;
+
+  case 502:
+  case 503:
+  case 504:
+    if(count<10) {
+	  count++;
+      http_detach(hf, 0, "Connection-mode = close");
+	  usleep(50000);
+      goto reconnect;
+    }
+	else return -1;
 
   case 405:
     snprintf(errbuf, errlen, "Unsupported method");
@@ -1886,7 +1939,7 @@ http_read_i(http_file_t *hf, void *buf, const size_t size)
       if(hf->hf_no_retries)
         return -1;
 
-      if(http_connect(hf, NULL, 0, 1, 0))
+      if(http_connect(hf, NULL, 0, 1, HTTP_MAX_CONCURRENT))
 	return -1;
       hc = hf->hf_connection;
     }
@@ -2209,13 +2262,13 @@ http_stat(fa_protocol_t *fap, const char *url, struct fa_stat *fs,
 			    flags & FA_NON_INTERACTIVE ? &statcode : NULL,
                             flags, NULL)) == NULL)
     return statcode;
- 
+
   memset(fs, 0, sizeof(struct fa_stat));
   hf = (http_file_t *)handle;
-  
+
   fs->fs_type = CONTENT_FILE;
   fs->fs_size = hf->hf_filesize;
-  
+
   http_destroy(hf);
   return 0;
 }
@@ -2302,7 +2355,7 @@ http_load(struct fa_protocol *fap, const char *url,
   }
 
   if(max_age != NULL) {
-    if((s  = http_header_get(response_headers, "date")) != NULL && 
+    if((s  = http_header_get(response_headers, "date")) != NULL &&
        (s2 = http_header_get(response_headers, "expires")) != NULL) {
       time_t expires, sdate;
       if(!http_ctime(&sdate, s) && !http_ctime(&expires, s2))
@@ -2313,7 +2366,7 @@ http_load(struct fa_protocol *fap, const char *url,
       if((s2 = strstr(s, "max-age=")) != NULL) {
 	*max_age = atoi(s2 + strlen("max-age="));
       }
-      
+
       if(strstr(s, "no-cache") || strstr(s, "no-store")) {
 	*max_age = 0;
       }
@@ -2522,8 +2575,8 @@ parse_propfind(http_file_t *hf, htsmsg_t *xml, fa_dir_t *fd,
 	    snprintf(fname, URL_MAX, "%s", q);
 	  }
 	  url_deescape(fname);
-	  
-	  fde = fa_dir_add(fd, path, fname, 
+
+	  fde = fa_dir_add(fd, path, fname,
 			   isdir ? CONTENT_DIR : CONTENT_FILE);
 
 	  if(fde != NULL) {
@@ -2531,7 +2584,7 @@ parse_propfind(http_file_t *hf, htsmsg_t *xml, fa_dir_t *fd,
 	    fde->fde_statdone = 1;
 
 	    if(!isdir) {
-	      
+
 	      if((d = htsmsg_get_str(c, "getcontentlength")) != NULL)
 		fde->fde_stat.fs_size = strtoll(d, NULL, 10);
 	      else
@@ -2562,13 +2615,13 @@ parse_propfind(http_file_t *hf, htsmsg_t *xml, fa_dir_t *fd,
         if((d = htsmsg_get_str(c, "getlastmodified")) != NULL)
           http_ctime(&hf->hf_mtime, d);
 	goto ok;
-      } 
+      }
     }
   }
 
   if(fd == NULL) {
-    /* We should have returned earlier, server did not include the file 
-       we asked for in its reply. The server is probably broken. 
+    /* We should have returned earlier, server did not include the file
+       we asked for in its reply. The server is probably broken.
        (It should respond with a 404 or something) */
     snprintf(errbuf, errlen, "WEBDAV: File not found in XML reply");
   err:
@@ -2603,22 +2656,22 @@ dav_propfind(http_file_t *hf, fa_dir_t *fd, char *errbuf, size_t errlen,
 
   for(i = 0; i < 5; i++) {
 
-    if(hf->hf_connection == NULL) 
-      if(http_connect(hf, errbuf, errlen, 1, 0))
+    if(hf->hf_connection == NULL)
+      if(http_connect(hf, errbuf, errlen, 1, HTTP_MAX_CONCURRENT))
 	return -1;
 
     htsbuf_queue_init(&q, 0);
 
     http_headers_init(&headers, hf);
-  
-    htsbuf_qprintf(&q, 
+
+    htsbuf_qprintf(&q,
 		   "PROPFIND %s HTTP/1.%d\r\n"
 		   "Depth: %d\r\n",
 		   hf->hf_path,
 		   hf->hf_version,
 		   fd != NULL ? 1 : 0);
     LIST_INIT(&cookies);
-    if(http_request_inspect(&headers, &cookies, 
+    if(http_request_inspect(&headers, &cookies,
                             hf, "PROPFIND", NULL, errbuf, errlen))
       return -1;
 
@@ -2644,7 +2697,7 @@ dav_propfind(http_file_t *hf, fa_dir_t *fd, char *errbuf, size_t errlen,
     }
 
     switch(code) {
-      
+
     case 207: /* 207 Multi-part */
       if((buf = http_read_content(hf)) == NULL) {
 	snprintf(errbuf, errlen, "Connection lost");
@@ -2735,7 +2788,7 @@ dav_scandir(fa_protocol_t *fap, fa_dir_t *fd, const char *url,
   hf->hf_id = atomic_add_and_fetch(&http_file_tally, 1);
   hf->hf_version = 1;
   hf->hf_url = strdup(url);
-  
+
   retval = dav_propfind(hf, fd, errbuf, errlen, NULL);
   http_destroy(hf);
   return retval;
@@ -3129,6 +3182,21 @@ http_req_do(http_req_aux_t *hra)
            hf->hf_url, hf->hf_connection->hc_id);
   http_headers_send(&q, &headers, &hra->headers_in);
 
+#if 0
+  int user_range = 0;
+  if(q.hq_size>28)
+  {
+	char *r1 = malloc(q.hq_size);
+	htsbuf_peek(&q, r1, q.hq_size);
+	//hexdump("HTTP-HEAD", r1, q.hq_size);
+	if(strstr(r1, "Range: bytes="))
+	{
+		user_range = 1;
+		//TRACE(TRACE_DEBUG, "HTTP", "User requested range");
+	}
+	free(r1);
+  }
+#endif
   if(hf->hf_debug)
     trace_request(&q, hf);
 
@@ -3207,8 +3275,21 @@ http_req_do(http_req_aux_t *hra)
        with a new Range: HTTP header. Clearly a bug, but we'll deal
        with it by redoing the request
     */
-    http_detach(hf, 0, "Got 206 without asking for it");
-    goto retry;
+#if 1
+	break;
+#else
+	if(user_range)
+	{
+		//TRACE(TRACE_DEBUG, "HTTP", "We got [206 Partial Content] - user/plugin was asking for it (%"PRId64" bytes)", hf->hf_rsize);
+		break;
+	}
+	else
+	{
+		//TRACE(TRACE_DEBUG, "HTTP", "We got [206 Partial Content] without asking for it");
+		http_detach(hf, 0, "Got 206 without asking for it");
+		goto retry;
+	}
+#endif
 
   default:
 

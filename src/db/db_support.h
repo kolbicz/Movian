@@ -18,7 +18,7 @@
  *  For more information, contact andreas@lonelycoder.com
  */
 #pragma once
-#include "ext/sqlite/sqlite3.h"
+#include <sqlite3.h>
 #include "misc/rstr.h"
 
 int db_one_statement(sqlite3 *db, const char *sql, const char *src);
@@ -39,7 +39,7 @@ int db_step(sqlite3_stmt *pStmt);
 
 int db_explain(sqlite3_stmt *pStmt);
 
-int db_preparex(sqlite3 *db, sqlite3_stmt **ppStmt, const char *zSql, 
+int db_preparex(sqlite3 *db, sqlite3_stmt **ppStmt, const char *zSql,
 		const char *file, int line);
 
 

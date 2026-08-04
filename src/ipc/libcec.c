@@ -19,7 +19,7 @@
  */
 
 #include <libcec/cecc.h>
-
+#include <unistd.h>
 #include "settings.h"
 #include "htsmsg/htsmsg_store.h"
 #include "main.h"
@@ -76,14 +76,17 @@ const static action_type_t *btn_to_action[256] = {
   [CEC_USER_CONTROL_CODE_FORWARD]     = AVEC(ACTION_SKIP_FORWARD),
   [CEC_USER_CONTROL_CODE_BACKWARD]    = AVEC(ACTION_SKIP_BACKWARD),
 
-  [CEC_USER_CONTROL_CODE_CHANNEL_UP]  = AVEC(ACTION_NEXT_CHANNEL),
-  [CEC_USER_CONTROL_CODE_CHANNEL_DOWN]= AVEC(ACTION_PREV_CHANNEL),
+  [CEC_USER_CONTROL_CODE_CHANNEL_UP]  = AVEC(ACTION_SKIP_FORWARD),//AVEC(ACTION_NEXT_CHANNEL),
+  [CEC_USER_CONTROL_CODE_CHANNEL_DOWN]= AVEC(ACTION_SKIP_BACKWARD),//AVEC(ACTION_PREV_CHANNEL),
 
   [CEC_USER_CONTROL_CODE_F1_BLUE]     = AVEC(ACTION_SYSINFO),
-  [CEC_USER_CONTROL_CODE_F2_RED]      = AVEC(ACTION_SWITCH_VIEW),
   [CEC_USER_CONTROL_CODE_F4_YELLOW]   = AVEC(ACTION_SHOW_MEDIA_STATS),
 
+  [CEC_USER_CONTROL_CODE_F3_GREEN]    = AVEC(ACTION_HYPSTART),
+  [CEC_USER_CONTROL_CODE_F2_RED]      = AVEC(ACTION_HYPSTOP),
+
   [CEC_USER_CONTROL_CODE_SUB_PICTURE] = AVEC(ACTION_CYCLE_SUBTITLE),
+  [CEC_USER_CONTROL_CODE_ELECTRONIC_PROGRAM_GUIDE] = AVEC(ACTION_ITEMMENU),//CYCLE_AUDIO),
 
 };
 
@@ -144,6 +147,9 @@ handle_cec_command(void *aux, const cec_command cmd)
   case CEC_OPCODE_STANDBY:
     if(cmd.initiator == CECDEVICE_TV) {
       TRACE(TRACE_INFO, "CEC", "TV STANDBY");
+      system("/usr/bin/hyperion-remote -e \"Cinema dim lights\" > /dev/null");
+	  sleep(10);
+      system("/usr/bin/pkill -f hyperion > /dev/null");
     }
     break;
   default:

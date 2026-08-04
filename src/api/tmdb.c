@@ -38,7 +38,7 @@
       TRACE(TRACE_DEBUG, "TMDB", x, ##__VA_ARGS__);                     \
   } while(0)
 
-// http://help.themoviedb.org/kb/api/about-3
+// https://help.themoviedb.org/kb/api/about-3
 
 // Showtimes TMDB APIKEY
 #define TMDB_APIKEY "a0d71cffe2d6693d462af9e4f336bc06"
@@ -126,7 +126,7 @@ static void
 addsize(tmdb_image_size_t **p, const char *str, float aspect)
 {
   int width = 0, height = 0;
-  
+
   if(*str == 'w') {
     width = atoi(str+1);
     if(aspect > 0)
@@ -242,7 +242,7 @@ tmdb_configure(void)
 
     buf_t *result;
     char errbuf[256];
-    result = fa_load("http://api.themoviedb.org/3/configuration",
+    result = fa_load("https://api.themoviedb.org/3/configuration",
                      FA_LOAD_ERRBUF(errbuf, sizeof(errbuf)),
                      FA_LOAD_QUERY_ARG("api_key", TMDB_APIKEY),
                      FA_LOAD_QUERY_ARG("language", getlang()),
@@ -262,7 +262,7 @@ tmdb_configure(void)
       TRACE(TRACE_ERROR, "TMDB", "Got bad JSON from config -- %s", errbuf);
       goto done;
     }
-    
+
     tmdb_parse_config(doc);
     htsmsg_release(doc);
     tmdb_configured = 1;
@@ -284,7 +284,7 @@ tmdb_load_movie_cast(const char *lookup_id)
   char errbuf[256];
   buf_t *result;
 
-  snprintf(url, sizeof(url), "http://api.themoviedb.org/3/movie/%s/casts",
+  snprintf(url, sizeof(url), "https://api.themoviedb.org/3/movie/%s/casts",
 	   lookup_id);
 
  retry:
@@ -396,7 +396,7 @@ tmdb_load_movie_info(void *db, const char *item_url, const char *lookup_id,
   char errbuf[256];
   buf_t *result;
   char image_language[30];
-  snprintf(url, sizeof(url), "http://api.themoviedb.org/3/movie/%s", lookup_id);
+  snprintf(url, sizeof(url), "https://api.themoviedb.org/3/movie/%s", lookup_id);
   snprintf(image_language, sizeof(image_language), "%s,null", getlang());
 
  retry:
@@ -463,7 +463,7 @@ tmdb_load_movie_info(void *db, const char *item_url, const char *lookup_id,
     double pop;
     if(htsmsg_get_dbl(doc, "popularity", &pop))
       pop = 0;
-    
+
     char tmdb_id[16];
     snprintf(tmdb_id, sizeof(tmdb_id), "%d", id);
     itemid = metadb_insert_videoitem(db, item_url, tmdb->ms_id, tmdb_id, md,
@@ -503,13 +503,13 @@ tmdb_load_movie_info(void *db, const char *item_url, const char *lookup_id,
 	  htsmsg_t *g = htsmsg_get_map_by_field(f);
 	  if(g == NULL)
 	    continue;
-	  
+
 	  const char *title = htsmsg_get_str(g, "name");
 	  if(title != NULL)
 	    metadb_insert_videogenre(db, itemid, title);
 	}
       }
-      
+
       if(cast != NULL)
 	tmdb_insert_movie_cast(db, itemid, cast);
     }
@@ -542,7 +542,7 @@ tmdb_query_by_title_and_year0(void *db, const char *item_url,
   else
     yeartxt[0] = 0;
 
-  const char *url = "http://api.themoviedb.org/3/search/movie";
+  const char *url = "https://api.themoviedb.org/3/search/movie";
 
  retry:
   tmdb_check_rate_limit();
@@ -796,7 +796,8 @@ tmdb_init(void)
 
   setting_create(SETTING_STRING, tmdb->ms_settings, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Language (ISO 639-1 code)")),
-                 SETTING_VALUE_PROP(globallang),
+                 //SETTING_VALUE_PROP(globallang),
+                 SETTING_VALUE("en"),
                  SETTING_CALLBACK(set_lang, NULL),
                  SETTING_STORE("tmdb", "language"),
                  NULL);
@@ -852,9 +853,9 @@ be_tmdb_imageloader(const char *url, const image_meta_t *im,
     snprintf(errbuf, errlen, "Invalid TMDB url");
     return NULL;
   }
-  
+
   htsmsg_t *m = htsmsg_create_list();
-  
+
   for(;s != NULL; s = s->next) {
     htsmsg_t *img = htsmsg_create_map();
     char u[256];

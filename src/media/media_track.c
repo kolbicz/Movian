@@ -68,8 +68,9 @@ mp_add_trackr(prop_t *parent,
     if(il != NULL) {
       prop_set(p, "language", PROP_SET_STRING, il->fullname);
       prop_set(p, "isolang", PROP_SET_STRING, il->iso639_2);
-    } else 
-      TRACE(TRACE_DEBUG, "Media", "Got unknown language code: %s", rstr_get(isolang));
+    } else
+		prop_set(p, "language", PROP_SET_STRING, rstr_get(isolang));
+      //TRACE(TRACE_DEBUG, "Media", "Got unknown language code: %s", rstr_get(isolang));
   }
 
   prop_set(p, "title", PROP_SET_RSTRING, title);
@@ -249,8 +250,7 @@ mtm_suggest(media_track_mgr_t *mtm)
   if(mt == NULL)
     return;
 
-  TRACE(TRACE_DEBUG, "media", "Selecting track %s, score %d",
-        mt->mt_url, mt->mt_final_score);
+  //TRACE(TRACE_DEBUG, "media", "Selecting track %s, score %d", mt->mt_url, mt->mt_final_score);
 
   prop_select_ex(mt->mt_root, NULL, mtm->mtm_node_sub);
   event_t *e = event_create_select_track(mt->mt_url, mtm_event_type(mtm), 0);
@@ -323,9 +323,7 @@ mt_set_url(void *opaque, const char *str)
      !strcmp(rstr_get(mtm->mtm_user_pref), mt->mt_url)) {
 
     mtm->mtm_user_set = 1;
-    TRACE(TRACE_DEBUG, "media",
-          "Selecting track %s (previously selected by user)",
-          mt->mt_url);
+    //TRACE(TRACE_DEBUG, "media", "Selecting track %s (previously selected by user)", mt->mt_url);
     prop_select_ex(mt->mt_root, NULL, mtm->mtm_node_sub);
     event_t *e = event_create_select_track(mt->mt_url,
                                            mtm_event_type(mtm), 0);
@@ -556,7 +554,7 @@ mtm_update_tracks(void *opaque, prop_event_t event, ...)
   case PROP_MOVE_CHILD:
     // NOP
     break;
-    
+
   case PROP_SET_DIR:
   case PROP_WANT_MORE_CHILDS:
     break;
@@ -568,7 +566,7 @@ mtm_update_tracks(void *opaque, prop_event_t event, ...)
 
   case PROP_SELECT_CHILD:
     break;
-    
+
   default:
     abort();
   }
@@ -710,6 +708,7 @@ mp_track_mgr_next_track(media_track_mgr_t *mtm)
 int
 mp_track_mgr_select_track(media_track_mgr_t *mtm, event_select_track_t *est)
 {
+  if(!est || est->id==NULL) return 0;
   const int is_audio = mtm->mtm_type == MEDIA_TRACK_MANAGER_AUDIO;
   int rval = 0;
   const char *id = est->id;
@@ -717,25 +716,56 @@ mp_track_mgr_select_track(media_track_mgr_t *mtm, event_select_track_t *est)
 
   if(is_audio) {
 
-    TRACE(TRACE_DEBUG, "Media", "Switching to audio track %s", id);
+	if(!strncmp(id, "hlsv:", strlen("hlsv:")))
+	{
+		TRACE(TRACE_DEBUG, "HLS", "Switching to video track with bitrate %i kb/s", atoi(id + strlen("hlsv:"))/1000);
+		prop_set_string(mp->mp_prop_video_track_current, id);
+		return 0;
+	}
+	else
+	{
+		TRACE(TRACE_DEBUG, "Media", "Switching to audio track %s", id);
 
+		if(!strcmp(id, "audio:off")) {
 
-    if(!strcmp(id, "audio:off")) {
+		  mp->mp_audio.mq_stream = -1;
 
-      mp->mp_audio.mq_stream = -1;
+		} else if(!strncmp(id, "libav:", strlen("libav:"))) {
 
-    } else if(!strncmp(id, "libav:", strlen("libav:"))) {
+		  mp->mp_audio.mq_stream =  atoi(id + strlen("libav:"));
+		  rval = 1;
+		}
 
-      mp->mp_audio.mq_stream =  atoi(id + strlen("libav:"));
-      rval = 1;
-    }
+		prop_set_string(mp->mp_prop_audio_track_current, id);
+		prop_set_int(mp->mp_prop_audio_track_current_manual, est->manual);
+		if(mtm->mtm_current!=NULL)
+		{
 
-    prop_set_string(mp->mp_prop_audio_track_current, id);
-    prop_set_int(mp->mp_prop_audio_track_current_manual, est->manual);
+			media_track_t *mt;
+			//mt = RB_FIRST(&mtm->mtm_sorted_tracks);
+			//if(mt == NULL)
+				mt = TAILQ_FIRST(&mtm->mtm_tracks);
 
+			while(mt != NULL)
+			{
+				if(mt->mt_url != NULL)
+				{
+				if(!strcmp(mt->mt_url, id))
+				{
+					prop_select_ex(mt->mt_root, NULL, mtm->mtm_node_sub);
+					break;
+				}
+				}
+				mt = TAILQ_NEXT(mt, mt_link);
+			}
+		}
+	}
   } else {
 
     TRACE(TRACE_INFO, "Media", "Switching to subtitle track %s", id);
+
+	if(!strcmp(id, "sub:off"))
+		mp->mp_subtitle.mq_stream2 = -1;
 
     // Sending an empty MB_CTRL_EXT_SUBTITLE will cause unload
     mp_send_cmd_locked(mp, &mp->mp_video, MB_CTRL_EXT_SUBTITLE);
@@ -745,6 +775,29 @@ mp_track_mgr_select_track(media_track_mgr_t *mtm, event_select_track_t *est)
 
     prop_set_string(mp->mp_prop_subtitle_track_current, id);
     prop_set_int(mp->mp_prop_subtitle_track_current_manual, est->manual);
+
+	if(mtm->mtm_current!=NULL)
+	{
+
+		media_track_t *mt;
+		//mt = RB_FIRST(&mtm->mtm_sorted_tracks);
+		//if(mt == NULL)
+		mt = TAILQ_FIRST(&mtm->mtm_tracks);
+
+		while(mt != NULL)
+		{
+			if(mt->mt_url!=NULL)
+			{
+				if(!strcmp(mt->mt_url, id))
+				{
+					prop_select_ex(mt->mt_root, NULL, mtm->mtm_node_sub);
+					break;
+				}
+			}
+			mt = TAILQ_NEXT(mt, mt_link);
+		}
+	}
+
     mp->mp_video.mq_stream2 = -1;
 
     if(mystrbegins(id, "sub:")) {
@@ -752,10 +805,16 @@ mp_track_mgr_select_track(media_track_mgr_t *mtm, event_select_track_t *est)
     } else if(!strncmp(id, "libav:", strlen("libav:"))) {
 
       mp->mp_video.mq_stream2 = atoi(id + strlen("libav:"));
+      mp->mp_subtitle.mq_stream2 = -1;
       rval = 1;
+
+    } else if(!strncmp(id, "hls:", strlen("hls:"))) {
+
+      mp->mp_subtitle.mq_stream2 = atoi(id + strlen("hls:"));
 
     } else {
 
+      mp->mp_subtitle.mq_stream2 = -1;
       mp_load_ext_sub(mp, id);
     }
   }

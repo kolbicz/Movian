@@ -164,6 +164,7 @@ zip_archive_find_file(zip_archive_t *za, zip_file_t *parent,
   const char *s, *n = name;
   char *b;
   int l;
+  int must_be_dir = 0;
 
   if(parent == NULL)
     return NULL;
@@ -174,8 +175,7 @@ zip_archive_find_file(zip_archive_t *za, zip_file_t *parent,
   if(s != NULL) {
     l = s - name;
     s++;
-    if(*s == 0)
-      return NULL; 
+	must_be_dir = *s == 0;
     n = b = alloca(l + 1);
     memcpy(b, name, l);
     b[l] = 0;
@@ -195,7 +195,13 @@ zip_archive_find_file(zip_archive_t *za, zip_file_t *parent,
     zf->zf_name = strdup(n);
     zf->zf_type = s ? CONTENT_DIR : CONTENT_FILE;
     LIST_INSERT_HEAD(&parent->zf_files, zf, zf_link);
-  } 
+  }
+
+  if(must_be_dir) {
+    if(zf->zf_type != CONTENT_DIR)
+      return NULL;
+    return zf;
+  }
 
   return s != NULL ? zip_archive_find_file(za, zf, s, create) : zf;
 }
@@ -209,7 +215,7 @@ zip_archive_destroy_file(zip_file_t *zf)
 
   while((c = LIST_FIRST(&zf->zf_files)) != NULL)
     zip_archive_destroy_file(c);
-  
+
   if(zf->zf_name != NULL) {
     free(zf->zf_name);
     free(zf->zf_fullname);
@@ -281,11 +287,11 @@ zip_archive_load(zip_archive_t *za)
     return -1;
   }
 
-  cds_size = 0; 
+  cds_size = 0;
   cds_off = 0;
 
   for(i = scan_size - sizeof(zip_hdr_disk_trailer_t); i >= 0; i--) {
-    if(buf[i + 0] == 'P' && buf[i + 1] == 'K' && 
+    if(buf[i + 0] == 'P' && buf[i + 1] == 'K' &&
        buf[i + 2] == 5   && buf[i + 3] == 6) {
       disktrailer = (void *)buf + i;
       cds_size = ZIPHDR_GET32(disktrailer, rootsize);
@@ -318,14 +324,14 @@ zip_archive_load(zip_archive_t *za)
      fhdr->magic[2] != 1   || fhdr->magic[3] != 2) {
 
     int64_t o2 = fs.fs_size - (cds_size + (TRAILER_SCAN_SIZE - i));
-    
+
     fa_seek(fh, o2, SEEK_SET);
     if(fa_read(fh, buf, cds_size) != cds_size) {
       free(buf);
       fa_close(fh);
       return -1;
     }
-    
+
     if(fhdr->magic[0] != 'P' || fhdr->magic[1] != 'K' ||
        fhdr->magic[2] != 1   || fhdr->magic[3] != 2) {
       free(buf);
@@ -367,14 +373,14 @@ zip_archive_load(zip_archive_t *za)
 	zf->zf_compressed_size   = ZIPHDR_GET32(fhdr, compressed_size);
 	zf->zf_lhpos             = ZIPHDR_GET32(fhdr, lfh_offset) + displacement;
 	zf->zf_method            = ZIPHDR_GET16(fhdr, method);
-	
+
       }
     }
 
     free(fname);
 
-    l = sizeof(zip_hdr_file_header_t) + 
-      ZIPHDR_GET16(fhdr, filename_len) + 
+    l = sizeof(zip_hdr_file_header_t) +
+      ZIPHDR_GET16(fhdr, filename_len) +
       ZIPHDR_GET16(fhdr, extra_len) +
       ZIPHDR_GET16(fhdr, comment_len);
 
@@ -461,7 +467,7 @@ zip_archive_find(const char *url, const char **rp)
   if(za == NULL) {
     za = calloc(1, sizeof(zip_archive_t));
     hts_mutex_init(&za->za_mutex);
-    
+
     za->za_url = strdup(u);
     LIST_INSERT_HEAD(&zip_archives, za, za_link);
   }
@@ -571,7 +577,7 @@ static void
 zip_unreference(fa_handle_t *fh)
 {
   zip_ref_t *zr = (zip_ref_t *)fh;
-  
+
   zip_file_unref(zr->file);
   free(fh);
 }
@@ -632,7 +638,7 @@ zip_file_read(fa_handle_t *handle, void *buf, size_t size)
       return -1;
     }
   }
-  
+
   r = fa_read(zfh->zfh_archive_handle, buf, size);
 
   if(r > 0)
@@ -724,7 +730,7 @@ zip_open(fa_protocol_t *fap, const char *url, char *errbuf, size_t errlen,
   zip_fh_t *zfh;
   zip_archive_t *za;
   zip_local_file_header_t h;
- 
+
   if((zf = zip_file_find(url)) == NULL) {
     snprintf(errbuf, errlen, "Entry not found in archive");
     return NULL;
@@ -748,7 +754,7 @@ zip_open(fa_protocol_t *fap, const char *url, char *errbuf, size_t errlen,
   }
 
   fa_seek(zfh->zfh_archive_handle, zf->zf_lhpos, SEEK_SET);
- 
+
   if(fa_read(zfh->zfh_archive_handle, &h, sizeof(h)) != sizeof(h)) {
     snprintf(errbuf, errlen, "Truncated ZIP file");
     goto bad;
@@ -760,7 +766,7 @@ zip_open(fa_protocol_t *fap, const char *url, char *errbuf, size_t errlen,
     goto bad;
   }
 
-  zfh->zfh_file_start = zf->zf_lhpos + sizeof(h) + 
+  zfh->zfh_file_start = zf->zf_lhpos + sizeof(h) +
     ZIPHDR_GET16(&h, filename_len) + ZIPHDR_GET16(&h, extra_len);
 
   switch(zf->zf_method) {
@@ -803,11 +809,11 @@ zip_open(fa_protocol_t *fap, const char *url, char *errbuf, size_t errlen,
  *
  */
 
-static void 
+static void
 zip_close(fa_handle_t *handle)
 {
   zip_fh_t *zfh = (zip_fh_t *)handle;
-  
+
    zfh->zfh_reader_proto->fap_close(zfh->zfh_reader_handle);
 
   zip_file_unref(zfh->zfh_file); /* za may be destroyed here */

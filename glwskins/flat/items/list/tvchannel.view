@@ -12,7 +12,7 @@ widget(container_z, {
 
   onEvent(itemMenu, navOpen($self.eventUrl));
 
-  focusable: true;
+  focusable: select($self.metadata.autofocus, 1.5, 1.0);
 
   widget(container_x, {
     style: "ListItem";

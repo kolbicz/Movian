@@ -58,6 +58,13 @@ widget(container_z, {
       onEvent(cancel, { $view.page = 0; });
       onEvent(back,   { $view.page = 0; });
 
+      // Touch devices have no remote-control Back key. Keep this local to the
+      // expanded selector so it closes the options without leaving Settings.
+      widget(container_y, {
+        hidden: !$ui.touch;
+        BackButton(true, { $view.page = 0; });
+      });
+
       widget(icon, {
         style: "ListItemIcon";
       });

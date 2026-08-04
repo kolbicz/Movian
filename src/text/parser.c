@@ -25,6 +25,8 @@
 #include "misc/minmax.h"
 
 #include "text.h"
+#include "subtitles/subtitles_settings.h"
+
 
 
 /**
@@ -39,7 +41,7 @@ typedef struct parse_ctx {
 /**
  *
  */
-static int 
+static int
 add_one_code(int c, uint32_t *output, int olen)
 {
   if(output != NULL)
@@ -59,7 +61,7 @@ is_ws(char c)
  */
 static int
 attrib_parser(char *v, uint32_t *output, int olen,
-	      int (*fn)(uint32_t *output, int olen, const char *attrib, 
+	      int (*fn)(uint32_t *output, int olen, const char *attrib,
 			const char *value, int context),
 	      int context)
 {
@@ -210,9 +212,9 @@ html_tag_to_code(char *s, uint32_t *output, int olen, int context, int flags)
     c = TR_CODE_SET_MARGIN;
   } else if(!strcasecmp(tag, "center")) {
     c = endtag ? TR_CODE_CENTER_OFF : TR_CODE_CENTER_ON;
-  } else if(!strcasecmp(tag, "i")) {
+  } else if(!strcasecmp(tag, "i") || !strcasecmp(tag, "s")) {
     c = endtag ? TR_CODE_ITALIC_OFF : TR_CODE_ITALIC_ON;
-  } else if(!strcasecmp(tag, "b")) {
+  } else if(!strcasecmp(tag, "b") || !strcasecmp(tag, "u")) {
     c =  endtag ? TR_CODE_BOLD_OFF : TR_CODE_BOLD_ON;
   } else if(!strncasecmp(tag, "font", 4)) {
     if(endtag)
@@ -276,6 +278,11 @@ sub_tag_to_code(char *s, uint32_t *output, int olen, int context, int flags,
       } else if(*s == 'i') {
         olen = add_one_code(TR_CODE_ITALIC_ON, output, olen);
         pc->eol_reset_italic = doreset;
+      } else if(*s == 's' || *s == 'u') {
+        olen = add_one_code(TR_CODE_BOLD_ON, output, olen);
+        pc->eol_reset_bold = doreset;
+        olen = add_one_code(TR_CODE_ITALIC_ON, output, olen);
+        pc->eol_reset_italic = doreset;
       }
       s++;
     }
@@ -301,6 +308,35 @@ sub_tag_to_code(char *s, uint32_t *output, int olen, int context, int flags,
                         (hexnibble(s[5])      ),
                         output, olen);
     break;
+
+  case '\\': // {\an8}
+
+      if(strlen(s) < 4)
+      break;
+    if(s[1] != 'a')
+      goto bad;
+    if(s[2] != 'n')
+      goto bad;
+    //if(s[3] != '8')
+    //  goto bad;
+
+	if(s[3] == '4' || s[3] == '5' || s[3] == '6') // middle
+	{
+		olen = add_one_code(TR_CODE_BOLD_ON, output, olen);
+		pc->eol_reset_bold = doreset;
+	}
+	/*
+	else
+	if(s[3] == '3' || s[3] == '6' || s[3] == '9') // right
+	{
+		olen = add_one_code(TR_CODE_ITALIC_ON, output, olen);
+		pc->eol_reset_italic = doreset;
+	}
+	*/
+
+    s+= 4;
+    break;
+
   }
   return olen;
 }
@@ -311,7 +347,7 @@ sub_tag_to_code(char *s, uint32_t *output, int olen, int context, int flags,
  */
 static int
 parse_str(uint32_t *output, const char *str, int flags, int context,
-          int default_color)
+          int default_color, int subtitles)
 {
   parse_ctx_t pc = {0};
   int olen = 0, c, p = -1, d;
@@ -321,6 +357,15 @@ parse_str(uint32_t *output, const char *str, int flags, int context,
 
   while((c = utf8_get(&str)) != 0) {
     if(c == '\r')
+      continue;
+
+	if(subtitles && !olen && subtitle_settings.sdh_override && (c == '#'))
+	{
+		if(tmp) free(tmp);
+		return 0;
+	}
+
+    if(subtitles && !olen && (c == '-' || c == ' ' || c == '\n'))
       continue;
 
     if(c == '\n') {
@@ -343,13 +388,13 @@ parse_str(uint32_t *output, const char *str, int flags, int context,
     }
 
 
-    if(flags & TEXT_PARSE_SLASH_PREFIX && sol && c == '/') {
+    if(sol && (subtitles || (flags & TEXT_PARSE_SLASH_PREFIX)) && c == '/') {
       olen = add_one_code(TR_CODE_ITALIC_ON, output, olen);
       sol = 0;
       continue;
     }
 
-    if(flags & TEXT_PARSE_HTML_TAGS && c == '<') {
+    if(c == '<' && (subtitles || (flags & TEXT_PARSE_HTML_TAGS))) {
       const char *s2 = str;
       int lp = 0;
       if(tmp == NULL)
@@ -375,11 +420,17 @@ parse_str(uint32_t *output, const char *str, int flags, int context,
 	p = -1;
 	continue;
       }
+	if(subtitles && lp)
+		{
+			p = -1;
+			continue;
+		}
+
       // Failed to parse tag
       str = s2;
     }
 
-    if(flags & TEXT_PARSE_SUB_TAGS && c == '{') {
+    if((subtitles || (flags & TEXT_PARSE_SUB_TAGS)) && c == '{')  {
       const char *s2 = str;
       int lp = 0;
       if(tmp == NULL)
@@ -404,11 +455,110 @@ parse_str(uint32_t *output, const char *str, int flags, int context,
 	p = -1;
 	continue;
       }
+
+		if(subtitles && lp)
+		{
+			p = -1;
+			continue;
+		}
       // Failed to parse tag
       str = s2;
     }
 
-    if(flags & TEXT_PARSE_HTML_ENTITIES && c == '&') {
+    if(subtitles && subtitle_settings.sdh_override && c == '[')
+	{
+		const char *s2 = str;
+		int lp = 0;
+
+		while((d = utf8_get(&str)) != 0)
+		{
+			if(d == ']')
+				break;
+			lp++;
+		}
+
+		if(d == 0)
+		{
+			if(output != NULL)
+				output[olen] = '[';
+			olen++;
+			str = s2;
+			continue;
+		}
+
+		if(lp)
+		{
+			p = -1;
+			continue;
+		}
+
+		// Failed to parse tag
+		str = s2;
+    }
+
+    if(subtitles && subtitle_settings.sdh_override && c == '(')
+	{
+		const char *s2 = str;
+		int lp = 0;
+
+		while((d = utf8_get(&str)) != 0)
+		{
+			if(d == ')')
+				break;
+			lp++;
+		}
+
+		if(d == 0)
+		{
+			if(output != NULL)
+				output[olen] = '(';
+			olen++;
+			str = s2;
+			continue;
+		}
+
+		if(lp)
+		{
+			p = -1;
+			continue;
+		}
+
+		// Failed to parse tag
+		str = s2;
+    }
+
+    if(subtitles /*&& subtitle_settings.sdh_override*/ && c == ',')
+	{
+		const char *s2 = str;
+		int cf = 1;
+
+		while((d = utf8_get(&str)) != 0 && cf < 7)
+		{
+			if(d == ',' )
+				cf++;
+		}
+
+		if(d == 0 || cf < 7)
+		{
+			if(output != NULL)
+				output[olen] = ',';
+			olen++;
+			str = s2;
+			continue;
+		}
+
+		if(cf)
+		{
+			olen = 0;
+			p = -1;
+			continue;
+		}
+
+		// Failed to parse tag
+		str = s2;
+    }
+
+    if((subtitles || (flags & TEXT_PARSE_HTML_ENTITIES)) && c == '&') {
       const char *s2 = str;
       int lp = 0;
       if(tmp == NULL)
@@ -438,15 +588,33 @@ parse_str(uint32_t *output, const char *str, int flags, int context,
       continue;
     }
 
-    if(p != -1 && (d = unicode_compose(p, c)) != -1) {
-      if(output != NULL)
-	output[olen-1] = d;
-      p = -1;
-    } else {
-      p = c;
-      olen = add_one_code(c, output, olen);
-      sol = 0;
-    }
+	if(subtitles && c == '\n' && !olen) continue;
+
+	if(c == '\\')
+	{
+		const char *s2 = str;
+		d = utf8_get(&str);
+		if(d == 'N')
+		{
+			c = '\n';
+			if(!olen) continue;
+		}
+		else
+			str = s2;
+	}
+	if(p != -1 && (d = unicode_compose(p, c)) != -1)
+	{
+		if(output != NULL)
+			output[olen-1] = d;
+		p = -1;
+	}
+	else
+	{
+		p = c;
+		olen = add_one_code(c, output, olen);
+		sol = 0;
+	}
+
   }
   free(tmp);
   return olen;
@@ -467,13 +635,38 @@ text_parse(const char *str, int *lenp, int flags,
       default_color = prefix[i] & 0xffffff;
   }
 
-  *lenp = parse_str(NULL, str, flags, context, default_color);
+  *lenp = parse_str(NULL, str, flags, context, default_color, 0);
   if(*lenp == 0)
     return NULL;
   *lenp += prefixlen;
   buf = malloc(*lenp * sizeof(int));
   memcpy(buf, prefix, prefixlen * sizeof(int));
-  parse_str(buf+prefixlen, str, flags, context, default_color);
+  parse_str(buf+prefixlen, str, flags, context, default_color, 0);
   return buf;
-  
+
+}
+
+/**
+ *
+ */
+uint32_t *
+text_parse_subtitles(const char *str, int *lenp, int flags,
+	   const uint32_t *prefix, int prefixlen, int context)
+{
+  uint32_t *buf;
+  int default_color = 0xffffff;
+  for(int i = 0; i < prefixlen; i++) {
+    if((prefix[i] & 0xff000000) == TR_CODE_COLOR)
+      default_color = prefix[i] & 0xffffff;
+  }
+
+  *lenp = parse_str(NULL, str, flags, context, default_color, 1);
+  if(*lenp == 0)
+    return NULL;
+  *lenp += prefixlen;
+  buf = malloc(*lenp * sizeof(int));
+  memcpy(buf, prefix, prefixlen * sizeof(int));
+  parse_str(buf+prefixlen, str, flags, context, default_color, 1);
+  return buf;
+
 }

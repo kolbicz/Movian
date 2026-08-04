@@ -4,7 +4,7 @@ $self.close = $self.slideshow.playstatus == "stop";
 widget(container_z, {
 
   widget(slideshow, {
-    
+
     delta($ui.fullwindow, isVisible());
 
     cloner($self.model.nodes, image, {

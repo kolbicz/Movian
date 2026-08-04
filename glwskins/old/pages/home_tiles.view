@@ -8,21 +8,21 @@ $view.sizer = $ui.size / 2;
     spacing: $ui.size / 2;
     focusable: WEIGHT;
     onEvent(activate, ACTION);
-    
+
     widget(displacement, {
 
       padding: $view.sizer * -1.5 * iir(isHovered() || isFocused(), 3) + $view.sizer * iir(isPressed(), 3);
 
       widget(container_z, {
-      
+
 	widget(backdrop, {
 
 	  color: iir(0.6 + (isFocused() || isPressed() || isHovered()), 4);
 	  SquareButtonBack();
-	  
+
 	  widget(frontdrop, {
 	    SquareButtonFront();
-	  
+
 	    widget(image, {
 	      color: iir(0.6 + (isFocused() || isPressed() || isHovered()), 4);
 	      source: ICON;
@@ -50,7 +50,7 @@ $view.sizer = $ui.size / 2;
 	});
       });
     });
-    
+
     widget(label, {
       caption: CAPTION;
       outline: true;
@@ -146,7 +146,7 @@ widget(container_y, {
 	  source: "skin://graphics/shadedplate.png";
 	  border:  4;
 	  padding: [0, -2, -2, -2];
-	  
+
           widget(backdrop, {
             filterConstraintX: true;
 	    color: 0;
@@ -204,8 +204,8 @@ widget(array, {
 
   cloner($core.services.stable, container_z, {
     HOMEITEM($self.title,
-	     $self.icon ?? 
-	     "dataroot://res/svg/" + 
+	     $self.icon ??
+	     "dataroot://res/svg/" +
 	     translate($self.type, "Folder",
 		       "music",    "Music",
 		       "video",    "Movie",

@@ -60,7 +60,7 @@ gen_white_noise(int sample)
 {
   static uint32_t seed;
   seed = seed * 196314165 + 907633515;
-  
+
   union {
     uint32_t u32;
     float f;
@@ -81,7 +81,7 @@ gen_pink_noise(int sample)
   static float octaves[16];
   static float x;
 
-  float prev = octaves[k]; 
+  float prev = octaves[k];
 
   while(1) {
     float r = gen_white_noise(0) * 0.5f;
@@ -93,9 +93,8 @@ gen_pink_noise(int sample)
     else
       break;
   }
-  return (gen_white_noise(0) * 0.5f + x) * 0.125f; 
+  return (gen_white_noise(0) * 0.5f + x) * 0.125f;
 }
-
 
 /**
  *
@@ -105,7 +104,7 @@ unpack_audio(const char *url, pcm_sound_t *out)
 {
   AVFormatContext *fctx;
   AVCodecContext *ctx = NULL;
- 
+
   char errbuf[256];
   fa_handle_t *fh = fa_open_ex(url, errbuf, sizeof(errbuf), 0, NULL);
   if(fh == NULL) {
@@ -133,7 +132,7 @@ unpack_audio(const char *url, pcm_sound_t *out)
       continue;
 
     if(avcodec_open2(ctx, codec, NULL) < 0) {
-      TRACE(TRACE_ERROR, "audiotest", "Unable to codec");
+      TRACE(TRACE_ERROR, "audiotest", "Unable to open codec");
       continue;
     }
     break;
@@ -141,24 +140,56 @@ unpack_audio(const char *url, pcm_sound_t *out)
 
   AVFrame *frame = av_frame_alloc();
 
+  av_frame_get_buffer(frame, 0);
+  av_frame_make_writable(frame);
+
   out->samples = 0;
   out->data = NULL;
+int ret, got_frame;
+AVPacket *pkt = av_packet_alloc();
 
-  while(1) {
-    AVPacket pkt;
-    int r;
+while (av_read_frame (fctx, pkt) >= 0)
+{
+    if (pkt->stream_index == s)
+    {
 
-    r = av_read_frame(fctx, &pkt);
-    if(r == AVERROR(EAGAIN))
-      continue;
-    if(r)
-      break;
-    if(pkt.stream_index == s) {
-      int got_frame;
-      while(pkt.size) {
-	r = avcodec_decode_audio4(ctx, frame, &got_frame, &pkt);
-	if(r < 0)
-	  break;
+        frame = av_frame_alloc();
+
+        ret = avcodec_send_packet(ctx, pkt);
+        if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
+        {
+            av_packet_unref (pkt);
+
+            if (frame)
+            {
+                av_frame_unref(frame);
+                frame = NULL;
+            }
+
+            continue;
+        }
+        else
+        {
+            if (0 <= ret)
+                pkt->size = 0;
+
+            ret = avcodec_receive_frame(ctx, frame);
+            if (ret >= 0)
+                got_frame = 1;
+            else
+            {
+                got_frame = 0;
+
+                if (frame)
+                {
+                    av_frame_unref(frame);
+                    frame = NULL;
+                }
+
+                av_packet_unref (pkt);
+                continue;
+            }
+
 	if(got_frame) {
 	  int ns = frame->nb_samples * 2;
 
@@ -173,13 +204,20 @@ unpack_audio(const char *url, pcm_sound_t *out)
 	  }
 	  out->samples += ns;
 	}
-	pkt.data += r;
-	pkt.size -= r;
-      }
+
+
+        }
+
+
     }
-    av_free_packet(&pkt);
-  }
-  av_frame_free(&frame);
+    av_packet_unref (pkt);
+
+    if (frame)
+    {
+        av_frame_unref(frame);
+        frame = NULL;
+    }
+}
   avcodec_close(ctx);
   fa_libav_close_format(fctx, 0);
   return 0;
@@ -194,19 +232,46 @@ unpack_audio(const char *url, pcm_sound_t *out)
 static void
 unpack_speaker_positions(pcm_sound_t v[8])
 {
-  unpack_audio("dataroot://res/speaker_positions/fl.mp3", &v[0]);
-  unpack_audio("dataroot://res/speaker_positions/fr.mp3", &v[1]);
-  unpack_audio("dataroot://res/speaker_positions/c.mp3", &v[2]);
-  unpack_audio("dataroot://res/speaker_positions/lfe.mp3", &v[3]);
-  unpack_audio("dataroot://res/speaker_positions/sl.mp3", &v[4]);
-  unpack_audio("dataroot://res/speaker_positions/sr.mp3", &v[5]);
-  unpack_audio("dataroot://res/speaker_positions/rl.mp3", &v[6]);
-  unpack_audio("dataroot://res/speaker_positions/rr.mp3", &v[7]);
+  unpack_audio("dataroot://res/speaker_positions/fl.wav", &v[0]);
+  unpack_audio("dataroot://res/speaker_positions/fr.wav", &v[1]);
+  unpack_audio("dataroot://res/speaker_positions/c.wav", &v[2]);
+  unpack_audio("dataroot://res/speaker_positions/lfe.wav", &v[3]);
+  unpack_audio("dataroot://res/speaker_positions/sl.wav", &v[4]);
+  unpack_audio("dataroot://res/speaker_positions/sr.wav", &v[5]);
+  unpack_audio("dataroot://res/speaker_positions/rl.wav", &v[6]);
+  unpack_audio("dataroot://res/speaker_positions/rr.wav", &v[7]);
 }
 
 /**
  *
  */
+
+static int audio_encode(AVCodecContext *ctx, AVFrame *frame, AVPacket *pkt)
+{
+    int ret;
+
+    ret = avcodec_send_frame(ctx, frame);
+    if (ret < 0) {
+		TRACE(TRACE_ERROR, "audiotest", "Error sending frame to encoder: %i", ret);
+        return ret;
+    }
+
+    while (ret >= 0) {
+        ret = avcodec_receive_packet(ctx, pkt);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+		{
+			//TRACE(TRACE_ERROR, "AT-AC3", "Error receiving frame: %i", ret);
+            return ret;
+		}
+        else if (ret < 0) {
+            return ret;
+        }
+
+        return ret;
+    }
+	return ret;
+}
+
 static void *
 test_generator_thread(void *aux)
 {
@@ -222,19 +287,25 @@ test_generator_thread(void *aux)
   ctx->sample_fmt = AV_SAMPLE_FMT_FLTP;
   ctx->sample_rate = 48000;
   ctx->channel_layout = AV_CH_LAYOUT_5POINT1;
+  ctx->channels = 6;
 
   if(avcodec_open2(ctx, codec, NULL) < 0) {
     TRACE(TRACE_ERROR, "audio", "Unable to open encoder");
     return NULL;
   }
 
+
+  frame->nb_samples = ctx->frame_size;
+  frame->channel_layout = ctx->channel_layout;
+  frame->format = ctx->sample_fmt;
+
+  av_frame_get_buffer(frame, 0);
+
   float *genbuf[8];
   for(int i = 0; i < 8; i++) {
     genbuf[i] = av_malloc(ctx->frame_size * sizeof(float));
     frame->data[i] = (void *)genbuf[i];
   }
-
-  frame->nb_samples = ctx->frame_size;
 
   media_codec_t *mc = media_codec_create(AV_CODEC_ID_AC3, 0,
 					 NULL, NULL, NULL, mp);
@@ -247,12 +318,14 @@ test_generator_thread(void *aux)
 
   unpack_speaker_positions(voices);
 
+	AVPacket *pkt;
+	pkt = av_packet_alloc();
+
   while(1) {
 
     if(mb == NULL) {
 
-      int got_packet;
-      AVPacket pkt = {0};
+      //int got_packet;
 
       generator_t *g;
 
@@ -279,11 +352,11 @@ test_generator_thread(void *aux)
 	sample += ctx->frame_size;
 
 	goto encode;
-	
+
       default: g = &gen_pink_noise; break;
       case 2:  g = &gen_sinewave;   break;
       }
-	
+
       for(int i = 0; i < ctx->frame_size; i++) {
 	float x = g(sample);
 	for(int c = 0; c < 8; c++) {
@@ -293,14 +366,17 @@ test_generator_thread(void *aux)
       }
 
     encode:
-      av_init_packet(&pkt);
-      int r = avcodec_encode_audio2(ctx, &pkt, frame, &got_packet);
-      if(!r && got_packet) {
-	mb = media_buf_from_avpkt_unlocked(mp, &pkt);
-	av_free_packet(&pkt);
+      //av_init_packet(&pkt);
+      //int r = avcodec_encode_audio2(ctx, &pkt, frame, &got_packet);
+		;
+		int r = audio_encode(ctx, frame, pkt);
+
+      if(!r) {
+		mb = media_buf_from_avpkt_unlocked(mp, pkt);
       } else {
 	sleep(1);
       }
+
 
       mb->mb_cw = media_codec_ref(mc);
 
@@ -319,8 +395,11 @@ test_generator_thread(void *aux)
       break;
     }
     event_release(e);
-  }  
-  av_frame_free(&frame);
+  }
+
+	av_packet_unref(pkt);
+	av_free_packet(pkt);
+	av_frame_free(&frame);
 
   for(int i = 0; i < 8; i++)
     av_freep(&genbuf[i]);

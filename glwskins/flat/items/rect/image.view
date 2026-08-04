@@ -2,7 +2,7 @@
 
 widget(container_z, {
 
-  focusable: true;
+  focusable: select($self.metadata.autofocus, 1.5, 1.0);
 
   onEvent(activate, navOpen("slideshow:" + $self.url, void, $self, $parent.model, void, $parent.url));
 

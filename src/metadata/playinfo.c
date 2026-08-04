@@ -24,7 +24,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-#include "ext/sqlite/sqlite3.h"
+#include <sqlite3.h>
 
 #include "prop/prop.h"
 #include "metadata.h"
@@ -231,7 +231,7 @@ metadb_set_playcount(void *opaque, prop_event_t event, ...)
     mip_release(mip);
     return;
   }
-  if(event != PROP_SET_INT) 
+  if(event != PROP_SET_INT)
     return;
 
   va_start(ap, event);
@@ -272,14 +272,14 @@ playinfo_bind_url_to_prop(const char *url, prop_t *parent)
   mip->mip_playcount  = prop_create_r(parent, "playcount");
   mip->mip_lastplayed = prop_create_r(parent, "lastplayed");
   mip->mip_restartpos = prop_create_r(parent, "restartpos");
-  
+
   mip->mip_playcount_sub =
     prop_subscribe(PROP_SUB_NO_INITIAL_UPDATE | PROP_SUB_TRACK_DESTROY,
 		   PROP_TAG_CALLBACK, metadb_set_playcount, mip,
 		   PROP_TAG_ROOT, mip->mip_playcount,
 		   PROP_TAG_MUTEX, &mip_mutex,
 		   NULL);
-  
+
   assert(mip->mip_playcount_sub != NULL);
 
   mip->mip_url = strdup(url);

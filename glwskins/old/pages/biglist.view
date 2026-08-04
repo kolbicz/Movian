@@ -27,7 +27,7 @@ widget(container_y, {
 	cloner($page.model.nodes, loader, {
 	  time: 0.1;
 	  effect: blend;
-	  source: "biglistitems/" + 
+	  source: "biglistitems/" +
 	    translate($self.type, "default",
 		      "video", "video"
 		     )
@@ -40,7 +40,7 @@ widget(container_y, {
 	width: 4;
 	focusable: canScroll();
 	alpha: iir(canScroll(), 16);
-	
+
 	widget(quad, {
 	  alpha: iir(0.3 + 0.3 * (isFocused() || isPressed()), 4) + isHovered();
 	});

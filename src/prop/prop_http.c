@@ -29,7 +29,8 @@ static prop_t *
 prop_from_path(const char *path)
 {
   char **n = strvec_split(path, '/');
-  prop_t *p = prop_get_by_name((const char **)n, 1, NULL);
+  prop_t *p = n[0] != NULL && !strcmp(n[0], "global") ?
+    prop_findv(prop_get_global(), n + 1) : NULL;
   strvec_free(n);
   return p;
 }

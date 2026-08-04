@@ -70,7 +70,13 @@ codecname(enum AVCodecID id)
   case AV_CODEC_ID_MOV_TEXT:
     return "Text";
   case AV_CODEC_ID_SSA:
+  case AV_CODEC_ID_ASS:
     return "SSA";
+  case AV_CODEC_ID_SRT:
+  case AV_CODEC_ID_SUBRIP:
+    return "SRT";
+  case AV_CODEC_ID_AV1:
+    return "AV1";
 
   default:
     c = avcodec_find_decoder(id);
@@ -126,7 +132,7 @@ libav_metadata_rstr(AVDictionary *m, const char *key)
     else
       break;
   }
-  if(*d == 0 || !strncasecmp(d, "http://", 7)) {
+  if(*d == 0 || !strncasecmp(d, "http://", 7) || !strncasecmp(d, "https://", 8)) {
     rstr_release(ret);
     return NULL;
   }
@@ -235,13 +241,7 @@ fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
 {
   uint16_t flags;
 
-  if(l >= 256 && (!memcmp(buf, "d8:announce", 11))) {
-    md->md_contenttype = CONTENT_ARCHIVE;
-    metdata_set_redirect(md, "torrentfile://%s/", url);
-    return 1;
-  }
-
-  if(l >= 256 && (!memcmp(buf, "d13:announce-list", 17))) {
+  if(l >= 256 && (!memcmp(buf, "d8:announce", 11) || !memcmp(buf, "d13:announce-list", 17) || !memcmp(buf, "d4:info", 7) || !memcmp(buf, "d5:files", 8) || !memcmp(buf, "d6:length", 9))) {
     md->md_contenttype = CONTENT_ARCHIVE;
     metdata_set_redirect(md, "torrentfile://%s/", url);
     return 1;
@@ -308,6 +308,20 @@ fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
     return 1;
   }
 
+  /*
+  if(l > 16 && !memcmp(buf+4, "ftypheic", 8)) {
+    md->md_contenttype = CONTENT_VIDEO;
+	//TRACE(TRACE_DEBUG, "Probe", "HEIC Video Frame");
+    return 1;
+  }
+
+  if(l > 16 && !memcmp(buf+4, "ftypavif", 8)) {
+    md->md_contenttype = CONTENT_VIDEO;
+	//TRACE(TRACE_DEBUG, "Probe", "AVIF Video Frame");
+    return 1;
+  }
+  */
+
   if(!memcmp(buf, pngsig, 8)) {
     /* PNG */
     md->md_contenttype = CONTENT_IMAGE;
@@ -341,10 +355,19 @@ fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
     return 1;
   }
 
-  if(!memcmp(buf, "<?xml", 5) && find_str((char *)buf, l, "<svg")) {
+  if(!memcmp(buf, "<svg", 4) || (!memcmp(buf, "<?xml", 5) && find_str((char *)buf, l, "<svg"))) {
     /* SVG */
     md->md_contenttype = CONTENT_IMAGE;
     return 1;
+  }
+
+  if(l > 16 && buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F' && buf[8] == 'W' && buf[9] == 'E' && buf[10] == 'B' && buf[11] == 'P') {
+    /* RIFF....WEBP */
+    uint32_t siz = 8 + (buf[4] | (buf[5] << 8) | (buf[6] << 16) | (buf[7] << 24));
+    if(siz == fa_fsize(fh)) {
+      md->md_contenttype = CONTENT_IMAGE;
+      return 1;
+    }
   }
 
   if(buf[0] == '%' && buf[1] == 'P' && buf[2] == 'D' && buf[3] == 'F') {
@@ -359,14 +382,19 @@ fa_probe_header(metadata_t *md, const char *url, fa_handle_t *fh,
     return 1;
   }
 
-  if(l > 16 && mystrbegins((const char *)buf, "#EXTM3U")) {
+  if(l > 32 && mystrbegins((const char *)buf, "#EXTM3U")) {
 
-
-
-    if(strstr((const char *)buf, "#EXT-X-STREAM-INF:") ||
-       strstr((const char *)buf, "#EXT-X-TARGETDURATION:") ||
+    if(strstr((const char *)buf, "#EXT-X-TARGETDURATION:") ||
        strstr((const char *)buf, "#EXT-X-MEDIA-SEQUENCE:")) {
       // Top level HLS playlist
+      md->md_contenttype = CONTENT_VIDEO;
+      return 1;
+    }
+
+    if(strstr((const char *)buf, "#EXT-X-STREAM-INF:")) {
+      // master HLS playlist
+	  TRACE(TRACE_INFO, "HLS", "HLS master playlist detected");
+	  metdata_set_redirect(md, "hls:%s", url);
       md->md_contenttype = CONTENT_VIDEO;
       return 1;
     }
@@ -440,7 +468,8 @@ fa_lavf_load_meta(metadata_t *md, AVFormatContext *fctx,
 
   md->md_album = libav_metadata_rstr(fctx->metadata, "album");
 
-  md->md_format = rstr_alloc(fctx->iformat->long_name);
+  snprintf(tmp1, sizeof(tmp1), "%s", fctx->iformat->name); mystrupper(tmp1);
+  md->md_format = rstr_alloc(tmp1);//long_name);
 
   if(fctx->duration != AV_NOPTS_VALUE)
     md->md_duration = (float)fctx->duration / 1000000;
@@ -506,11 +535,21 @@ fa_lavf_load_meta(metadata_t *md, AVFormatContext *fctx,
 	continue;
       }
 
-      if(codec == NULL) {
-	snprintf(tmp1, sizeof(tmp1), "%s", codecname(avctx->codec_id));
-      } else {
-	metadata_from_libav(tmp1, sizeof(tmp1), codec, avctx);
-      }
+	if(codec == NULL)
+	{
+		snprintf(tmp1, sizeof(tmp1), "%s", codecname(avctx->codec_id));
+
+		if((avctx->codec_id == AV_CODEC_ID_AV1) && avctx->width && avctx->height)
+		{
+			snprintf(tmp1, sizeof(tmp1), "AV1, %dx%d", avctx->width, avctx->height);
+			has_video = 1;
+			if(!vtrack) tn = ++vtrack;
+		}
+
+	} else
+	{
+		metadata_from_libav(tmp1, sizeof(tmp1), codec, avctx);
+	}
 
       lang = av_dict_get(stream->metadata, "language", NULL,
                          AV_DICT_IGNORE_SUFFIX);
@@ -557,7 +596,7 @@ fa_probe_metadata(const char *url, char *errbuf, size_t errsize,
 
 
   AVFormatContext *fctx;
-  int park = 1;
+  int park = 0;
   fa_open_extra_t foe = {
     .foe_stats = stats
   };
@@ -568,9 +607,11 @@ fa_probe_metadata(const char *url, char *errbuf, size_t errsize,
   if(fh == NULL)
     return NULL;
 
+  fa_deadline(fh, 1500000, 1 /*tfh->tfh_probe*/); // 1.5sec
+
   metadata_t *md = metadata_create();
 
-  uint8_t buf[4097];
+  uint8_t buf[4097]; //4097
   int l = fa_read(fh, buf, sizeof(buf) - 1);
   if(l > 0) {
     buf[l] = 0;
@@ -641,13 +682,13 @@ fa_probe_dir(const char *url)
 
   fa_pathjoin(path, sizeof(path), url, "VIDEO_TS");
   if(fa_stat(path, &fs, NULL, 0) == 0 && fs.fs_type == CONTENT_DIR) {
-    md->md_contenttype = CONTENT_DVD;
+    md->md_contenttype = CONTENT_DIR;
     return md;
   }
 
   fa_pathjoin(path, sizeof(path), url, "video_ts");
   if(fa_stat(path, &fs, NULL, 0) == 0 && fs.fs_type == CONTENT_DIR) {
-    md->md_contenttype = CONTENT_DVD;
+    md->md_contenttype = CONTENT_DIR;//CONTENT_DVD;
     return md;
   }
 

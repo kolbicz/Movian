@@ -23,6 +23,22 @@
 
 const char *appversion;
 
+void
+arch_open_external_url(const char *url)
+{
+  NSString *string = [NSString stringWithUTF8String:url];
+  if(string == nil)
+    return;
+  NSURL *nsurl = [NSURL URLWithString:string];
+  if(nsurl == nil)
+    return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [[UIApplication sharedApplication] openURL:nsurl
+                                       options:@{}
+                             completionHandler:nil];
+  });
+}
+
 uint32_t
 parse_version_int(const char *str)
 {

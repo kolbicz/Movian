@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2006-2018 Lonelycoder AB
+ *  Copyright (C) 2006-2016 Lonelycoder AB
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -22,6 +22,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 
 #include "main.h"
 #include "event.h"
@@ -50,6 +54,7 @@
 #include "subtitles/subtitles.h"
 #include "db/db_support.h"
 #include "htsmsg/htsmsg_store.h"
+#include "htsmsg/htsmsg_json.h"
 #include "db/kvstore.h"
 #include "upgrade.h"
 #include "usage.h"
@@ -77,7 +82,7 @@ static LIST_HEAD(, inithelper) inithelpers;
 
 gconf_t gconf;
 
-#if ENABLE_LIBAV
+#if 0 //ENABLE_LIBAV
 static int
 fflockmgr(void **_mtx, enum AVLockOp op)
 {
@@ -147,9 +152,19 @@ init_global_info(void)
   prop_t *s = prop_create(prop_get_global(), "app");
 
   prop_set(s, "name", PROP_SET_STRING, APPNAMEUSER);
+  prop_set(s, "nameM", PROP_SET_STRING, "M7");
   prop_set(s, "version", PROP_SET_STRING, appversion);
+#if defined(__APPLE__) && TARGET_OS_OSX && defined(__arm64__)
+  char version_display[128];
+  snprintf(version_display, sizeof(version_display),
+           "%s (macOS ARM 64-bit)", appversion);
+  prop_set(s, "versionDisplay", PROP_SET_STRING, version_display);
+#else
+  prop_set(s, "versionDisplay", PROP_SET_STRING, appversion);
+#endif
   prop_set(s, "fullversion", PROP_SET_STRING, appversion);
-  prop_set(s, "copyright", PROP_SET_STRING, "© 2006 - 2018 Lonelycoder AB");
+  prop_set(s, "copyright", PROP_SET_STRING, "© 2006-2018 Lonelycoder AB");
+  prop_set(s, "copyright2", PROP_SET_STRING, "© 2016-2026 Dean Kasabow");
 }
 
 
@@ -214,6 +229,37 @@ navigator_can_start(void)
 }
 
 
+static void *
+geothread(void *aux)
+{
+  for(int i = 0; i < 10; i++) {
+
+    buf_t *b = fa_load("https://ifconfig.co/json", NULL);
+    if(b == NULL) {
+      sleep(i * 2);
+      continue;
+    }
+    htsmsg_t *msg = htsmsg_json_deserialize(buf_cstr(b));
+    buf_release(b);
+    if(msg != NULL) {
+      const char *cc = htsmsg_get_str(msg, "country");
+	  const char *city = htsmsg_get_str(msg, "city");
+	  const char *cc_iso = htsmsg_get_str(msg, "country_iso");
+	  const char *tz = htsmsg_get_str(msg, "time_zone");
+	  const char *asn = htsmsg_get_str(msg, "asn_org");
+      if(cc_iso != NULL) {
+        TRACE(TRACE_DEBUG, "GEO", "Location: %s, %s (time zone: %s) - %s", (cc != NULL ? cc : "Unknown Country"), (city != NULL ? city : "Unknown City"), (tz != NULL ? tz : "-"), (asn != NULL ? asn : "") );
+        prop_setv(prop_get_global(), "location", "cc", NULL,
+                  PROP_SET_STRING, cc_iso);
+      }
+
+      htsmsg_release(msg);
+    }
+    break;
+  }
+  return NULL;
+}
+
 /**
  *
  */
@@ -226,7 +272,7 @@ swthread(void *aux)
 
   upgrade_init();
 
-  usage_start();
+  //usage_start();
 
   if(!gconf.disable_upgrades) {
 
@@ -268,7 +314,7 @@ swthread(void *aux)
       if(timeout)
 	break;
     }
-    
+
     gconf.swrefresh = 0;
     hts_mutex_unlock(&gconf.state_mutex);
 #if ENABLE_PLUGINS
@@ -343,6 +389,7 @@ main_init(void)
   hts_mutex_init(&gconf.state_mutex);
   hts_cond_init(&gconf.state_cond, &gconf.state_mutex);
 
+  glw_settings.gs_debuglog = 1;
   gconf.exit_code = 1;
 
   unicode_init();
@@ -419,11 +466,11 @@ main_init(void)
 
 #if ENABLE_LIBAV
   /* Initialize libavcodec & libavformat */
-  av_lockmgr_register(fflockmgr);
-  av_log_set_callback(fflog);
-  av_register_all();
+  //av_lockmgr_register(fflockmgr);
+  //av_log_set_callback(fflog);
+  //av_register_all();
 
-  TRACE(TRACE_INFO, "libav", LIBAVFORMAT_IDENT", "LIBAVCODEC_IDENT", "LIBAVUTIL_IDENT" cpuflags:0x%x", av_get_cpu_flags());
+  TRACE(TRACE_INFO, "ffmpeg", LIBAVFORMAT_IDENT", "LIBAVCODEC_IDENT", "LIBAVUTIL_IDENT" (4.4.4) cpuflags:0x%x", av_get_cpu_flags()); //  2023-12-23)
 #endif
 
   init_group(INIT_GROUP_GRAPHICS);
@@ -449,15 +496,17 @@ main_init(void)
 
 #if ENABLE_PLUGINS
   /* Initialize plugin manager */
+  //plugins_init();
   plugins_init(gconf.devplugins);
 #endif
 
   generate_device_id();
-  TRACE(TRACE_DEBUG, "SYSTEM", "Hashed device ID: %s", gconf.device_id);
+  //TRACE(TRACE_DEBUG, "SYSTEM", "Hashed device ID: %s", gconf.device_id);
   if(gconf.device_type[0])
     TRACE(TRACE_DEBUG, "SYSTEM", "Device type: %s", gconf.device_type);
 
   /* Start software installer thread (plugins, upgrade, etc) */
+  hts_thread_create_detached("geothread", geothread, NULL, THREAD_PRIO_BGTASK);
   hts_thread_create_detached("swinst", swthread, NULL, THREAD_PRIO_BGTASK);
 
   /* Internationalization */
@@ -500,39 +549,38 @@ parse_opts(int argc, char **argv)
   while(argc > 0) {
     if(!strcmp(argv[0], "-h") || !strcmp(argv[0], "--help")) {
       printf(APPNAMEUSER" %s\n"
-	     "Copyright (C) 2006-2018 Lonelycoder AB\n"
+	     "Copyright (C) 2006-2016 Lonelycoder AB\n"
 	     "\n"
 	     "Usage: %s [options] [<url>]\n"
 	     "\n"
 	     "  Options:\n"
-	     "   -h, --help          - This help text.\n"
-	     "   -d                  - Enable debug output.\n"
-	     "   --no-ui             - Start without UI.\n"
-	     "   --fullscreen        - Start in fullscreen mode.\n"
-	     "   --libav-log         - Print libav log messages.\n"
-	     "   --with-standby      - Enable system standby.\n"
-	     "   --with-poweroff     - Enable system power-off.\n"
-	     "   -s <path>           - Non-default settings path.\n"
-	     "   --ui <ui>           - Use specified user interface.\n"
-	     "   -L <ip:host>        - Send log messages to remote <ip:host>.\n"
-	     "   --syslog            - Send log messages to syslog.\n"
+	     "   -h, --help        - This help text.\n"
+	     "   -d                - Enable debug output.\n"
+	     "   --no-ui           - Start without UI.\n"
+	     "   --fullscreen      - Start in fullscreen mode.\n"
+	     "   --libav-log       - Print libav log messages.\n"
+	     "   --with-standby    - Enable system standby.\n"
+	     "   --with-poweroff   - Enable system power-off.\n"
+	     "   -s <path>         - Non-default settings path.\n"
+	     "   --ui <ui>         - Use specified user interface.\n"
+	     "   -L <ip:host>      - Send log messages to remote <ip:host>.\n"
+	     "   --syslog          - Send log messages to syslog.\n"
 #if ENABLE_STDIN
-	     "   --stdin             - Listen on stdin for events.\n"
+	     "   --stdin           - Listen on stdin for events.\n"
 #endif
-	     "   -v <view>           - Use specific view for <url>.\n"
-	     "   --cache <path>      - Set path for cache [%s].\n"
+	     "   -v <view>         - Use specific view for <url>.\n"
+	     "   --cache <path>    - Set path for cache [%s].\n"
 	     "   --persistent <path> - Set path for persistent stuff [%s].\n"
 #if ENABLE_HTTPSERVER
-	     "   --disable-upnp      - Disable UPNP/DLNA stack.\n"
+	     "   --disable-upnp    - Disable UPNP/DLNA stack.\n"
 #endif
-	     "   --disable-sd        - Disable service discovery (mDNS, etc).\n"
-	     "   -p                  - Path to plugin directory to load\n"
-	     "                         Intended for plugin development\n"
-	     "   --plugin-repo       - URL to plugin repository\n"
-	     "                         Intended for plugin development\n"
-	     "   --proxy <host:port> - Use SOCKS 4/5 proxy for http requests.\n"
-	     "   -j <path>           - Load javascript file\n"
-	     "   --skin <skin>       - Select skin (for GLW ui)\n"
+	     "   --disable-sd      - Disable service discovery (mDNS, etc).\n"
+	     "   -p                - Path to plugin directory to load\n"
+	     "                       Intended for plugin development\n"
+	     "   --plugin-repo     - URL to plugin repository\n"
+	     "                       Intended for plugin development\n"
+	     "   -j <path>           Load javascript file\n"
+	     "   --skin <skin>     Select skin (for GLW ui)\n"
 	     "\n"
 	     "  URL is any URL-type supported, "
 	     "e.g., \"file:///...\"\n"

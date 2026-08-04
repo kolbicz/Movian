@@ -1,0 +1,133 @@
+#import "skin://theme.view"
+
+#define ITEM(CAPTION, EVENT, ICON, HIDDEN=false) {
+  widget(container_z, {
+	zoffset: 135;
+    hidden: HIDDEN;
+    ListItemHighlight();
+    focusable: true;
+	clickable: true;
+
+    onEvent(activate, EVENT);
+
+    widget(container_x, {
+      padding:[1em, 0.1em];
+      spacing: 0.5em;
+      widget(icon, {
+        source: ICON;
+      });
+
+      widget(label, {
+        caption: CAPTION;
+      });
+    });
+  });
+
+}
+
+	widget(displacement, {
+	  scaling: [0.5 + iir($clone.itemMenu != void, 4) * 0.5,
+				0.5 + iir($clone.itemMenu != void, 4) * 0.5,
+				1];
+widget(popup, {
+  .screenPositionX ?=  $clone.popupScreenX;
+  .screenPositionY ?=  $clone.popupScreenY;
+
+  clickable: true;
+
+  onEvent(click, {
+    $clone.itemMenu = void;
+  }, true, true, true);
+
+  widget(container_z, {
+    zoffset: 130;
+    widget(quad, {
+      alpha: 0.8;
+      color: 0;
+    });
+
+    widget(container_y, {
+      padding:[0.2em, 0.2em];
+
+      widget(container_x, {
+        padding:[0.2em, 0.2em];
+        spacing: 0.5em;
+        widget(image, {
+		  width: 4.5em;
+          source: $args.metadata.nows;
+		  cornerRadius: 0.3em;
+        });
+
+        widget(label, {
+          maxWidth: 20em;
+		  width: 20em;
+		  maxlines: 2;
+          caption: $args.metadata.title;
+		  ellipsize: true;
+        });
+
+        widget(image, {
+		  width: 4.5em;
+		  height: 2em;
+          source: $args.metadata.icon;
+        });
+      });
+      widget(dummy, {
+        height: 0.1em;
+      });
+
+        widget(quad, {
+        height: 1;
+        color: 0;
+        alpha: 0.5;
+      });
+      widget(quad, {
+        height: 1;
+        alpha: 0.5;
+      });
+	  widget(bar, {
+		alpha: 0.9;
+		height: 1;
+		color1: [32,32,32];
+		color2: [128,128,128];
+		fill: $args.metadata.tnow / ($args.metadata.nstart - $args.metadata.cstart);
+	  });
+      widget(dummy, {
+        height: 0.1em;
+      });
+
+        widget(label, {
+		  padding:[0.2em, 0.2em];
+          maxWidth: 20em;
+		  width: 20em;
+		  size: 0.9em;
+          caption: $args.metadata.description;
+		  maxlines: 12;
+		  ellipsize: true;
+        });
+
+      widget(dummy, {
+        height: 0.25em;
+      });
+      widget(quad, {
+        height: 1;
+        alpha: 0.5;
+      });
+      widget(dummy, {
+        height: 0.25em;
+      });
+
+    cloner($args.options, loader, {
+      time: 0.1;
+      noInitialTransform: true;
+      effect: blend;
+      source: "skin://items/list/" + $self.type + ".view";
+      hidden: !$self.enabled;
+	  onEvent(activate, {$view.close = true;});
+      onEvent("item.*", {$view.close = true; deliverEvent($args);});
+    });
+
+    });
+  });
+});
+}); //displacement

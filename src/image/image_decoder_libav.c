@@ -82,7 +82,7 @@ fulhack(const AVPicture *pict, int src_w, int src_h,
  * Rescaling with libswscale
  */
 static pixmap_t *
-pixmap_rescale_swscale(const AVPicture *pict, int src_pix_fmt, 
+pixmap_rescale_swscale(const AVPicture *pict, int src_pix_fmt,
 		       int src_w, int src_h,
 		       int dst_w, int dst_h,
 		       int with_alpha, int margin)
@@ -94,6 +94,9 @@ pixmap_rescale_swscale(const AVPicture *pict, int src_pix_fmt,
   int strides[4];
   pixmap_t *pm;
   int outflags = 0;
+
+  if(src_pix_fmt == AV_PIX_FMT_YUVJ420P) src_pix_fmt = AV_PIX_FMT_YUV420P;
+  else if(src_pix_fmt == AV_PIX_FMT_YUVJ444P) src_pix_fmt = AV_PIX_FMT_YUV444P;
 
   const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(src_pix_fmt);
   if(desc && !(desc->flags & AV_PIX_FMT_FLAG_ALPHA))
@@ -128,10 +131,10 @@ pixmap_rescale_swscale(const AVPicture *pict, int src_pix_fmt,
     TRACE(TRACE_DEBUG, "swscale", "Converting %d x %d [%s] to %d x %d [%s]",
 	  src_w, src_h, av_get_pix_fmt_name(src_pix_fmt),
 	  dst_w, dst_h, av_get_pix_fmt_name(dst_pix_fmt));
-  
-  sws = sws_getContext(src_w, src_h, src_pix_fmt, 
+
+  sws = sws_getContext(src_w, src_h, src_pix_fmt,
 		       dst_w, dst_h, dst_pix_fmt,
-		       SWS_LANCZOS | 
+		       SWS_LANCZOS |
 		       (gconf.enable_image_debug ? SWS_PRINT_INFO : 0),
                        NULL, NULL, NULL);
   if(sws == NULL)
@@ -169,7 +172,7 @@ pixmap_rescale_swscale(const AVPicture *pict, int src_pix_fmt,
   pic.linesize[2] = 0;
   pic.linesize[3] = 0;
   sws_scale(sws, ptr, strides, 0, src_h, pic.data, pic.linesize);
-#if 0  
+#if 0
   if(pm->pm_type == PIXMAP_BGR32) {
     uint32_t *dst = pm->pm_data;
     int i;
@@ -264,7 +267,7 @@ pixmap_from_avpic(AVPicture *pict, int pix_fmt,
   case AV_PIX_FMT_BGR32:
     fmt = PIXMAP_BGR32;
     break;
-    
+
   case AV_PIX_FMT_Y400A:
     if(!im->im_can_mono) {
       need_format_conv = 1;
@@ -424,6 +427,9 @@ image_decode_libav(image_coded_type_t type,
   case IMAGE_BMP:
     codec = avcodec_find_decoder(AV_CODEC_ID_BMP);
     break;
+  case IMAGE_WEBP:
+    codec = avcodec_find_decoder(AV_CODEC_ID_WEBP);
+    break;
   default:
     codec = NULL;
     break;
@@ -436,12 +442,14 @@ image_decode_libav(image_coded_type_t type,
 
   ctx = avcodec_alloc_context3(codec);
 
+  ctx->thread_count = 1;
+
   if(avcodec_open2(ctx, codec, NULL) < 0) {
     av_free(ctx);
     snprintf(errbuf, errlen, "Unable to open codec");
     return NULL;
   }
-  
+
   frame = av_frame_alloc();
 
   AVPacket avpkt;
@@ -472,7 +480,7 @@ image_decode_libav(image_coded_type_t type,
 
   pixmap_t *pm;
 
-  pm = pixmap_from_avpic((AVPicture *)frame, 
+  pm = pixmap_from_avpic((AVPicture *)frame,
 			 ctx->pix_fmt, ctx->width, ctx->height, w, h, im);
 
   if(pm != NULL) {

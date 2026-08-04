@@ -340,7 +340,7 @@ typedef enum {
   GLW_SIGNAL_SCROLL,
 
   /**
-   * Sent to a widget when it enters or leaves the current 
+   * Sent to a widget when it enters or leaves the current
    * "path of focus / hover / pressed"
    */
   GLW_SIGNAL_FHP_PATH_CHANGED,
@@ -355,12 +355,12 @@ typedef enum {
 
   /**
    * Emitted by a widget when it can be scrolled / moved
-   */ 
+   */
   GLW_SIGNAL_CAN_SCROLL_CHANGED,
 
   /**
    *
-   */ 
+   */
   GLW_SIGNAL_FULLWINDOW_CONSTRAINT_CHANGED,
 
   /**
@@ -409,7 +409,7 @@ typedef struct {
 } glw_move_op_t;
 
 
-typedef int (glw_callback_t)(struct glw *w, void *opaque, 
+typedef int (glw_callback_t)(struct glw *w, void *opaque,
 			     glw_signal_t signal, void *value);
 
 
@@ -860,7 +860,7 @@ typedef struct glw_root {
   prop_t *gr_screensaver_active;
   int gr_inhibit_screensaver;
   prop_sub_t *gr_disable_screensaver_sub;
-  
+
   /**
    * View loader
    */
@@ -995,7 +995,7 @@ typedef struct glw_root {
   Vec4 gr_stencil[2];
   const struct glw_backend_texture *gr_stencil_texture;
 #endif
-  
+
 #if NUM_FADERS > 0
   Vec4 gr_fader[NUM_FADERS];
   float gr_fader_alpha[NUM_FADERS];
@@ -1029,7 +1029,7 @@ typedef struct glw_root {
 
   // On Screen Keyboard
 
-  void (*gr_open_osk)(struct glw_root *gr, 
+  void (*gr_open_osk)(struct glw_root *gr,
 		      const char *title, const char *str, struct glw *w,
 		      int password);
 
@@ -1050,7 +1050,7 @@ typedef struct glw_root {
 
   void *gr_private;
   void *gr_window;
-  
+
   uint8_t gr_left_pressed; // For pointer -> touch converter
 
   struct glw_rec *gr_rec;
@@ -1592,7 +1592,7 @@ static inline void glw_zinc(glw_rctx_t *rc)
 
 
 /**
- * Global flush interface 
+ * Global flush interface
  */
 typedef struct glw_gf_ctrl {
   LIST_ENTRY(glw_gf_ctrl) link;
@@ -1671,7 +1671,7 @@ void glw_blendmode(struct glw_root *gr, int mode);
 
 void glw_frontface(struct glw_root *gr, char how);
 
-struct glw_program *glw_make_program(struct glw_root *gr, 
+struct glw_program *glw_make_program(struct glw_root *gr,
 				     const char *vertex_shader,
 				     const char *fragment_shader);
 

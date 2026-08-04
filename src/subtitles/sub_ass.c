@@ -45,8 +45,8 @@ ass_get_ts(const char *buf)
   return 1000LL * (
     (buf[ 0] - '0') *  3600000LL +
     (buf[ 2] - '0') *   600000LL +
-    (buf[ 3] - '0') *    60000LL + 
-    (buf[ 5] - '0') *    10000LL + 
+    (buf[ 3] - '0') *    60000LL +
+    (buf[ 5] - '0') *    10000LL +
     (buf[ 6] - '0') *     1000LL +
     (buf[ 8] - '0') *      100LL +
     (buf[ 9] - '0') *       10LL);
@@ -110,7 +110,7 @@ typedef struct ass_style {
 } ass_style_t;
 
 static const ass_style_t ass_style_default = {
-  .as_primary_color = 0xffffff,
+  .as_primary_color = 0xaaaaaa,
   .as_outline_color = 0x000000,
   .as_shadow = 1,
   .as_outline = 1,
@@ -118,8 +118,8 @@ static const ass_style_t ass_style_default = {
   .as_alignment = 1,
   .as_margin_left = 20,
   .as_margin_right = 20,
-  .as_margin_vertical = 20,
-  .as_fontsize = 48,
+  .as_margin_vertical = 45,
+  .as_fontsize = 18,
 };
 
 typedef struct ass_decoder_ctx {
@@ -133,7 +133,7 @@ typedef struct ass_decoder_ctx {
   LIST_HEAD(, ass_style) adc_styles;
   const char *adc_style_format;
   char *adc_event_format;
-  
+
   int adc_resx;
   int adc_resy;
 
@@ -218,7 +218,7 @@ ass_parse_color(const char *str)
 
   if(*str == 'h' || *str == 'H')
     str++;
-  
+
   while(hexnibble(str[l]) != -1)
     l++;
 
@@ -255,7 +255,7 @@ ass_parse_v4style(ass_decoder_ctx_t *adc, const char *str)
     return;
 
   as = calloc(1, sizeof(ass_style_t));
-  as->as_primary_color = 0x00ffffff;
+  as->as_primary_color = 0x00aaaaaa;
   as->as_outline_color = 0x00000000;
 
   while(*fmt && *str) {
@@ -379,7 +379,7 @@ ass_decode_line(ass_decoder_ctx_t *adc, const char *str)
 
     s = mystrbegins(str, "Dialogue:");
     if(s != NULL) {
-      if(adc->adc_dialogue_handler == NULL) 
+      if(adc->adc_dialogue_handler == NULL)
 	return 1;
       adc->adc_dialogue_handler(adc, s);
       break;
@@ -435,13 +435,13 @@ typedef struct ass_dialogue {
 
   int ad_fadein;
   int ad_fadeout;
-  
+
   int16_t ad_x;
   int16_t ad_y;
 
   int8_t ad_alignment;
   int8_t ad_absolute_pos;
-  
+
   char ad_not_supported;
 
 } ass_dialoge_t;
@@ -474,7 +474,7 @@ ass_handle_override(ass_dialoge_t *ad, const char *src, int len,
   str = alloca(len + 1);
   memcpy(str, src, len);
   str[len] = 0;
-  
+
   while((cmd = strchr(str, '\\')) != NULL) {
   next:
     str = ++cmd;
@@ -596,19 +596,20 @@ ad_dialogue_decode(const ass_decoder_ctx_t *adc, const char *line,
   if(font_subs[0])
     ad_txt_append(&ad, TR_CODE_FONT_FAMILY |
 		  freetype_family_id(font_subs, fontdomain));
-  
+
   else if(as->as_fontname)
     ad_txt_append(&ad, TR_CODE_FONT_FAMILY |
 		  freetype_family_id(as->as_fontname, fontdomain));
 
   if(as == &ass_style_default || subtitle_settings.style_override) {
 
+	ad_txt_append(&ad, TR_CODE_SIZE_PX | 18);
     ad_txt_append(&ad, TR_CODE_COLOR | subtitle_settings.color);
+	ad_txt_append(&ad, TR_CODE_OUTLINE | subtitle_settings.outline_size);
     ad_txt_append(&ad, TR_CODE_OUTLINE_COLOR | subtitle_settings.outline_color);
+	ad_txt_append(&ad, TR_CODE_SHADOW | subtitle_settings.shadow_displacement);
     ad_txt_append(&ad, TR_CODE_SHADOW_COLOR | subtitle_settings.shadow_color);
-
-    ad_txt_append(&ad, adc->adc_shadow | subtitle_settings.shadow_displacement);
-    ad_txt_append(&ad, adc->adc_outline | subtitle_settings.outline_size);
+	ad_txt_append(&ad, TR_CODE_BBOX | subtitle_settings.bounding_box);
 
   } else {
     int alpha;
@@ -632,6 +633,8 @@ ad_dialogue_decode(const ass_decoder_ctx_t *adc, const char *line,
 
     if(as->as_outline)
       ad_txt_append(&ad, adc->adc_outline | (as->as_outline & 0xff));
+
+	ad_txt_append(&ad, TR_CODE_BBOX | subtitle_settings.bounding_box);
   }
 
   int c;

@@ -1,4 +1,5 @@
-setDefaultFont("skin://fonts/RobotoCondensed-Regular.ttf");
+//setDefaultFont("skin://fonts/RobotoCondensed-Regular.ttf");
+setDefaultFont(select(isVoid($core.fonts.main), "skin://fonts/RobotoCondensed-Regular.ttf", $core.fonts.main));
 
 $ui.sizeOffset = 4;
 $ui.xmargin = select($ui.aspect > 1, $ui.width / 100, 0.2em);
@@ -22,14 +23,6 @@ onEvent(logwindow, {
 onEvent(back, {
   $ui.logwindow = false;
 }, $ui.logwindow);
-
-onEvent(back, {
-  $ui.mediainfo = false;
-}, $ui.mediainfo);
-
-onEvent(back, {
-  $ui.sysinfo = false;
-}, $ui.sysinfo);
 
 
 $ui.orientation = select($ui.aspect > 1, "landscape", "portrait");
@@ -57,11 +50,18 @@ widget(container_z, {
   });
 
   widget(loader, {
-    hidden: iir($nav.currentpage.model.loading, 8) < 0.001;
+    hidden: iir($nav.currentpage.model.loading==1, 4) < 0.001; // !($nav.currentpage.model.loading==1); //
     zoffset: -999;
-    alpha: iir($nav.currentpage.model.loading, 8);
+    alpha: iir($nav.currentpage.model.loading==1, 4);
     source: selectedElement(vectorize($core.glw.views.standard.loading))
       ?? "loading.view";
+  });
+
+  widget(loader, {
+    hidden: iir($nav.currentpage.model.loading==2, 6) < 0.001; //!($nav.currentpage.model.loading==2); //
+    zoffset: -999;
+    alpha: iir($nav.currentpage.model.loading==2, 6);
+    source: "loading_fwd.view";
   });
 
   widget(underscan, {
@@ -113,22 +113,54 @@ widget(container_z, {
 
           widget(loader, {
             autohide: true;
-            source: translate($core.media.current.type, "",
+            source: $ui.screensaverActive ? "" : (translate($core.media.current.type, "",
                               "tracks", "playdecks/" + $ui.orientation + "/tracks.view",
                               "radio",  "playdecks/" + $ui.orientation + "/radio.view"
-                             );
+                             ));
           });
 
           cloner($core.notifications.nodes, container_z, {
+			height: 2em;
+
             widget(quad, {
               color: 0;
-              alpha: 0.6;
+              alpha: 0.7;
             });
 
-            widget(label, {
-              padding: [2em, 0.5em];
-              caption: $self.text;
-            });
+			widget(container_y, {
+
+				filterConstraintY: true;
+				filterConstraintX: true;
+				widget(quad, {
+				  height: 1;
+				  alpha: 0.15;
+				});
+				space(1);
+				widget(quad, {
+				  height: 1;
+				  color: 0;
+				  alpha: 0.15;
+				});
+			});
+
+			widget(container_z, {
+
+				hbox({
+					spacing: 0.5em;
+					padding: select($self.icon, [1em, 0.2em], [1em, 0.4em]);
+					widget(image, {
+					  width: 2em;
+					  source: $self.icon ? $self.icon : "skin://icons/movian.svg";
+					});
+
+					widget(label, {
+					  caption: $self.text;
+					  align: left;
+					  ellipsize: true;
+					});
+				});
+
+			});
           });
 
           cloner($core.clipboard.copyprogress, container_z, {
@@ -258,6 +290,7 @@ widget(container_z, {
       });
 
       widget(container_x, {
+	    hidden: $core.audio.passthrough;
         alpha: iir(changed($core.audio.mastervolume, 2, true), 7);
         align: center;
         widget(container_z, {
@@ -279,7 +312,7 @@ widget(container_z, {
             widget(bar, {
               color1: $ui.color1;
               color2: $ui.color2;
-              fill: ($core.audio.mastervolume + 75) / 87;
+              fill: ($core.audio.mastervolume + 50) / 50;
             });
           });
 
@@ -318,7 +351,7 @@ widget(container_z, {
 
     widget(container_y, {
       widget(label, {
-        alpha: iir(!$ui.showTopIcons && !$ui.hideClock, 4);
+        hidden: ($ui.showTopIcons || $ui.hideClock); //alpha: iir(!$ui.showTopIcons && !$ui.hideClock, 4);
         padding: [1em, 0];
         height: 3em;
         align: right;

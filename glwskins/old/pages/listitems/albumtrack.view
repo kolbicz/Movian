@@ -1,11 +1,11 @@
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
   focusOnClick: true;
   onEvent(activate,playTrackFromSource($self, $parent.model));
-  
+
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 
   suggestFocus($self.playing);
@@ -25,7 +25,7 @@ widget(backdrop, {
       filterConstraintX: true;
       shadow: true;
       color: select(isFocused(), 1.0, 0.6);
-      
+
       caption: select($self.metadata.track > 0,
 		      fmt("%02d", $self.metadata.track),
 		      "");
@@ -36,7 +36,7 @@ widget(backdrop, {
       shadow: true;
       outline: true;
       color: select(isFocused(), 1.0, 0.6);
-      
+
       caption: $self.metadata.title;
       ellipsize: true;
     });
@@ -46,7 +46,7 @@ widget(backdrop, {
       shadow: true;
       outline: true;
       color: select(isFocused(), 1.0, 0.6);
-      
+
       caption: $self.metadata.artist;
       ellipsize: true;
     });
@@ -57,7 +57,7 @@ widget(backdrop, {
       filterConstraintX: true;
       shadow: true;
       color: select(isFocused(), 1.0, 0.6);
-      
+
       caption: value2duration($self.metadata.duration);
     });
 

@@ -25,6 +25,35 @@
 #include "osx_c.h"
 #include "src/ui/glw/glw.h"
 
+@interface MovianTextField : NSTextField {
+  NSTimeInterval activation_timestamp;
+}
+- (void)setActivationTimestamp:(NSTimeInterval)timestamp;
+@end
+
+@implementation MovianTextField
+
+- (void)setActivationTimestamp:(NSTimeInterval)timestamp
+{
+  activation_timestamp = timestamp;
+}
+
+- (void)mouseDown:(NSEvent *)event
+{
+  [super mouseDown:event];
+  /* The first click is delivered to GLW and creates this overlay. AppKit then
+   * sees the second click as the new field's first click, so clickCount alone
+   * cannot recognize a double-click across the control replacement. */
+  if([event clickCount] >= 2 ||
+     ([event timestamp] >= activation_timestamp &&
+      [event timestamp] - activation_timestamp <= [NSEvent doubleClickInterval])) {
+    NSTextView *editor = (NSTextView *)[self currentEditor];
+    [editor selectAll:self];
+  }
+}
+
+@end
+
 @interface GLWView (hidden)
 
 - (CVReturn)getFrameForTime:(const CVTimeStamp *)ot;
@@ -155,6 +184,25 @@ glw_in_fullwindow(void *opaque, int val)
 }
 
 
+static void
+glw_inhibit_display_sleep(void *opaque, int val)
+{
+  GLWView *view = (GLWView *)opaque;
+
+  if(val && view->display_sleep_activity == nil) {
+    view->display_sleep_activity =
+      [[[NSProcessInfo processInfo]
+        beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep |
+                                 NSActivityIdleDisplaySleepDisabled
+        reason:@"Movian video playback"] retain];
+  } else if(!val && view->display_sleep_activity != nil) {
+    [[NSProcessInfo processInfo] endActivity:view->display_sleep_activity];
+    [view->display_sleep_activity release];
+    view->display_sleep_activity = nil;
+  }
+}
+
+
 /**
  *
  */
@@ -223,7 +271,8 @@ glw_in_fullwindow(void *opaque, int val)
 }
 
 - (void)glwMouseEvent:(int)type event:(NSEvent*)event {
-  NSPoint loc = [self convertPointToBacking:[event locationInWindow]];
+  NSPoint loc = [self convertPoint:[event locationInWindow] fromView:nil];
+  loc = [self convertPointToBacking:loc];
   glw_pointer_event_t gpe;
 
   gpe.screen_x = (2.0 * loc.x / gr->gr_width) - 1;
@@ -263,7 +312,9 @@ glw_in_fullwindow(void *opaque, int val)
 {
   NSText *editor = [native_text_field currentEditor];
   if(editor == nil)
-    return 0;
+    return (int)([[native_text_field stringValue]
+                  lengthOfBytesUsingEncoding:NSUTF32LittleEndianStringEncoding] /
+                 sizeof(uint32_t));
 
   NSRange selection = [(NSTextView *)editor selectedRange];
   NSString *value = [native_text_field stringValue];
@@ -310,6 +361,16 @@ doCommandBySelector:(SEL)commandSelector
     [self finishNativeEditing];
     return YES;
   }
+  if(commandSelector == @selector(insertTab:) ||
+     commandSelector == @selector(insertBacktab:)) {
+    BOOL backwards = commandSelector == @selector(insertBacktab:);
+    [self finishNativeEditing];
+    event_t *e = event_create_action(backwards ? ACTION_FOCUS_PREV :
+                                                 ACTION_FOCUS_NEXT);
+    prop_send_ext_event(eventSink, e);
+    event_release(e);
+    return YES;
+  }
   return NO;
 }
 
@@ -327,6 +388,13 @@ doCommandBySelector:(SEL)commandSelector
   [[self window] endEditingFor:nil];
   [field removeFromSuperview];
   [field release];
+
+  /* NSTextField installs a field editor as the window's first responder.
+   * endEditing removes it but does not reliably return keyboard ownership to
+   * the OpenGL view. This is especially visible after an SMB authentication
+   * popup closes: the directory has GLW focus, yet no key events arrive until
+   * the user clicks the window. */
+  [[self window] makeFirstResponder:self];
 
   glw_lock(gr);
   if(gr->gr_osk_widget != NULL) {
@@ -367,13 +435,19 @@ doCommandBySelector:(SEL)commandSelector
   frame = NSIntersectionRect(frame, [self bounds]);
 
   NSTextField *field = password ? [[NSSecureTextField alloc] initWithFrame:frame]
-                                : [[NSTextField alloc] initWithFrame:frame];
+                                : [[MovianTextField alloc] initWithFrame:frame];
+  if(!password)
+    [(MovianTextField *)field setActivationTimestamp:
+      [[NSProcessInfo processInfo] systemUptime]];
   [field setDelegate:self];
   [field setStringValue:text != NULL ? [NSString stringWithUTF8String:text] : @""];
   [field setFont:[NSFont systemFontOfSize:16.0]];
   [field setTextColor:[NSColor whiteColor]];
   [field setBackgroundColor:[NSColor colorWithCalibratedWhite:0.08 alpha:0.98]];
   [field setDrawsBackground:YES];
+  /* Keep AppKit's native padding and vertical alignment, but force its dark
+   * control appearance so Light Mode cannot replace the fill with white. */
+  [field setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]];
   [field setBezeled:YES];
   [field setBezelStyle:NSTextFieldRoundedBezel];
 
@@ -674,6 +748,9 @@ doCommandBySelector:(SEL)commandSelector
   [self showCursor];
   prop_unsubscribe(fullWindow);
   fullWindow = NULL;
+  prop_unsubscribe(disableScreensaver);
+  disableScreensaver = NULL;
+  glw_inhibit_display_sleep(self, 0);
 }
 
 
@@ -743,6 +820,14 @@ doCommandBySelector:(SEL)commandSelector
 		   PROP_TAG_NAME("ui", "fullwindow"),
 		   PROP_TAG_COURIER, gr->gr_courier,
 		   PROP_TAG_CALLBACK_INT, glw_in_fullwindow, self,
+		   PROP_TAG_ROOT, gr->gr_prop_ui,
+		   NULL);
+
+  disableScreensaver =
+    prop_subscribe(0,
+		   PROP_TAG_NAME("ui", "disableScreensaver"),
+		   PROP_TAG_COURIER, gr->gr_courier,
+		   PROP_TAG_CALLBACK_INT, glw_inhibit_display_sleep, self,
 		   PROP_TAG_ROOT, gr->gr_prop_ui,
 		   NULL);
 

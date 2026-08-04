@@ -118,7 +118,7 @@ notify_add(prop_t *root, notify_type_t type, const char *icon, int delay,
   case NOTIFY_ERROR:   typestr = "error";   tl = TRACE_ERROR; break;
   default: return NULL;
   }
-  
+
   va_start(ap, fmt);
   va_copy(apx, ap);
 
@@ -175,7 +175,7 @@ notify_destroy(void *p)
 /**
  *
  */
-static void 
+static void
 eventsink(void *opaque, prop_event_t event, ...)
 {
   event_t *e, **ep = opaque;
@@ -245,7 +245,7 @@ message_popup(const char *message, int flags, const char **extra)
 
   p = prop_ref_inc(prop_create_root(NULL));
 
-  TRACE(TRACE_DEBUG, "Notification", "%s", message);
+  //TRACE(TRACE_DEBUG, "Notification", "%s", message);
 
   prop_set_string(prop_create(p, "type"), "message");
   prop_set_string_ex(prop_create(p, "message"), NULL, message,
@@ -313,9 +313,9 @@ text_dialog(const char *message, char **answer, int flags)
     prop_set_int(prop_create(p, "cancel"), 1);
   if(flags & MESSAGE_POPUP_OK)
     prop_set_int(prop_create(p, "ok"), 1);
-  
+
   event_t *e = popup_display(p);
-  
+
   if(event_is_action(e, ACTION_OK)) {
     r = prop_get_string(string, NULL);
 
@@ -323,16 +323,16 @@ text_dialog(const char *message, char **answer, int flags)
       *answer = strdup(rstr_get(r));
     rstr_release(r);
   }
-  
+
   prop_destroy(p);
   prop_ref_dec(p);
   if(event_is_action(e, ACTION_CANCEL)) {
     event_release(e);
     return -1;
-  } 
+  }
 
   event_release(e);
-  
+
   return 0;
 }
 

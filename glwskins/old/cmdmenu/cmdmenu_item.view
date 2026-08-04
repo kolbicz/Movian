@@ -11,7 +11,7 @@ $view.item = $args;
 commandMenuChrome(
 
   SEPICON($args.metadata.title,
-	  "dataroot://res/svg/" + 
+	  "dataroot://res/svg/" +
 	  translate($args.type,  "File",
 		    "archive",   "Archive",
 		    "artist",    "User",
@@ -68,7 +68,7 @@ commandMenuChrome(
   // Mark as unseen (video)
 
   ITEM(_("Mark as unseen"), {
-    $args.playcount = false; 
+    $args.playcount = false;
     $clone.itemMenu = false;
   }, "dataroot://res/svg/Check.svg",
        $args.type == "video" && $args.playcount > 0);
@@ -83,7 +83,7 @@ commandMenuChrome(
 
   // Star / Unstar feature
 
-  ITEMTOGGLE(_("Star"), _("Unstar"), 
+  ITEMTOGGLE(_("Star"), _("Unstar"),
 	     $args.metadata.starred,
 	     deliverEvent($args, "starToggle"),
 	     !isVoid($args.metadata.starred),
@@ -110,7 +110,7 @@ commandMenuChrome(
 
   // Delete item
 
-  ITEM(_("Delete"), { 
+  ITEM(_("Delete"), {
     delete($args);
   }, "dataroot://res/svg/Delete.svg",
        $self.model.canDelete || $args.canDelete,

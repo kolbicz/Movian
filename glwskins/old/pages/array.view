@@ -24,16 +24,16 @@ widget(container_y, {
 
       alphaFallOff: 0.1;
       blurFallOff: 0.1;
-      
+
       Yspacing: $ui.size / 2;
       Xspacing: $ui.size / 2;
 
       childTilesX: 6;
-      
+
       cloner($self.model.nodes, loader, {
 	time: 0.1;
 	effect: blend;
-	source: "squareitems/" + 
+	source: "squareitems/" +
 	  translate($self.type, "default",
 		    "separator", "separator",
 		    "artistalbum", "artistalbum",
@@ -47,7 +47,7 @@ widget(container_y, {
       width: 4;
       focusable: canScroll();
       alpha: iir(canScroll(), 16);
-      
+
       widget(quad, {
 	alpha: iir(0.3 + 0.3 * (isFocused() || isPressed()), 4) + isHovered();
       });

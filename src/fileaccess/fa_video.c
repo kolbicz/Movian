@@ -20,6 +20,9 @@
 #include <libavformat/avformat.h>
 #include <libavutil/mathematics.h>
 
+//usleep
+#include <unistd.h>
+
 #include "main.h"
 #include "fa_video.h"
 #include "event.h"
@@ -27,6 +30,7 @@
 #include "fileaccess.h"
 #include "fa_libav.h"
 #include "backend/dvd/dvd.h"
+//#include "backend/bittorrent/bittorrent.h"
 #include "notifications.h"
 #include "htsmsg/htsmsg_xml.h"
 #include "backend/backend.h"
@@ -105,15 +109,15 @@ rescale(AVFormatContext *fctx, int64_t ts, int si)
  */
 static void
 video_seek(AVFormatContext *fctx, media_pipe_t *mp, media_buf_t **mbp,
-	   int64_t pos, const char *txt)
+	   int64_t pos, const char *txt, int show)
 {
-  pos = FFMAX(0, FFMIN(fctx->duration, pos)) + fctx->start_time;
+  pos = FFMAX(0, FFMIN(fctx->duration, pos/*-1000000*/)) + fctx->start_time;
 
-  TRACE(TRACE_DEBUG, "Video", "seek %s to %.2f (%"PRId64" - %"PRId64")", txt,
+  if(show) TRACE(TRACE_DEBUG, "Video", "seek %s to %.2f (%"PRId64" - %"PRId64")", txt,
 	(pos - fctx->start_time) / 1000000.0,
 	pos, fctx->start_time);
 
-  if(av_seek_frame(fctx, -1, pos, AVSEEK_FLAG_BACKWARD)) {
+  if(av_seek_frame(fctx, -1, pos, AVSEEK_FLAG_BACKWARD)) { //AVSEEK_FLAG_ANY // AVSEEK_FLAG_BACKWARD
     TRACE(TRACE_ERROR, "Video", "Seek failed");
   }
 
@@ -180,6 +184,10 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
   event_ts_t *ets;
   int64_t ts;
 
+	int64_t bw_start = arch_get_avtime();
+	float bw_size = 0;
+	float bw_time = 0;
+
   int lastsec = -1;
   int restartpos_last = -1;
   int64_t last_timestamp_presented = AV_NOPTS_VALUE;
@@ -190,13 +198,41 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
   int64_t start = 0;
   if(mp->mp_flags & MP_CAN_SEEK) {
     start = playinfo_get_restartpos(canonical_url, title, resume_mode) * 1000;
+
+	mp->mp_pre_buffer_delay = 10 * 1000000;
+	mp->mp_hold_flags |= MP_HOLD_PRE_BUFFERING;
+
+    if(video_settings.video_prebuffer_size)
+    {
+	  mp->mp_pre_buffer_delay = ( (video_settings.video_prebuffer_size>1) ? video_settings.video_prebuffer_size : (video_settings.video_prebuffer_size + 4)) * 1000000;
+      //mp->mp_pre_buffer_delay = video_settings.video_prebuffer_size * 1000000;
+      //mp_underrun(mp);
+    }
+
     if(start) {
-      TRACE(TRACE_DEBUG, "VIDEO", "Attempting to resume from %.2f seconds",
-            start / 1000000.0f);
+      TRACE(TRACE_DEBUG, "VIDEO", "Attempting to resume from %.2f seconds", start / 1000000.0f);
       mp->mp_seek_base = start;
-      video_seek(fctx, mp, &mb, start, "restart position");
+      video_seek(fctx, mp, &mb, start, "restart position", 1);
     }
   }
+  else
+  {
+    //if(video_settings.video_prebuffer_size)
+    {
+      mp->mp_pre_buffer_delay = ( (video_settings.video_prebuffer_size>1) ? video_settings.video_prebuffer_size : (video_settings.video_prebuffer_size + 4)) * 1000000;
+      mp_configure(mp, MP_CAN_PAUSE, MP_BUFFER_DEEP, 0, "video");
+//  mp->mp_seek_base = 0;
+//  mp->mp_video.mq_seektarget = 0;//AV_NOPTS_VALUE;
+//  mp->mp_audio.mq_seektarget = 0;//AV_NOPTS_VALUE;
+
+//  mp_flush(mp);
+//  if(mb != NULL)
+//    media_buf_free_unlocked(mp, mb);
+//  mb = NULL;
+      mp_underrun(mp);
+    }
+     // video_seek(fctx, mp, &mb, start, "restart position");
+ }
 
   prop_set_float_ex(mp->mp_prop_currenttime, mp->mp_sub_currenttime,
 		    start / 1000000.0);
@@ -208,7 +244,47 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
 
   const int64_t offset = fctx->start_time != PTS_UNSET ? fctx->start_time : 0;
 
-  while(1) {
+  int loading = 1;
+  int64_t seek_pending_ts = 0;
+  int64_t seek_pending_req = 0;
+
+  gconf.f_in_video_playback = 1;
+  event_dispatch(event_create_action(ACTION_PLAY));
+
+  while(1)
+  {
+
+	if(seek_pending_req)
+	{
+		//mp->mp_video_clock = PTS_UNSET;
+		//mp->mp_seeking = 2;
+		if(mp->mp_eof && mb == MB_SPECIAL_EOF) { mb = NULL; mp->mp_eof = 0; }
+
+		if(arch_get_avtime() - seek_pending_req > 750000)
+		{
+			mp_flush(mp);
+			//TRACE(TRACE_DEBUG, "Seek", "Seek request SEEKING: %li", seek_pending_ts/1000);
+			media_buf_t *mbt = NULL;
+			mp->mp_seek_base = seek_pending_ts;
+			video_seek(fctx, mp, &mbt, seek_pending_ts, "direct", 0);//, (seek_pending_ts < last_timestamp_presented));
+			seek_pending_req = 0;
+			//event_dispatch(event_create_action(ACTION_PAUSE));
+			//event_dispatch(event_create_action(ACTION_PLAY));
+			//if(!mp->mp_tunnel_mode) mp->mp_stream_index++;
+			//seek_pending_ts = last_timestamp_presented;
+
+			if(video_settings.video_prebuffer_size)
+			{
+				mp->mp_pre_buffer_delay = ( (video_settings.video_prebuffer_size>1) ? video_settings.video_prebuffer_size : (video_settings.video_prebuffer_size + 4)) * 1000000;
+				mp->mp_hold_flags |= MP_HOLD_PRE_BUFFERING;
+				mp_hold(mp, mp->mp_hold_flags, NULL);
+				//TRACE(TRACE_INFO, "Seek", "mp->mp_pre_buffer_delay = %i", mp->mp_pre_buffer_delay);
+			}
+			//if(seek_pending_ts < last_timestamp_presented) mp_underrun(mp);
+		}
+		//else TRACE(TRACE_INFO, "Seek", "Seeking too fast... (%li)", arch_get_avtime() - seek_pending_req);
+	}
+
     /**
      * Need to fetch a new packet ?
      */
@@ -216,27 +292,58 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
 
       mp->mp_eof = 0;
 
-      fa_deadline(fh, mp->mp_buffer_delay != INT32_MAX ?
-		  mp->mp_buffer_delay / 3 : 0);
+	if(seek_pending_req)
+	{
+		//TRACE(TRACE_DEBUG, "Video", "Not reading data");
+		hts_mutex_lock(&mp->mp_mutex);
+		e = TAILQ_FIRST(&mp->mp_eq);
+		if(e != NULL) TAILQ_REMOVE(&mp->mp_eq, e, e_link);
+		hts_mutex_unlock(&mp->mp_mutex);
+		if(e == NULL) {usleep(10000); continue;}
+		goto check_events;
+	}
+
+      fa_deadline(fh, (mp->mp_buffer_delay != INT32_MAX ?	((mp->mp_buffer_delay / 3) * 1) : 0	), 0 /*tfh->tfh_probe*/);
 
       r = av_read_frame(fctx, &pkt);
 
-      if(r == AVERROR(EAGAIN))
-	continue;
+	if(r == AVERROR(EAGAIN))
+	{
+		//TRACE(TRACE_ERROR, "Video", "EAGAIN");
+		hts_mutex_lock(&mp->mp_mutex);
+		e = TAILQ_FIRST(&mp->mp_eq);
+		if(e != NULL) TAILQ_REMOVE(&mp->mp_eq, e, e_link);
+		hts_mutex_unlock(&mp->mp_mutex);
+		if(e == NULL) {usleep(1000); continue;}
+		goto check_events;
+		//sched_yield();
+	}
 
       if(r) {
-	char buf[512];
+	/*char buf[512];
 	if(av_strerror(r, buf, sizeof(buf)))
 	  snprintf(buf, sizeof(buf), "Error %d", r);
 	TRACE(TRACE_DEBUG, "Video", "Playback reached EOF: %s (%d)", buf, r);
 	mb = MB_SPECIAL_EOF;
 	mp->mp_eof = 1;
-	continue;
+	*/
+
+		if(!seek_pending_req)
+		{
+			mb = MB_SPECIAL_EOF;
+			mp->mp_eof = 1;
+		}
+		continue;
       }
+
+	  bw_size += pkt.size;
 
       si = pkt.stream_index;
       if(si >= cwvec_size)
 	goto bad;
+
+//if(si>1)
+//TRACE(TRACE_ERROR, "Video", "INFO TYPE: %i - %i", fctx->streams[si]->codec->codec_type, fctx->streams[si]->codecpar->codec_type);
 
       if(si == mp->mp_video.mq_stream) {
 	/* Current video stream */
@@ -261,7 +368,11 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
 
       } else if(fctx->streams[si]->codec->codec_type == AVMEDIA_TYPE_SUBTITLE) {
 
+//TRACE(TRACE_ERROR, "Video", "SUBTITLE TYPE: %i - %i", fctx->streams[si]->codec->codec_type, fctx->streams[si]->codecpar->codec_type);
+
 	int duration = pkt.convergence_duration ?: pkt.duration;
+
+//TRACE(TRACE_ERROR, "Video", "SUBTITLE ID: %i (SRT: %i), %i - %i", duration, AV_CODEC_ID_SRT, fctx->streams[si]->codec->codec_id, fctx->streams[si]->codecpar->codec_id);
 
 	mb = media_buf_from_avpkt_unlocked(mp, &pkt);
 	mb->mb_codecid = fctx->streams[si]->codec->codec_id;
@@ -273,6 +384,7 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
 
       } else {
 	/* Check event queue ? */
+	//TRACE(TRACE_ERROR, "Video", "UNKNOWN TYPE: %i - %i", fctx->streams[si]->codec->codec_type, fctx->streams[si]->codecpar->codec_type);
       bad:
 	av_free_packet(&pkt);
 	continue;
@@ -327,36 +439,114 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
 	break;
       }
     } else if((e = mb_enqueue_with_events(mp, mq, mb)) == NULL) {
+
+			if(mp->mp_buffer_delay>30000000)
+			{
+				if(mq == &mp->mp_video || mp->mp_buffer_delay>60000000)
+					usleep(4096);
+				else
+					usleep(1536);
+			}
+
       mb = NULL; /* Enqueue succeeded */
       continue;
     }
 
-    if(event_is_type(e, EVENT_CURRENT_TIME)) {
+	if(loading != (mp->mp_hold_flags & MP_HOLD_PRE_BUFFERING))
+	{
+		loading = (mp->mp_hold_flags & MP_HOLD_PRE_BUFFERING);
+		prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, (loading!=0));
+    }
 
-      ets = (event_ts_t *)e;
+check_events:
 
-      if(ets->epoch == mp->mp_epoch && mp->mp_flags & MP_CAN_SEEK) {
-	int sec = ets->ts / 1000000;
-	last_timestamp_presented = ets->ts;
+    if(event_is_type(e, EVENT_CURRENT_TIME))
+	{
+		ets = (event_ts_t *)e;
 
-	// Update restartpos every 5 seconds
-	if(sec < restartpos_last || sec >= restartpos_last + 5) {
-	  restartpos_last = sec;
-	  playinfo_set_restartpos(canonical_url, ets->ts / 1000, 1);
-	}
+		bw_time = (arch_get_avtime() - bw_start);
+		if(bw_time > 1000000)
+		{
+			//TRACE(TRACE_DEBUG, "bb", "bw_time=%f bw_size=%f arch=%lli", bw_time, bw_size, arch_get_avtime());
+			prop_set_int(mp->mp_video.mq_prop_bw, (bw_size * 8.f / bw_time) + 0.5f);
+			bw_time = bw_size = 0;
+			bw_start = arch_get_avtime();
+		}
 
-	if(sec != lastsec) {
-	  lastsec = sec;
-	  update_seek_index(sidx, sec);
-	  update_seek_index(cidx, sec);
-	}
-      }
+		if(ets->epoch == mp->mp_epoch)
+		{
+			int sec = ets->ts / 1000000;
 
+			if(mp->mp_flags & MP_CAN_SEEK)
+				last_timestamp_presented = ets->ts;
 
-    } else if(event_is_type(e, EVENT_SEEK)) {
+			// Update restartpos every 10 seconds
+			if(sec < restartpos_last || sec >= restartpos_last + 10)
+			{
+				if(restartpos_last != -1)
+				{
+					loading = 0;
+					prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 0);
+				}
 
-      ets = (event_ts_t *)e;
-      video_seek(fctx, mp, &mb, ets->ts, "direct");
+				restartpos_last = sec;
+
+				if(mp->mp_flags & MP_CAN_SEEK)
+					playinfo_set_restartpos(canonical_url, ets->ts / 1000, 1);
+			}
+
+			if(sec != lastsec && (mp->mp_flags & MP_CAN_SEEK))
+			{
+				lastsec = sec;
+				update_seek_index(sidx, sec);
+				update_seek_index(cidx, sec);
+			}
+		}
+    }
+	else if(event_is_type(e, EVENT_SEEK))
+	{
+
+		ets = (event_ts_t *)e;
+
+			if(fctx->duration != AV_NOPTS_VALUE && ets->ts > (fctx->duration + (fctx->start_time!= AV_NOPTS_VALUE?fctx->start_time:0)))
+			{
+				//e = event_create_type(EVENT_EOF);
+				event_release(e);
+				e = event_create_type(EVENT_EOF);
+				//e = NULL;
+				break;
+				//mp->mp_pre_buffer_delay = 1 * 1000000;
+				//video_seek(fctx, mp, &mb, fctx->duration - 10000000, "direct", 1);
+			}
+			else
+			{
+				if(fctx->duration != AV_NOPTS_VALUE && (fctx->duration - ets->ts)<15000000)
+				{
+					mp->mp_pre_buffer_delay = 500000;
+					//mp->mp_allow_prebuffer = 0;
+				}
+				else
+				{
+					seek_pending_ts = ets->ts;
+					seek_pending_req = arch_get_avtime();
+					mp_flush(mp);
+					//TRACE(TRACE_DEBUG, "Seek", "Seek request: %lli", ets->ts);
+					//video_seek(fctx, mp, &mb, ets->ts, "direct", 0, (ets->ts < last_timestamp_presented));
+				}
+			}
+
+		//video_seek(fctx, mp, &mb, ets->ts, "direct", 1);
+
+		/*if(mp->mp_buffer_limit > 16 * 1024 * 1024)
+		{
+			//fa_deadline(fh, 1500000);
+			mp->mp_pre_buffer_delay = 10 * 1000000;
+			// mp->mp_pre_buffer_delay = ( (video_settings.video_prebuffer_size>1) ? video_settings.video_prebuffer_size : (video_settings.video_prebuffer_size + 4)) * 1000000;
+			mp->mp_hold_flags |= MP_HOLD_PRE_BUFFERING;
+			prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 1);
+			loading = (MP_HOLD_PRE_BUFFERING);
+		}
+		*/
 
     } else if(event_is_action(e, ACTION_SKIP_FORWARD) ||
               event_is_action(e, ACTION_SKIP_BACKWARD) ||
@@ -365,6 +555,7 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
       break;
     }
     event_release(e);
+
   }
 
   if(mb != NULL && mb != MB_SPECIAL_EOF)
@@ -396,6 +587,9 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
     playinfo_set_restartpos(canonical_url, -1, 0);
   }
 
+  gconf.f_in_video_playback = 0;
+  event_dispatch(event_create_action(ACTION_PAUSE));
+  usleep(500000);
   return e;
 }
 
@@ -553,15 +747,17 @@ be_file_playvideo(const char *url, media_pipe_t *mp,
      * Is it a DVD ?
      */
     if(fs.fs_type == CONTENT_DIR) {
-
+/*
       metadata_t *md = fa_probe_dir(url);
       int is_dvd = md->md_contenttype == CONTENT_DVD;
       metadata_destroy(md);
 
       if(is_dvd)
 	goto isdvd;
+*/
       return NULL;
     }
+
   }
 #endif
 
@@ -599,7 +795,7 @@ be_file_playvideo(const char *url, media_pipe_t *mp,
     if(fa_probe_iso(NULL, fh) == 0) {
       fa_close(fh);
 #if ENABLE_DVD
-    isdvd:
+//    isdvd:
       prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 0);
       return dvd_play(url, mp, errbuf, errlen, 1);
 #else
@@ -625,9 +821,9 @@ be_file_playvideo(const char *url, media_pipe_t *mp,
         htsbuf_queue_t hq;
         htsbuf_queue_init(&hq, 0);
         htsbuf_append(&hq, buf, l);
-        if(l == sizeof(buf) - 1 && fa_read_to_htsbuf(&hq, fh, 100000)) {
+        if(l == sizeof(buf) - 1 && fa_read_to_htsbuf(&hq, fh, 1024000)) {
           htsbuf_queue_flush(&hq);
-          snprintf(errbuf, errlen, "Unable to read HLS playlist file");
+          snprintf(errbuf, errlen, "%s", hlserrstr[HLS_ERROR_VARIANT_PROBE_ERROR]); //"Unable to read HLS playlist file"
         }
         fa_close(fh);
 
@@ -644,6 +840,7 @@ be_file_playvideo(const char *url, media_pipe_t *mp,
 
   event_t *e = be_file_playvideo_fh(url, mp,  errbuf, errlen, vq, fh, &va);
   rstr_release(title);
+  gconf.f_in_video_playback = 0;
   return e;
 }
 
@@ -658,6 +855,8 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
 {
   sub_scanner_t *ss = NULL;
   video_args_t va = *va0;
+
+  fa_deadline(fh, 0, 0);
 
   if(!(va.flags & BACKEND_VIDEO_NO_SUBTITLE_SCAN)) {
     compute_hash(fh, &va);
@@ -677,7 +876,7 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
     return NULL;
   }
 
-  usage_event("Play video", 1, USAGE_SEG("format", fctx->iformat->name));
+  //usage_event("Play video", 1, USAGE_SEG("format", fctx->iformat->name));
 
   mp->mp_audio.mq_stream = -1;
   mp->mp_video.mq_stream = -1;
@@ -757,9 +956,13 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
   int i;
   LIST_INIT(&alist);
 
+  int cwvec_codecs[fctx->nb_streams];
+
+
 
   for(i = 0; i < fctx->nb_streams; i++) {
     char str[256];
+	cwvec_codecs[i] = -1;
     media_codec_params_t mcp = {0};
     AVStream *st = fctx->streams[i];
     AVCodecContext *ctx = st->codec;
@@ -772,6 +975,11 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
     case AVMEDIA_TYPE_VIDEO:
       mcp.width = ctx->width;
       mcp.height = ctx->height;
+      if(!mcp.width || !mcp.height)
+      {
+        mcp.width = 1920;
+        mcp.height = 1080;
+      }
       mcp.profile = ctx->profile;
       mcp.level = ctx->level;
       mcp.sar_num = st->sample_aspect_ratio.num;
@@ -780,10 +988,32 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
       mcp.frame_rate_num = st->avg_frame_rate.num;
       mcp.frame_rate_den = st->avg_frame_rate.den;
 
+//    TRACE(TRACE_DEBUG, "Video", " FPS: %i/%i (%i/%i)", mcp.frame_rate_num, mcp.frame_rate_den,
+//														ctx->time_base.den, ctx->time_base.num);
+	if(ctx->time_base.den == 48000 && ctx->time_base.num == 1001)
+	{
+      mcp.frame_rate_num = 24000;
+      mcp.frame_rate_den = 1001;
+	}
+
+	if(ctx->time_base.den == 50 && ctx->time_base.num == 1)
+	{
+      mcp.frame_rate_num = 25;
+      mcp.frame_rate_den = 1;
+	}
+
+      if(!ctx->time_base.den  || !ctx->time_base.num) {
+	ctx->time_base.den = mcp.frame_rate_num;
+	ctx->time_base.num = mcp.frame_rate_den;
+      }
+
       if(!mcp.frame_rate_num  || !mcp.frame_rate_num) {
 	mcp.frame_rate_num = ctx->time_base.den;
 	mcp.frame_rate_den = ctx->time_base.num;
       }
+
+//    TRACE(TRACE_DEBUG, "Video", " FPS: %i/%i (%i/%i)", mcp.frame_rate_num, mcp.frame_rate_den,
+//														ctx->time_base.den, ctx->time_base.num);
       break;
 
     case AVMEDIA_TYPE_AUDIO:
@@ -834,12 +1064,42 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
     if(ctx->codec_type == AVMEDIA_TYPE_VIDEO && mp->mp_video.mq_stream != -1)
       continue;
 
+	if(ctx->codec_type == AVMEDIA_TYPE_SUBTITLE &&
+	(
+		ctx->codec_id == AV_CODEC_ID_SRT ||
+		ctx->codec_id == AV_CODEC_ID_SUBRIP ||
+		ctx->codec_id == AV_CODEC_ID_SSA ||
+		ctx->codec_id == AV_CODEC_ID_ASS ||
+		ctx->codec_id == AV_CODEC_ID_TEXT ||
+		ctx->codec_id == AV_CODEC_ID_MOV_TEXT
+	)
+	) continue;
+
     mcp.extradata      = ctx->extradata;
     mcp.extradata_size = ctx->extradata_size;
 
-    cwvec[i] = media_codec_create(ctx->codec_id, 0, fw, ctx, &mcp, mp);
+	int codec_defined = -1;
+	for(int j=0;j<i;j++)
+	{
+		if(cwvec_codecs[j] == ctx->codec_id && cwvec[j] != NULL)
+		{
+			codec_defined = j;
+			break;
+		}
+	}
+
+	if(codec_defined>=0)
+		cwvec[i] = media_codec_ref(cwvec[codec_defined]);
+	else
+	{
+		cwvec_codecs[i] = ctx->codec_id;
+		cwvec[i] = media_codec_create(ctx->codec_id, 0, fw, ctx, &mcp, mp);
+	}
 
     if(cwvec[i] != NULL) {
+		if(codec_defined>=0)
+			TRACE(TRACE_DEBUG, "Video", " Stream #%d: Codec referenced", i);
+		else
       TRACE(TRACE_DEBUG, "Video", " Stream #%d: Codec created", i);
       switch(ctx->codec_type) {
       case AVMEDIA_TYPE_VIDEO:
@@ -915,6 +1175,7 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
     metadata_destroy(md);
 #endif
 
+  gconf.f_in_video_playback = 0;
   return e;
 }
 

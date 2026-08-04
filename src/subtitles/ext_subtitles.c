@@ -46,7 +46,7 @@ es_insert_text(ext_subtitles_t *es, const char *text,
 	       int64_t start, int64_t stop, int tags)
 {
   video_overlay_t *vo;
-  vo = video_overlay_render_cleartext(text, start, stop, tags, 0);
+  vo = video_overlay_render_cleartext(text, start, stop, tags, 0, NULL);
   if(vo != NULL)
     TAILQ_INSERT_TAIL(&es->es_entries, vo, vo_link);
 }
@@ -93,7 +93,7 @@ linereader_next(linereader_t *lr)
 
     if(lr->len > 0 && lr->buf[0] == 10) {
       lr->len--;
-      lr->buf++; 
+      lr->buf++;
     }
 
   }
@@ -137,31 +137,134 @@ static int64_t
 get_srt_timestamp2(const char *buf)
 {
   return 1000LL * (
-    (buf[ 0] - '0') * 36000000LL + 
+    (buf[ 0] - '0') * 36000000LL +
     (buf[ 1] - '0') *  3600000LL +
     (buf[ 3] - '0') *   600000LL +
-    (buf[ 4] - '0') *    60000LL + 
-    (buf[ 6] - '0') *    10000LL + 
+    (buf[ 4] - '0') *    60000LL +
+    (buf[ 6] - '0') *    10000LL +
     (buf[ 7] - '0') *     1000LL +
     (buf[ 9] - '0') *      100LL +
     (buf[10] - '0') *       10LL +
     (buf[11] - '0'));
 }
 
+// 59:59.182
+static int64_t
+get_srt_timestamp3(const char *buf)
+{
+  return 1000LL * (
+//    (buf[ 0] - '0') * 36000000LL +
+//    (buf[ 1] - '0') *  3600000LL +
+    (buf[ 0] - '0') *   600000LL +
+    (buf[ 1] - '0') *    60000LL +
+    (buf[ 3] - '0') *    10000LL +
+    (buf[ 4] - '0') *     1000LL +
+    (buf[ 6] - '0') *      100LL +
+    (buf[ 7] - '0') *       10LL +
+    (buf[ 8] - '0'));
+}
+
+// 1:00:02.164
+static int64_t
+get_srt_timestamp4(const char *buf)
+{
+  return 1000LL * (
+//    (buf[ 0] - '0') * 36000000LL +
+    (buf[ 0] - '0') *  3600000LL +
+    (buf[ 2] - '0') *   600000LL +
+    (buf[ 3] - '0') *    60000LL +
+    (buf[ 5] - '0') *    10000LL +
+    (buf[ 6] - '0') *     1000LL +
+    (buf[ 8] - '0') *      100LL +
+    (buf[ 9] - '0') *       10LL +
+    (buf[10] - '0'));
+}
+
+// 1:02.164
+static int64_t
+get_srt_timestamp5(const char *buf)
+{
+  return 1000LL * (
+//    (buf[ 0] - '0') * 36000000LL +
+//    (buf[ 0] - '0') *  3600000LL +
+//    (buf[ 2] - '0') *   600000LL +
+    (buf[ 0] - '0') *    60000LL +
+    (buf[ 2] - '0') *    10000LL +
+    (buf[ 3] - '0') *     1000LL +
+    (buf[ 5] - '0') *      100LL +
+    (buf[ 6] - '0') *       10LL +
+    (buf[ 7] - '0'));
+}
+
 /**
  *
  */
+
+/*
+59:59.182 --> 01:00:04.712	#26 stamp3/2
+01:00:02.212 --> 01:00:04.712	#29 stamp2/2
+
+0:01.000 --> 0:04.000		#21 stamp5/5
+0:01.000 --> 10:04.000		#22 stamp5/3
+00:01.000 --> 00:04.000		#23 stamp3/3
+59:59.182 --> 1:00:02.164	#25 stamp3/4
+1:00:02.212 --> 1:00:04.712	#27 stamp4/4
+*/
 static int
 get_srt_timestamp(linereader_t *lr, int64_t *start, int64_t *stop)
 {
-  if(lr->ll < 29 || memcmp(lr->buf + 12, " --> ", 5))
-    return -1;
+  if(lr->ll >= 29 && !memcmp(lr->buf + 12, " --> ", 5) && (lr->buf[25]=='.' || lr->buf[25]==','))
+  {
+	*start = get_srt_timestamp2(lr->buf);
+	*stop  = get_srt_timestamp2(lr->buf + 17);
+	return 0;
+  }
 
-  *start = get_srt_timestamp2(lr->buf);
-  *stop  = get_srt_timestamp2(lr->buf + 17);
-  return 0;
+  if(lr->ll >= 26 && !memcmp(lr->buf + 9, " --> ", 5) && (lr->buf[22]=='.' || lr->buf[22]==','))
+  {
+	*start = get_srt_timestamp3(lr->buf);
+	*stop  = get_srt_timestamp2(lr->buf + 14);
+	return 0;
+  }
+
+  if(lr->ll >= 21 && !memcmp(lr->buf + 8, " --> ", 5) && (lr->buf[17]=='.' || lr->buf[17]==','))
+  {
+	*start = get_srt_timestamp5(lr->buf);
+	*stop  = get_srt_timestamp5(lr->buf + 13);
+	return 0;
+  }
+
+  if(lr->ll >= 22 && !memcmp(lr->buf + 8, " --> ", 5) && (lr->buf[18]=='.' || lr->buf[18]==','))
+  {
+	*start = get_srt_timestamp5(lr->buf);
+	*stop  = get_srt_timestamp3(lr->buf + 13);
+	return 0;
+  }
+
+  if(lr->ll >= 23 && !memcmp(lr->buf + 9, " --> ", 5) && (lr->buf[19]=='.' || lr->buf[19]==','))
+  {
+	*start = get_srt_timestamp3(lr->buf);
+	*stop  = get_srt_timestamp3(lr->buf + 14);
+	return 0;
+  }
+
+  if(lr->ll >= 25 && !memcmp(lr->buf + 9, " --> ", 5) && (lr->buf[21]=='.' || lr->buf[21]==','))
+  {
+	*start = get_srt_timestamp3(lr->buf);
+	*stop  = get_srt_timestamp4(lr->buf + 14);
+	return 0;
+  }
+
+  if(lr->ll >= 27 && !memcmp(lr->buf + 11, " --> ", 5) && (lr->buf[23]=='.' || lr->buf[23]==','))
+  {
+	*start = get_srt_timestamp4(lr->buf);
+	*stop  = get_srt_timestamp4(lr->buf + 16);
+	return 0;
+  }
+
+  return -1;
+
 }
-
 
 /**
  *
@@ -194,10 +297,13 @@ srt_skip_preamble(const char **bufp, size_t *lenp)
 static int
 is_srt(const char *buf, size_t len)
 {
+  if(!memcmp(buf, "WEBVTT", 6)) return 1;
+
   linereader_t lr;
 
   int n;
   int64_t start, stop;
+
 
   srt_skip_preamble(&buf, &len);
 
@@ -258,12 +364,45 @@ load_srt(const char *url, const char *buf, size_t len)
   linereader_init(&lr, buf, len);
   while(1) {
     if((n = linereader_next(&lr)) < 0)
+	{
+		//TRACE(TRACE_INFO, "Subtitles", "-- : %ld %ld %ld %ld %s [%zu %zu]", start, stop, pstart, pstop, txt?txt:"<nothing>", tlen, txtoff);
+		if(tlen > 0)
+			txtoff = tlen - 1;
       break;
+	}
 
     if(get_srt_timestamp(&lr, &start, &stop) == 0) {
+
+	//TRACE(TRACE_INFO, "Subtitles", "-- : %ld %ld %ld %ld %s", start, stop, pstart, pstop, txt?txt:"");
+
       if(txt != NULL && pstart != -1 && pstop != -1) {
 	txt[txtoff] = 0;
-	es_insert_text(es, txt, pstart, pstop, tag_flags);
+
+//TRACE(TRACE_INFO, "Subtitles", "BEFORE: %lld %lld %lld %lld", start, stop, pstart, pstop);
+	if((stop - start) < 3000000) stop = start + 3000000;
+	if((stop - start) > 14000000) stop = start + 14000000;
+
+	if((pstop - pstart) < (txtoff*41000)) pstop = pstart + (txtoff*41000) + 410000;
+	if((pstop - pstart) < 3000000) pstop = pstart + 3000000;
+	if((pstop - pstart) > 14000000) pstop = pstart + 14000000;
+
+	if(start - pstop < 82000) pstop = start - 82000;
+
+	if(txtoff>40 && strchr(txt, 0x0a) == NULL)
+    {
+		for(int cp=(int)(txtoff/2); cp<txtoff; cp++)
+		{
+			if(txt[cp] == 0x20)
+			{
+				txt[cp] = 0x0a;
+				break;
+			}
+		}
+    }
+
+	if(pstop - pstart > 300000)
+		es_insert_text(es, txt, pstart, pstop, tag_flags);
+//TRACE(TRACE_INFO, "Subtitles", "AFTER : %ld %ld %ld %ld %s", start, stop, pstart, pstop, txt);
 	free(txt);
 	txt = NULL;
 	tlen = 0;
@@ -288,6 +427,7 @@ load_srt(const char *url, const char *buf, size_t len)
     txt[txtoff] = 0;
     es_insert_text(es, txt, pstart, pstop, tag_flags);
   }
+  //TRACE(TRACE_INFO, "Subtitles", "AFTER : %ld %ld %ld %ld %s", start, stop, pstart, pstop, txt);
   free(txt);
   return es;
 }
@@ -733,18 +873,23 @@ es_sort(ext_subtitles_t *es, int trim_stop)
     cnt++;
 
   vec = malloc(sizeof(video_overlay_t *) * cnt);
-  
+
   cnt = 0;
   TAILQ_FOREACH(vo, &es->es_entries, vo_link)
     vec[cnt++] = vo;
-  
+
   qsort(vec, cnt, sizeof(video_overlay_t *), vocmp);
 
-  if(trim_stop) {
-    // Trim so no stop time is higher than next items start time
-    for(i = 0; i < cnt - 1; i++)
-      vec[i]->vo_stop = MIN(vec[i]->vo_stop, vec[i + 1]->vo_start);
-  }
+	// Trim so no stop time is higher than next items start time
+	for(i = 0; i < cnt - 1; i++)
+	{
+		if(trim_stop)
+			vec[i]->vo_stop = MIN(vec[i]->vo_stop, vec[i + 1]->vo_start);
+
+		vec[i]->vo_start_next = vec[i + 1]->vo_start;
+		vec[i+1]->vo_start_next = vec[i + 1]->vo_start+5000000;
+		//TRACE(TRACE_DEBUG, "SORT", "Next PTS: %ld", vec[i]->vo_start_next);
+	}
 
   TAILQ_INIT(&es->es_entries);
   for(i = 0; i < cnt; i++)
@@ -862,6 +1007,7 @@ vo_deliver(ext_subtitles_t *es, video_overlay_t *vo, media_pipe_t *mp,
 
         video_overlay_enqueue(mp, dup);
         //printf("delivery %" PRId64 " %" PRId64 " - %" PRId64 ": %ls\n",user_time,vo->vo_start,vo->vo_stop,(wchar_t*)vo->vo_text);
+		//TRACE(TRACE_INFO, "Subtitles", "NOW : %ld %ld - %s", vo->vo_start, vo->vo_stop, (char*)vo->vo_text);
         vo = TAILQ_NEXT(vo, vo_link);
   } while(vo != NULL && vo->vo_start == s && vo->vo_stop > user_time);
 }
@@ -897,7 +1043,7 @@ subtitles_pick(ext_subtitles_t *es, int64_t user_time, int64_t pts,
   }
 
   TAILQ_FOREACH(vo, &es->es_entries, vo_link) {
-    if(vo->vo_start <= user_time && vo->vo_stop > user_time && vo->vo_start>user_time-1000000) {//don't re-delivery long standing item
+    if(vo->vo_start <= user_time && vo->vo_stop > user_time && vo->vo_start>user_time-2000000) {//don't re-delivery long standing item
       vo_deliver(es, vo, mp, user_time, user_time_to_pts);
       return;
     }
@@ -943,26 +1089,30 @@ subtitles_from_zipfile(media_pipe_t *mp, buf_t *b)
 ext_subtitles_t *
 subtitles_load(media_pipe_t *mp, const char *url)
 {
+  const char *s;
+
+  if((s = mystrbegins(url, "hls:")) != NULL) return NULL;
+
   ext_subtitles_t *sub;
   char errbuf[256];
 
-  const char *s;
+
   if((s = mystrbegins(url, "vobsub:")) != NULL) {
     sub = vobsub_load(s, errbuf, sizeof(errbuf), mp);
-    if(sub == NULL) 
-      TRACE(TRACE_ERROR, "Subtitles", "Unable to load %s -- %s", 
+    if(sub == NULL)
+      TRACE(TRACE_ERROR, "Subtitles", "Unable to load %s -- %s",
 	    s, errbuf);
     return sub;
   }
 
-  TRACE(TRACE_DEBUG, "Subtitles", "Trying to load %s", url);
+  //TRACE(TRACE_DEBUG, "Subtitles", "Trying to load %s", url);
 
   buf_t *b = fa_load(url,
                      FA_LOAD_ERRBUF(errbuf, sizeof(errbuf)),
                      NULL);
 
   if(b == NULL) {
-    TRACE(TRACE_ERROR, "Subtitles", "Unable to load %s -- %s", 
+    TRACE(TRACE_ERROR, "Subtitles", "Unable to load %s -- %s",
 	  url, errbuf);
     return NULL;
   }
@@ -971,13 +1121,13 @@ subtitles_load(media_pipe_t *mp, const char *url)
     TRACE(TRACE_DEBUG, "Subtitles", "%s is a ZIP archive, scanning...", url);
     return subtitles_from_zipfile(mp, b);
   }
-  
+
   if(gz_check(b)) {
     // is .gz compressed, inflate it
 
     b = gz_inflate(b, errbuf, sizeof(errbuf));
     if(b == NULL) {
-      TRACE(TRACE_ERROR, "Subtitles", "Unable to decompress %s -- %s", 
+      TRACE(TRACE_ERROR, "Subtitles", "Unable to decompress %s -- %s",
 	    url, errbuf);
       return NULL;
     }
@@ -993,9 +1143,7 @@ subtitles_load(media_pipe_t *mp, const char *url)
 	  "Unable to load %s -- Unknown format (%d bytes), dump of first 64 bytes follows",
 	  url, size);
     hexdump("Subtitles", header, MIN(size, 64));
-  } else {
-    TRACE(TRACE_DEBUG, "Subtitles", "Loaded %s OK", url);
-  }
+  } //else { TRACE(TRACE_DEBUG, "Subtitles", "Loaded %s OK", url); }
   return sub;
 }
 
@@ -1009,6 +1157,11 @@ subtitles_probe(const char *url)
 {
   const char *ret;
   buf_t *b = fa_load(url, NULL);
+  if(!b)
+  {
+	  TRACE(TRACE_ERROR, "Subtitles", "Cannot probe, invalid buffer for URL: %s", url);
+	  return NULL;
+  }
 
   if(is_txt(buf_cstr(b), buf_len(b)))
     ret = "TXT";

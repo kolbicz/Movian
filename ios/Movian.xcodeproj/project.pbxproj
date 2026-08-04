@@ -139,6 +139,8 @@
 		F10000000000000000000012 /* fa_libsmb2_pool.c in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* fa_libsmb2_pool.c */; };
 		F10000000000000000000013 /* fa_libsmb2.c in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* fa_libsmb2.c */; };
 		F10000000000000000000014 /* fa_libsmb2_pool.c in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* fa_libsmb2_pool.c */; };
+		F30000000000000000000011 /* wsd.c in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000001 /* wsd.c */; };
+		F30000000000000000000012 /* wsd.c in Sources */ = {isa = PBXBuildFile; fileRef = F30000000000000000000001 /* wsd.c */; };
 		6A35C2051C1041FC00D8EA86 /* glw_popup.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A6AD6D11C0E2EC700931F45 /* glw_popup.c */; };
 		6A35C2061C1041FC00D8EA86 /* glw_scroll.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A08CDEB1C07000F00387E87 /* glw_scroll.c */; };
 		6A35C2071C1041FC00D8EA86 /* glw_array.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCF631B30785D0099FB5A /* glw_array.c */; };
@@ -625,6 +627,7 @@
 		6ADCD0061B30785D0099FB5A /* glw.c in Sources */ = {isa = PBXBuildFile; fileRef = 6ADCCFBD1B30785D0099FB5A /* glw.c */; };
 		6ADCD34A1B316BEE0099FB5A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6AC2B8841B1F23D800969FB4 /* Images.xcassets */; };
 		6AEAE74C1B9A374800235754 /* main.c in Sources */ = {isa = PBXBuildFile; fileRef = 6AEAE74B1B9A374800235754 /* main.c */; };
+		F20000000000000000000001 /* plugins.c in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* plugins.c */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -985,6 +988,7 @@
 		F10000000000000000000001 /* fa_libsmb2.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_libsmb2.c; sourceTree = "<group>"; };
 		F10000000000000000000002 /* fa_libsmb2_pool.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_libsmb2_pool.c; sourceTree = "<group>"; };
 		F10000000000000000000003 /* fa_libsmb2_pool.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = fa_libsmb2_pool.h; sourceTree = "<group>"; };
+		F30000000000000000000001 /* wsd.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = wsd.c; path = ../src/sd/wsd.c; sourceTree = "<group>"; };
 		6ADCCE341B304C280099FB5A /* asyncio.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = asyncio.h; sourceTree = "<group>"; };
 		6ADCCE351B304C280099FB5A /* asyncio_http.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = asyncio_http.c; sourceTree = "<group>"; };
 		6ADCCE371B304C280099FB5A /* asyncio_posix.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = asyncio_posix.c; sourceTree = "<group>"; };
@@ -1181,6 +1185,7 @@
 		6ADCCFBD1B30785D0099FB5A /* glw.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = glw.c; path = ../src/ui/glw/glw.c; sourceTree = "<group>"; };
 		6ADCCFBE1B30785D0099FB5A /* glw.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = glw.h; path = ../src/ui/glw/glw.h; sourceTree = "<group>"; };
 		6AEAE74B1B9A374800235754 /* main.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = main.c; path = ../src/main.c; sourceTree = "<group>"; };
+		F20000000000000000000002 /* plugins.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = plugins.c; path = ../src/plugins.c; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1347,6 +1352,7 @@
 				6ADCCD1B1B30135B0099FB5A /* libav.c */,
 				6ADCCD1C1B30135B0099FB5A /* libav.h */,
 				6AEAE74B1B9A374800235754 /* main.c */,
+				F20000000000000000000002 /* plugins.c */,
 				6ADCCC6C1B30007A0099FB5A /* main.h */,
 				6ADCCD811B3015C90099FB5A /* media */,
 				6ADCCEE11B304E5C0099FB5A /* metadata */,
@@ -2213,10 +2219,12 @@
 			);
 			outputPaths = (
 				"$(BUILT_PRODUCTS_DIR)/lib/libavcodec.a",
+				"$(BUILT_PRODUCTS_DIR)/lib/libavfilter.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavdevice.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavformat.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavresample.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavutil.a",
+				"$(BUILT_PRODUCTS_DIR)/lib/libswresample.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libswscale.a",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -2232,10 +2240,12 @@
 			);
 			outputPaths = (
 				"$(BUILT_PRODUCTS_DIR)/lib/libavcodec.a",
+				"$(BUILT_PRODUCTS_DIR)/lib/libavfilter.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavdevice.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavformat.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavresample.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libavutil.a",
+				"$(BUILT_PRODUCTS_DIR)/lib/libswresample.a",
 				"$(BUILT_PRODUCTS_DIR)/lib/libswscale.a",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -2454,6 +2464,7 @@
 				6ADCCE1B1B30165E0099FB5A /* fa_nativesmb.c in Sources */,
 				F10000000000000000000011 /* fa_libsmb2.c in Sources */,
 				F10000000000000000000012 /* fa_libsmb2_pool.c in Sources */,
+				F30000000000000000000011 /* wsd.c in Sources */,
 				6ADCCD391B30135B0099FB5A /* playqueue.c in Sources */,
 				6ADCCE1C1B30165E0099FB5A /* nmb.c in Sources */,
 				6ADCCE191B30165E0099FB5A /* fileaccess.c in Sources */,
@@ -2506,6 +2517,7 @@
 				6ADCCCF51B3011CF0099FB5A /* prop_reorder.c in Sources */,
 				6ADCCCEC1B3011CF0099FB5A /* prop_core.c in Sources */,
 				6AEAE74C1B9A374800235754 /* main.c in Sources */,
+				F20000000000000000000001 /* plugins.c in Sources */,
 				6ADCCF1F1B304EFE0099FB5A /* httpcontrol.c in Sources */,
 				6ADCCCAD1B3000CC0099FB5A /* isolang.c in Sources */,
 				6ADCCEF11B304E5C0099FB5A /* metadata_sources.c in Sources */,
@@ -2729,6 +2741,7 @@
 				6A35C2031C1041D200D8EA86 /* fa_nativesmb.c in Sources */,
 				F10000000000000000000013 /* fa_libsmb2.c in Sources */,
 				F10000000000000000000014 /* fa_libsmb2_pool.c in Sources */,
+				F30000000000000000000012 /* wsd.c in Sources */,
 				6A35C27C1C10426F00D8EA86 /* ssdp.c in Sources */,
 				6A35C2A01C1042B700D8EA86 /* upnp_browse.c in Sources */,
 				6A35C2421C10423600D8EA86 /* i18n.c in Sources */,
@@ -2984,6 +2997,7 @@
 					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
 					"$(SRCROOT)/../",
 					"$(SRCROOT)/../src",
+					"$(SRCROOT)/../ext/sqlite",
 					"$(SRCROOT)/freetype2-ios/include",
 					"$(SRCROOT)/../ext/libsmb2/include",
 					"$(BUILT_PRODUCTS_DIR)/usr/local/include",
@@ -3039,6 +3053,7 @@
 					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
 					"$(SRCROOT)/../",
 					"$(SRCROOT)/../src",
+					"$(SRCROOT)/../ext/sqlite",
 					"$(SRCROOT)/freetype2-ios/include",
 					"$(BUILT_PRODUCTS_DIR)/usr/local/include",
 				);
@@ -3066,6 +3081,7 @@
 					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
 					"$(SRCROOT)/../",
 					"$(SRCROOT)/../src",
+					"$(SRCROOT)/../ext/sqlite",
 					"$(SRCROOT)/freetype2-ios/include",
 					"$(SRCROOT)/../ext/libsmb2/include",
 				);
@@ -3089,10 +3105,13 @@
 				);
 				OTHER_LDFLAGS = (
 					"${BUILT_PRODUCTS_DIR}/lib/libavformat.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libavfilter.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavcodec.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavutil.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavresample.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libswresample.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libswscale.a",
+					"-liconv",
 					"$(SRCROOT)/../build.ios/libsmb2/lib/libsmb2.a",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = tv.Movian;
@@ -3114,6 +3133,7 @@
 					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include,
 					"$(SRCROOT)/../",
 					"$(SRCROOT)/../src",
+					"$(SRCROOT)/../ext/sqlite",
 					"$(SRCROOT)/freetype2-ios/include",
 					"$(SRCROOT)/../ext/libsmb2/include",
 				);
@@ -3137,10 +3157,13 @@
 				);
 				OTHER_LDFLAGS = (
 					"${BUILT_PRODUCTS_DIR}/lib/libavformat.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libavfilter.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavcodec.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavutil.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavresample.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libswresample.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libswscale.a",
+					"-liconv",
 					"$(SRCROOT)/../build.ios/libsmb2/lib/libsmb2.a",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = tv.Movian;
@@ -3174,10 +3197,13 @@
 				);
 				OTHER_LDFLAGS = (
 					"${BUILT_PRODUCTS_DIR}/lib/libavformat.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libavfilter.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavcodec.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavutil.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavresample.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libswresample.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libswscale.a",
+					"-liconv",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.lonelycoder.Movian-tvOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -3212,10 +3238,13 @@
 				);
 				OTHER_LDFLAGS = (
 					"${BUILT_PRODUCTS_DIR}/lib/libavformat.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libavfilter.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavcodec.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavutil.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libavresample.a",
+					"${BUILT_PRODUCTS_DIR}/lib/libswresample.a",
 					"${BUILT_PRODUCTS_DIR}/lib/libswscale.a",
+					"-liconv",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.lonelycoder.Movian-tvOS";
 				PRODUCT_NAME = "$(TARGET_NAME)";

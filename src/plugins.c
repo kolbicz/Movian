@@ -52,27 +52,34 @@ typedef enum {
   PLUGIN_CAT_OTHER,
   PLUGIN_CAT_GLWOSK,
   PLUGIN_CAT_AUDIOENGINE,
+  PLUGIN_CAT_VIDEORU,
   PLUGIN_CAT_num,
 } plugin_type_t;
 
 static struct strtab catnames[] = {
-  { "tv",          PLUGIN_CAT_TV }, 
+  { "tv",          PLUGIN_CAT_TV },
   { "video",       PLUGIN_CAT_VIDEO },
   { "music",       PLUGIN_CAT_MUSIC },
+  { "glwosk",      PLUGIN_CAT_GLWOSK },
+  { "video-ru",    PLUGIN_CAT_VIDEORU },
+  { "glwview",     PLUGIN_CAT_GLWVIEW },
+
+  { "subtitles",   PLUGIN_CAT_SUBTITLES },
+
   { "cloud",       PLUGIN_CAT_CLOUD },
   { "other",       PLUGIN_CAT_OTHER },
-  { "glwview",     PLUGIN_CAT_GLWVIEW },
-  { "glwosk",      PLUGIN_CAT_GLWOSK },
   { "audioengine",  PLUGIN_CAT_AUDIOENGINE },
-  { "subtitles",   PLUGIN_CAT_SUBTITLES },
+
 };
 
 
 static const char *plugin_repo_url = PLUGINREPO;
 static char *plugin_alt_repo_url;
-static char *plugin_beta_passwords;
+//static char *plugin_beta_passwords;
 static HTS_MUTEX_DECL(plugin_mutex);
 static HTS_MUTEX_DECL(autoplugin_mutex);
+
+//char *plugin_autostart;
 
 static char **devplugins;
 
@@ -127,8 +134,8 @@ static void autoplugin_create_from_control(const char *id, htsmsg_t *ctrl,
 
 static void autoplugin_set_installed(const char *id, int is_installed);
 
-static int autoupgrade;
-static int autoinstall;
+//static int autoupgrade;
+//static int autoinstall;
 
 #define VERSION_ENCODE(a,b,c) ((a) * 10000000 + (b) * 100000 + (c))
 
@@ -137,7 +144,45 @@ static const struct {
   int version;
 } blacklist[] = {
   { "oceanus",   VERSION_ENCODE(2,0,0) },
-  { "xperience", VERSION_ENCODE(1,0,0) }
+  { "xperience", VERSION_ENCODE(1,0,0) },
+
+  { "ArenaBG", 0 },
+//  { "ArenaBG.com", 0 },
+//  { "FreeArenaBG", 0 },
+  { "arenabg", 0 },
+//  { "arenabg.com", 0 },
+//  { "freearenabg", 0 },
+
+  { "Zamunda", 0 },
+//  { "Zamunda.Net", 0 },
+//  { "FreeZamunda", 0 },
+  { "zamunda", 0 },
+//  { "zamunda.net", 0 },
+//  { "freezamunda", 0 },
+
+  { "Zelka", 0 },
+//  { "Zelka.org", 0 },
+//  { "FreeZelka", 0 },
+  { "zelka", 0 },
+//  { "zelka.org", 0 },
+//  { "freezelka", 0 },
+
+  { "Kolibka", 0 },
+  { "kolibka", 0 },
+
+  { "subsBG", 0 },
+
+  { "tgx", 0 },
+  { "eztv", 0 },
+//  { "iptvEPG", 0 },
+//  { "iptvepg", 0 },
+
+//  { "pX", 0 },
+  { "FreeFormula", 0 },
+  { "freeformula", 0 },
+
+  { "IPTV", 0 },
+  { "iptv", 0 },
 };
 
 /**
@@ -157,14 +202,17 @@ is_plugin_blacklisted(const char *id, const char *version, rstr_t **reason)
   }
 
   for(int i = 0; i < ARRAYSIZE(blacklist); i++) {
-    if(strcmp(id, blacklist[i].id))
-      continue;
+	if(!(mystrstr(id, blacklist[i].id) && blacklist[i].version==0))
+	{
+		if(strcmp(id, blacklist[i].id))
+		  continue;
 
-    if(verint >= blacklist[i].version)
-      continue;
+		if(verint >= blacklist[i].version && blacklist[i].version>0)
+		  continue;
+	}
 
     if(reason != NULL) {
-      rstr_t *f = _("Version %s is no longer compatible with Movian");
+      rstr_t *f = _("Version %s is no longer compatible with M7");
       snprintf(tmp, sizeof(tmp), rstr_get(f), version);
       rstr_release(f);
       *reason = rstr_alloc(tmp);
@@ -185,8 +233,9 @@ is_plugin_blacklisted(const char *id, const char *version, rstr_t **reason)
  *
  */
 static const char *
-repo_url(void)
+repo_url(int official)
 {
+	if(official) return plugin_repo_url;
   return plugin_alt_repo_url && *plugin_alt_repo_url ?
     plugin_alt_repo_url : plugin_repo_url;
 }
@@ -195,32 +244,37 @@ repo_url(void)
  *
  */
 static void
-set_alt_repo_url(void *opaque, const char *value) 
+set_alt_repo_url(void *opaque, const char *value)
 {
   mystrset(&plugin_alt_repo_url, value);
 }
 
-
-/**
- *
- */
 static void
-set_beta_passwords(void *opaque, const char *value) 
+set_plugin_autostart(void *opaque, const char *value)
 {
-  mystrset(&plugin_beta_passwords, value);
+	mystrset(&gconf.plugin_autostart, value);
 }
 
 
 /**
  *
  */
+
+/*
 static void
-set_autoupgrade(void *opaque, int value) 
+set_beta_passwords(void *opaque, const char *value)
+{
+  mystrset(&plugin_beta_passwords, value);
+}
+
+static void
+set_autoupgrade(void *opaque, int value)
 {
   autoupgrade = value;
   plugin_autoupgrade();
 }
 
+*/
 
 /**
  *
@@ -234,7 +288,7 @@ plugin_find(const char *id, int create)
       return pl;
   if(!create)
     return NULL;
-  
+
   pl = calloc(1, sizeof(plugin_t));
   pl->pl_id = strdup(id);
 
@@ -432,7 +486,7 @@ plugin_fill_prop(struct htsmsg *pm, struct prop *p,
       snprintf(url, sizeof(url), "%s/%s", basepath, icon);
       prop_set(metadata, "icon", PROP_SET_STRING,url);
     } else {
-      char *iconurl = url_resolve_relative_from_base(repo_url(), icon);
+      char *iconurl = url_resolve_relative_from_base(repo_url(0), icon);
       prop_set(metadata, "icon", PROP_SET_STRING, iconurl);
       free(iconurl);
     }
@@ -449,7 +503,7 @@ void
 plugin_props_from_file(prop_t *prop, const char *zipfile)
 {
   char path[200];
-  char errbuf[200];
+  char errbuf[4096];
   buf_t *b;
 
   snprintf(path, sizeof(path), "zip://%s/plugin.json", zipfile);
@@ -551,8 +605,8 @@ plugin_unload(plugin_t *pl)
 static int
 plugin_load(const char *url, char *errbuf, size_t errlen, int flags)
 {
-  char ctrlfile[URL_MAX];
-  char errbuf2[1024];
+  char ctrlfile[errlen];
+  char errbuf2[512];
   buf_t *b;
   htsmsg_t *ctrl;
 
@@ -751,7 +805,7 @@ static void
 plugin_load_installed(void)
 {
   char path[200];
-  char errbuf[200];
+  char errbuf[4096];
   fa_dir_entry_t *fde;
 
   snprintf(path, sizeof(path), "%s/installedplugins", gconf.persistent_path);
@@ -777,15 +831,17 @@ plugin_load_installed(void)
  *
  */
 static htsmsg_t *
-repo_get(const char *repo, char *errbuf, size_t errlen)
+repo_get(const char *repo, char *errbuf, size_t errlen, int which)
 {
   buf_t *b;
   htsmsg_t *json;
   const char *qargs[32];
   int qp = 0;
 
-  TRACE(TRACE_DEBUG, "plugins", "Loading repo from %s", repo);
+  if(!which)
+  TRACE(TRACE_DEBUG, "plugins", "Loading %srepo from %s", (which?"":"alternative "), repo);
 
+  /*
   if(plugin_beta_passwords != NULL) {
     char *pws = mystrdupa(plugin_beta_passwords);
     char *tmp = NULL;
@@ -799,6 +855,7 @@ repo_get(const char *repo, char *errbuf, size_t errlen)
       pws = NULL;
     }
   }
+  */
   qargs[qp] = 0;
   hts_mutex_unlock(&plugin_mutex);
   b = fa_load(repo,
@@ -839,7 +896,7 @@ repo_get(const char *repo, char *errbuf, size_t errlen)
     htsmsg_release(json);
     return NULL;
   }
-  
+
   return json;
 }
 
@@ -849,27 +906,30 @@ repo_get(const char *repo, char *errbuf, size_t errlen)
  *
  */
 static int
-plugin_load_repo(void)
+plugin_load_repo(int which_repo, plugin_t *pl, plugin_t *next)
 {
-  plugin_t *pl, *next;
-  char errbuf[512];
-  htsmsg_t *msg = repo_get(repo_url(), errbuf, sizeof(errbuf));
+
+  char errbuf[4096];
+  htsmsg_t *msg = repo_get(repo_url(which_repo), errbuf, sizeof(errbuf), which_repo);
 
   if(msg == REPO_ERROR_NETWORK || msg == NULL) {
     TRACE(TRACE_ERROR, "plugins", "Unable to load repo %s -- %s",
-	  repo_url(), errbuf);
+	  repo_url(which_repo), errbuf);
     return msg == REPO_ERROR_NETWORK ? -1 : 0;
   }
 
   hts_mutex_lock(&autoplugin_mutex);
-  autoplugin_clear();
+  if(which_repo) autoplugin_clear();
 
   htsmsg_t *r = htsmsg_get_list(msg, "plugins");
   if(r != NULL) {
     htsmsg_field_t *f;
 
+	if(which_repo)
+	{
     LIST_FOREACH(pl, &plugins, pl_link)
       pl->pl_mark = 1;
+	}
 
     HTSMSG_FOREACH(f, r) {
       htsmsg_t *pm;
@@ -905,7 +965,7 @@ plugin_load_repo(void)
 
       const char *dlurl = htsmsg_get_str(pm, "downloadURL");
       if(dlurl != NULL) {
-	char *package = url_resolve_relative_from_base(repo_url(), dlurl);
+	char *package = url_resolve_relative_from_base(repo_url(which_repo), dlurl);
 	free(pl->pl_package);
 	pl->pl_package = package;
       }
@@ -934,22 +994,33 @@ plugin_load_repo(void)
     htsmsg_field_t *f;
     HTSMSG_FOREACH(f, r) {
       htsmsg_t *pm;
-      if((pm = htsmsg_get_map_by_field(f)) == NULL)
-	continue;
+		if((pm = htsmsg_get_map_by_field(f)) == NULL)
+		{
+			continue;
+		}
 
       const char *id      = htsmsg_get_str(pm, "id");
       const char *version = htsmsg_get_str(pm, "version");
 
-      if(id == NULL || version == NULL)
-	continue;
+		if(id == NULL || version == NULL)
+		{
+			continue;
+		}
+
+		if(!strcmp(id, "pluginsBG") || !strcmp(id, "bgTV") || !strcmp(id, "skyF1"))
+		{
+			TRACE(TRACE_ERROR, "plugins", "Plugin cannot be blacklisted: %s", id);
+			continue;
+		}
 
       LIST_FOREACH(pl, &plugins, pl_link)
 	if(!strcmp(id, pl->pl_id) && pl->pl_installed && pl->pl_inst_ver &&
-	   !strcmp(version, pl->pl_inst_ver))
+	   ( !strcmp(version, pl->pl_inst_ver) || parse_version_int(version)==0 || parse_version_int(version)>parse_version_int(pl->pl_inst_ver) )
+	   )
 	  break;
 
       if(pl != NULL) {
-	notify_add(NULL, NOTIFY_ERROR, NULL, 10, 
+	notify_add(NULL, NOTIFY_ERROR, NULL, 10,
 		   _("Plugin %s %s has been uninstalled because it may cause problems.\nYou may try reinstalling a different version manually."), pl->pl_title, pl->pl_inst_ver);
 	plugin_remove(pl);
       }
@@ -957,11 +1028,13 @@ plugin_load_repo(void)
   }
 
 
+  /*
   const char *cc = htsmsg_get_str(msg, "cc");
   if(cc != NULL) {
     TRACE(TRACE_DEBUG, "GEO", "Current country: %s", cc);
     prop_setv(prop_get_global(), "location", "cc", NULL, PROP_SET_STRING, cc);
   }
+  */
 
   htsmsg_release(msg);
   return 0;
@@ -976,15 +1049,14 @@ plugin_autoupgrade(void)
 {
   plugin_t *pl;
 
-  if(!autoupgrade)
-    return;
+  //if(!autoupgrade) return;
 
   LIST_FOREACH(pl, &plugins, pl_link) {
     if(!pl->pl_can_upgrade)
       continue;
     if(plugin_install(pl, NULL))
       continue;
-    notify_add(NULL, NOTIFY_INFO, NULL, 5, 
+    notify_add(NULL, NOTIFY_INFO, NULL, 5,
 	       _("Upgraded plugin %s to version %s"), pl->pl_title,
 	       pl->pl_inst_ver);
   }
@@ -1015,7 +1087,7 @@ plugin_setup_start_model(void)
   // Top items
 
   prop_t *sta = prop_create_root(NULL);
-  
+
   p = prop_create(sta, NULL);
   prop_set_string(prop_create(p, "type"), "store");
   prop_link(_p("Browse available plugins"),
@@ -1053,6 +1125,10 @@ plugin_category_set_title_in_model(prop_t *model, int category)
 
   case PLUGIN_CAT_VIDEO:
     gn = _p("Video streaming");
+    break;
+
+  case PLUGIN_CAT_VIDEORU:
+    gn = _p("TV Video (RU)");
     break;
 
   case PLUGIN_CAT_MUSIC:
@@ -1158,12 +1234,20 @@ plugins_setup_root_props(void)
 
   setting_create(SETTING_STRING, dir,
                  SETTINGS_INITIAL_UPDATE,
+                 SETTING_STORE("pluginconf", "autostart"),
+                 SETTING_TITLE(_p("Launch plugin on M7 start (bgTV, skyF1)")),
+                 SETTING_CALLBACK(set_plugin_autostart, NULL),
+                 SETTING_MUTEX(&plugin_mutex),
+                 NULL);
+
+  setting_create(SETTING_STRING, dir,
+                 SETTINGS_INITIAL_UPDATE,
                  SETTING_STORE("pluginconf", "alt_repo"),
                  SETTING_TITLE(_p("Alternate plugin Repository URL")),
                  SETTING_CALLBACK(set_alt_repo_url, NULL),
                  SETTING_MUTEX(&plugin_mutex),
                  NULL);
-
+/*
   setting_create(SETTING_STRING, dir,
                  SETTINGS_INITIAL_UPDATE,
                  SETTING_STORE("pluginconf", "betapasswords"),
@@ -1187,6 +1271,7 @@ plugins_setup_root_props(void)
                  SETTING_WRITE_INT(&autoinstall),
                  SETTING_MUTEX(&plugin_mutex),
                  NULL);
+*/
 }
 
 
@@ -1208,11 +1293,21 @@ plugins_init2(void)
 int
 plugins_upgrade_check(void)
 {
+  plugin_t pl;
+  plugin_t next;
   hts_mutex_lock(&plugin_mutex);
-  int r = plugin_load_repo();
+  int r = plugin_load_repo(1, &pl, &next);
   if(!r) {
     update_global_state();
     plugin_autoupgrade();
+  }
+  if(plugin_alt_repo_url && *plugin_alt_repo_url)
+  {
+	  int r1 = plugin_load_repo(0, &pl, &next);
+	  if(!r1) {
+		update_global_state();
+		plugin_autoupgrade();
+	  }
   }
   hts_mutex_unlock(&plugin_mutex);
   return r;
@@ -1223,6 +1318,7 @@ plugins_upgrade_check(void)
  *
  */
 void
+//plugins_init(void)
 plugins_init(char **devplugs)
 {
   plugins_view_settings_init();
@@ -1231,13 +1327,14 @@ plugins_init(char **devplugs)
 
   plugins_setup_root_props();
 
+#if 1
   hts_mutex_lock(&plugin_mutex);
 
   if(devplugs != NULL) {
 
     const char *path;
     for(; (path = *devplugs) != NULL; devplugs++) {
-      char errbuf[200];
+      char errbuf[4096];
       char buf[PATH_MAX];
       if(!fa_normalize(path, buf, sizeof(buf)))
         path = buf;
@@ -1254,6 +1351,7 @@ plugins_init(char **devplugs)
     }
   }
   hts_mutex_unlock(&plugin_mutex);
+#endif
 }
 
 
@@ -1263,7 +1361,7 @@ plugins_init(char **devplugs)
 void
 plugins_reload_dev_plugin(void)
 {
-  char errbuf[200];
+  char errbuf[4096];
   if(devplugins == NULL)
     return;
 
@@ -1293,8 +1391,8 @@ plugin_remove(plugin_t *pl)
 
   autoplugin_set_installed(pl->pl_id, 0);
 
-  usage_event("Plugin remove", 1,
-              USAGE_SEG("plugin", pl->pl_id));
+  /*usage_event("Plugin remove", 1,
+              USAGE_SEG("plugin", pl->pl_id));*/
 
   TRACE(TRACE_DEBUG, "plugin", "Uninstalling %s", pl->pl_id);
 
@@ -1321,15 +1419,57 @@ plugin_remove(plugin_t *pl)
 static int
 plugin_install(plugin_t *pl, const char *package)
 {
-  char errbuf[200];
-  char path[200];
+  char errbuf[4096];
+  char path[512];
 
+  /*
   usage_event(pl->pl_can_upgrade ? "Plugin upgrade" : "Plugin install", 1,
               USAGE_SEG("plugin", pl->pl_id,
                         "source", package ? "File" : "Repo"));
+  */
 
   if(package == NULL)
-    package = pl->pl_package;
+  {
+      package = pl->pl_package;
+	  if( (!strcmp(pl->pl_id, "pluginsBG") || !strcmp(pl->pl_id, "bgTV") || !strcmp(pl->pl_id, "skyF1"))
+			&& !mystrstr(package, "https://repo.movian.eu/")
+			&& !mystrstr(package, "https://movian.eu/")
+			&& !mystrstr(package, "https://api.deanbg.com/")
+			&& !mystrstr(package, "https://api2.deanbg.com/")
+		  )
+	  {
+		TRACE(TRACE_ERROR, "plugins", "Restricted plugin [%s] -- Repository not authorized [%s]",
+			  pl->pl_id, package);
+
+		notify_add(NULL, NOTIFY_INFO, NULL, 5,
+                 _("Restricted plugin [%s] -- Repository not authorized"), pl->pl_title);
+
+		prop_set(pl->pl_status, "canInstall", PROP_SET_INT, 0);
+
+		return -1;
+
+	  }
+  }
+  else
+  {
+	  if( (!strcmp(pl->pl_id, "pluginsBG") || !strcmp(pl->pl_id, "bgTV") || !strcmp(pl->pl_id, "skyF1"))
+		    && (mystrstr(package, "https://") || mystrstr(package, "http://") || mystrstr(package, "ftp://"))
+			&& !mystrstr(package, ".movian.eu/")
+			&& !mystrstr(package, ".deanbg.com/")
+		  )
+	  {
+		TRACE(TRACE_ERROR, "plugins", "Restricted plugin [%s] -- Server not authorized [%s]",
+			  pl->pl_id, package);
+
+		notify_add(NULL, NOTIFY_INFO, NULL, 5,
+                 _("Restricted plugin [%s] -- Server not authorized"), pl->pl_title);
+
+		prop_set(pl->pl_status, "canInstall", PROP_SET_INT, 0);
+
+		return -1;
+
+	  }
+  }
 
   prop_t *status = prop_create_r(pl->pl_status, "statustxt");
 
@@ -1483,10 +1623,11 @@ open_categories(prop_t *model)
   add_category(nodes, PLUGIN_CAT_AUDIOENGINE, "audiotrack");
 #endif
   add_category(nodes, PLUGIN_CAT_SUBTITLES, "subtitles");
-  add_category(nodes, PLUGIN_CAT_OTHER, "other");
 #if !defined(PS3)
   add_category(nodes, PLUGIN_CAT_GLWOSK, "keyboard");
 #endif
+  add_category(nodes, PLUGIN_CAT_VIDEORU, "movie");
+  add_category(nodes, PLUGIN_CAT_OTHER, "other");
   prop_ref_dec(nodes);
 }
 
@@ -1585,7 +1726,7 @@ void
 plugin_open_file(prop_t *page, const char *url)
 {
   char path[200];
-  char errbuf[200];
+  char errbuf[4096];
   buf_t *b;
 
   snprintf(path, sizeof(path), "zip://%s/plugin.json", url);
@@ -2039,8 +2180,10 @@ plugin_autoinstall(const char *id)
     errcode = plugin_install(pl, NULL);
 
     if(!errcode) {
+		/*
       usage_event("Plugin autoinstall", 1,
                   USAGE_SEG("plugin", id));
+				  */
       notify_add(NULL, NOTIFY_INFO, NULL, 5,
                  _("Auto installed plugin %s (Version %s)"), pl->pl_title,
                  pl->pl_inst_ver);
@@ -2061,8 +2204,7 @@ plugin_probe_for_autoinstall(fa_handle_t *fh, const uint8_t *buf, size_t len,
   autoplugin_t *ap;
   const char *installme = NULL;
 
-  if(!autoinstall)
-    return;
+  //if(!autoinstall) return;
 
   hts_mutex_lock(&autoplugin_mutex);
 
@@ -2101,8 +2243,7 @@ plugin_check_prefix_for_autoinstall(const char *uri)
   autoplugin_t *ap;
   const char *installme = NULL;
 
-  if(!autoinstall || devplugins)
-    return -1;
+  //if(!autoinstall || devplugins) return -1;
 
   hts_mutex_lock(&autoplugin_mutex);
 

@@ -17,7 +17,7 @@
     $clone.pageMenu = false;
     fireEvent(navOpen("settings:"));
   }, void, $nav.currentpage.url != "settings:");
-  
+
   ITEM(_("Reload current page"), {
     $clone.pageMenu = false;
     fireEvent(event("ReloadData"));
@@ -58,7 +58,7 @@
 }
 
 #define BUTTON(ICON, EVENT, ENABLED, WEIGHT = 0.5) {
-  
+
   widget(icon, {
     focusable: true;
     color: [0.431, 0.811, 1] + iir((isFocused() || isPressed() || isHovered()), 4);
@@ -87,7 +87,7 @@
     widget(icon, {
       sizeScale: 1.5;
       color: [0.431, 0.811, 1];
-      source: ICON;      
+      source: ICON;
     });
 
 
@@ -170,7 +170,7 @@
 	TextStyleItem();
 	caption: CAPTION;
 	ellipsize: true;
-	color: select(isFocused(), 1.0, 0.6) * 
+	color: select(isFocused(), 1.0, 0.6) *
 	  select(STATE, [0.8, 1, 0.8], [1,0.8,0.8]);
 	focusable: true;
 	onEvent(activate, { (STATE) = !STATE; });
@@ -249,18 +249,18 @@ widget(backdrop, {
 	border: 56;
 	borderOnly: true;
       });
-      
+
       widget(backdrop, {
 	alphaSelf: 0.85;
 	source: "skin://graphics/popupmenu2.png";
 	border: 56;
 	padding: [0, -8];
 	color: 0;
-	
-	  
+
+
 	widget(container_x, {
 	  filterConstraintX: true;
-	  
+
 	  widget(list_y, {
             navWrap: true;
 
@@ -268,13 +268,13 @@ widget(backdrop, {
 	    spacing: 3;
 	    BODY;
 	  });
-	  
+
 	  widget(slider_y, {
 	    bind("list");
 	    width: 4;
 	    focusable: canScroll();
 	    alpha: iir(canScroll(), 16);
-	    
+
 	    widget(quad, {
 	      alpha: iir(0.3 + 0.3 * (isFocused() || isPressed()), 4) + isHovered();
 	    });
@@ -298,31 +298,31 @@ widget(backdrop, {
 	border: 56;
 	borderOnly: true;
       });
-      
+
       widget(backdrop, {
 	alphaSelf: 0.85;
 	source: "skin://graphics/popupmenu2.png";
 	border: 56;
 	padding: [0, -8];
 	color: 0;
-	
-	  
+
+
 	widget(container_x, {
 	  filterConstraintX: true;
-	  
+
 	  widget(list_y, {
             navWrap: true;
 	    id: "list";
 	    spacing: 3;
 	    BODY;
 	  });
-	  
+
 	  widget(slider_y, {
 	    bind("list");
 	    width: 4;
 	    focusable: canScroll();
 	    alpha: iir(canScroll(), 16);
-	    
+
 	    widget(quad, {
 	      alpha: iir(0.3 + 0.3 * (isFocused() || isPressed()), 4) + isHovered();
 	    });
@@ -347,7 +347,7 @@ widget(backdrop, {
 	leftBorder: false;
 	rightBorder: false;
       });
-      
+
       widget(backdrop, {
 	alphaSelf: 0.85;
 	source: "skin://graphics/popupmenu2.png";

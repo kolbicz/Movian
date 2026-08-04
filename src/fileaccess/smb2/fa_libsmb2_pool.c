@@ -274,12 +274,12 @@ movian_smb2_can_query_user(int flags)
   if(flags & (FA_NON_INTERACTIVE | FA_DISABLE_AUTH))
     return 0;
 
-#ifdef PLATFORM_OSX
+#if defined(PLATFORM_OSX) || defined(__ANDROID__)
   /*
-   * Cocoa directory scans run on Movian's asyncio-named worker, but the
-   * keyring dialog is dispatched to the main application UI. Suppressing the
-   * query solely because of that worker name leaves macOS unable to request
-   * credentials for any SMB2 server.
+   * Cocoa and Android directory scans can run on Movian's asyncio-named
+   * worker, while the keyring dialog is dispatched to the platform UI.
+   * Suppressing the query solely because of that worker name leaves these
+   * platforms unable to request credentials for an SMB2 server.
    */
   return 1;
 #else

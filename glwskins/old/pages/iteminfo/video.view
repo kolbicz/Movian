@@ -32,8 +32,8 @@ widget(container_y, {
 	margin: -4;
 	widget(image, {
 	  width: $ui.width / 6;
-	  source: $args.metadata.usericon ?? 
-	    $args.metadata.icon ?? 
+	  source: $args.metadata.usericon ??
+	    $args.metadata.icon ??
 	    "dataroot://res/svg/Movie.svg";
 	});
       });
@@ -55,14 +55,14 @@ widget(container_y, {
 	widget(label, {
 	  hidden: !$args.metadata.year;
 	  TextStyleItem();
-	  caption: '<font color="#888">' + _("Year:") + ' </font>' + 
+	  caption: '<font color="#888">' + _("Year:") + ' </font>' +
 	    fmt("%d", $args.metadata.year);
 	});
 
 
 	widget(label, {
 	  TextStyleItem();
-	  caption: '<font color="#888">' + _("Duration:") + ' </font>' + 
+	  caption: '<font color="#888">' + _("Duration:") + ' </font>' +
 	    select($args.restartpos > 0,
 		   value2duration($args.restartpos) + '  /  ',
 		   '') +
@@ -73,7 +73,7 @@ widget(container_y, {
 	  hidden: !$args.metadata.genre;
 	  TextStyleItem();
 	  maxlines: 3;
-	  caption: '<font color="#888">' + _("Genre:") + ' </font><margin>' + 
+	  caption: '<font color="#888">' + _("Genre:") + ' </font><margin>' +
 	    $args.metadata.genre;
 	});
 
@@ -86,7 +86,7 @@ widget(container_y, {
 	    shadow: true;
 	    outline: true;
 
-	    caption: '<font color="#888">' + _("Rating:") + ' </font>' + 
+	    caption: '<font color="#888">' + _("Rating:") + ' </font>' +
 	      fmt("(%1.1f / 10):", $args.metadata.rating / 10);
 	  });
 
@@ -98,11 +98,11 @@ widget(container_y, {
 	      STAR_DIMMED();
 	      STAR_DIMMED();
 	    });
-	    
+
 
 	    widget(clip, {
 	      clipping: [0, 0, 1 - $args.metadata.rating / 100, 0];
-	      
+
 	      widget(container_x, {
 		STAR_FULL();
 		STAR_FULL();
@@ -119,7 +119,7 @@ widget(container_y, {
 	widget(label, {
 	  hidden: !$args.metadata.timestamp;
 	  align: left;
-	  caption: '<font color="#888">' + _("File date:") + ' </font>' + 
+	  caption: '<font color="#888">' + _("File date:") + ' </font>' +
 	    strftime($args.metadata.timestamp, "%F");
 	  TextStyleItem();
 	});
@@ -133,14 +133,14 @@ widget(container_y, {
 	space(1);
 
 
-	
-	
+
+
 
       });
     });
   });
-  
-  
+
+
   widget(label, {
     TextStyleItem();
     sizeScale: 0.8;

@@ -40,13 +40,13 @@ widget(container_y, {
     widget(container_y, {
       widget(label, {
 	TextStyleItem();
-	caption: '<font color="#888">' + _("Date: ") + '</font>' + 
+	caption: '<font color="#888">' + _("Date: ") + '</font>' +
 	  strftime($args.metadata.timestamp, "%F");
       });
 
       widget(label, {
 	TextStyleItem();
-	caption: '<font color="#888">' + _("Camera: ") + '</font>' + 
+	caption: '<font color="#888">' + _("Camera: ") + '</font>' +
 	  $args.metadata.equipment;
       });
     });

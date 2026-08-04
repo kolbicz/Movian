@@ -1,8 +1,16 @@
+widget(container_z, {
+
+  widget(backdrop, {
+    source: "pixmap:gradient:30,30,30:10,10,10";
+    zoffset: -1450;
+    alpha: $ui.screenSaverAlpha;
+  });
+
 widget(slideshow, {
   alpha: $ui.screenSaverAlpha;
 
   time: $core.glw.screensaver.imageDuration;
-  transitionTime: 2;
+  transitionTime: 1.5;
 
   cloner($core.glw.screensaver.items, container_z, {
 
@@ -15,17 +23,17 @@ widget(slideshow, {
       hidden: isVoid($self.info);
       vbox({
         padding: [0, 0.5em, 0.5em, 0.5em + $ui.universeBottomHeight];
-        alpha: iir(delay(isVisible(), 3, 0), 16);
+        alpha: iir(delay(isVisible(), $core.glw.screensaver.imageDuration * 0.75, 0), 16);
 
         space(1);
         hbox({
           zbox({
             quad({
               color: 0;
-              alpha: 0.8;
+              alpha: 0.6;
             });
             label({
-              padding: [2em, 0.25em, 0.5em, 0.25em];
+              padding: [1em, 0.25em, 1em, 0.25em];
               caption: $self.info;
             });
           });
@@ -34,4 +42,5 @@ widget(slideshow, {
       });
     });
   });
+});
 });

@@ -26,6 +26,8 @@
 #include "main.h"
 #include "fa_libav.h"
 
+static hts_mutex_t probe_mutex;
+
 /**
  *
  */
@@ -66,10 +68,11 @@ fa_libav_reopen(fa_handle_t *fh, int no_seek)
     if(fa_seek(fh, 0, SEEK_SET) != 0)
       return NULL;
 
-  int buf_size = 32768;
+  //int buf_size = 32768;//65536;//*16;
+  int buf_size = 32768;//65536;
   void *buf = av_malloc(buf_size);
 
-  avio = avio_alloc_context(buf, buf_size, 0, fh, fa_libav_read, NULL, 
+  avio = avio_alloc_context(buf, buf_size, 0, fh, fa_libav_read, NULL,
 			    fa_libav_seek);
   if(avio != NULL && !seekable)
     avio->seekable = 0;
@@ -88,7 +91,7 @@ fa_libav_open_error(char *errbuf, size_t errlen, const char *hdr, int errcode)
 
   if(av_strerror(errcode, libaverr, sizeof(libaverr)))
     snprintf(libaverr, sizeof(libaverr), "libav error %d", errcode);
-  
+
   snprintf(errbuf, errlen, "%s: %s", hdr, libaverr);
   return NULL;
 }
@@ -115,6 +118,8 @@ static const struct {
   { "application/ogg", "ogg" },
   { "audio/aac", "aac" },
   { "audio/aacp", "aac" },
+  { "audio/vnd.dts", "dts" },
+  { "audio/dts", "dts" },
 };
 
 
@@ -126,6 +131,25 @@ fa_libav_open_format(AVIOContext *avio, const char *url,
 		     char *errbuf, size_t errlen, const char *mimetype,
                      int strategy)
 {
+  static int init_probe_mutex = 0;
+  int do_lock = (url != NULL && !strncmp(url, "torrentfile://", 14) && strategy != FA_LIBAV_OPEN_STRATEGY_AUDIO);
+
+  if(!init_probe_mutex)
+  {
+	  hts_mutex_init(&probe_mutex);
+	  init_probe_mutex = 1;
+	  //TRACE(TRACE_DEBUG, "probe", "Init probe_mutex");
+  }
+  //else TRACE(TRACE_DEBUG, "probe", "LOCK probe_mutex");
+
+  init_probe_mutex++;
+
+  if(do_lock && init_probe_mutex < 6) do_lock = 0;
+
+  //TRACE(TRACE_DEBUG, "probe", "LOCK probe_mutex - cnt: %i | lock: %i | %s", init_probe_mutex, do_lock, url);
+
+  if(do_lock) hts_mutex_lock(&probe_mutex);
+
   AVInputFormat *fmt = NULL;
   AVFormatContext *fctx;
   int err;
@@ -141,44 +165,63 @@ fa_libav_open_format(AVIOContext *avio, const char *url,
       }
     }
     if(fmt == NULL)
-      TRACE(TRACE_DEBUG, "probe", "%s: Don't know mimetype %s, probing instead",
+      TRACE(TRACE_DEBUG, "probe", "%s: Unknown mimetype %s, probing instead",
 	    url, mimetype);
   }
 
-  int probe_size = 0;
+  int probe_size = 65536*16;
+
   switch(strategy) {
   case FA_LIBAV_OPEN_STRATEGY_AUDIO:
-    probe_size = 4096;
+    probe_size = 4096*8; //32k
     break;
   case FA_LIBAV_OPEN_STRATEGY_VIDEO_NON_SEEKABLE:
-    probe_size = 65536;
+    probe_size = 65536*2; //128k
     break;
   }
 
+  //TRACE(TRACE_DEBUG, "probe", "START size %i for %s", probe_size, url);
   if(fmt == NULL) {
     if((err = av_probe_input_buffer(avio, &fmt, url, NULL, 0, probe_size)) != 0)
+	{
+		//TRACE(TRACE_DEBUG, "probe", "ERR size %i for %s", probe_size, url);
+	  if(init_probe_mutex>1) init_probe_mutex--;
+	  if(do_lock) hts_mutex_unlock(&probe_mutex);
       return fa_libav_open_error(errbuf, errlen,
 				 "Unable to probe file", err);
+	}
+	//TRACE(TRACE_DEBUG, "probe", "END size %i for %s", probe_size, url);
 
     if(fmt == NULL) {
       snprintf(errbuf, errlen, "Unknown file format");
+	  if(init_probe_mutex>1) init_probe_mutex--;
+	  if(do_lock) hts_mutex_unlock(&probe_mutex);
       return NULL;
     }
     TRACE(TRACE_DEBUG, "probe", "%s: Probed as %s", url, fmt->name);
   }
 
-  TRACE(TRACE_DEBUG, "probe", "%s: Opening with strategy %s",
+	/*
+		TRACE(TRACE_DEBUG, "probe", "%s: Opening with strategy %s",
         url,
         strategy == FA_LIBAV_OPEN_STRATEGY_AUDIO ? "audio" :
         strategy == FA_LIBAV_OPEN_STRATEGY_VIDEO_NON_SEEKABLE ? "video-ns" :
         strategy == FA_LIBAV_OPEN_STRATEGY_VIDEO_SEEKABLE ? "video-seekable" :
         "???");
-
+	*/
 
   fctx = avformat_alloc_context();
   fctx->pb = avio;
+  // AVFMT_FLAG_NOBUFFER | // cannot start from BEGINNING
+  fctx->flags = AVFMT_FLAG_IGNDTS | AVFMT_FLAG_GENPTS | AVFMT_FLAG_NONBLOCK | AVFMT_FLAG_FAST_SEEK;
+  //fctx->flags = AVFMT_FLAG_NOBUFFER | AVFMT_FLAG_FLUSH_PACKETS; // changed for 7.0.134
+  //if(strategy == FA_LIBAV_OPEN_STRATEGY_AUDIO)
+	//  fctx->flags = AVFMT_FLAG_FLUSH_PACKETS;
 
   if((err = avformat_open_input(&fctx, url, fmt, NULL)) != 0) {
+	avformat_free_context(fctx);
+	if(init_probe_mutex>1) init_probe_mutex--;
+	if(do_lock) hts_mutex_unlock(&probe_mutex);
     if(mimetype != NULL) {
       TRACE(TRACE_DEBUG, "libav",
             "Unable to open using mimetype %s, retrying with probe",
@@ -196,13 +239,41 @@ fa_libav_open_format(AVIOContext *avio, const char *url,
     fctx->max_analyze_duration = 0;
     break;
   case FA_LIBAV_OPEN_STRATEGY_VIDEO_NON_SEEKABLE:
-    fctx->fps_probe_size = 2;
-    fctx->max_analyze_duration = 1;
-    break;
+    fctx->fps_probe_size = 250;//50;
+    fctx->max_analyze_duration = 5000000;//1000000;
+	break;
+  case FA_LIBAV_OPEN_STRATEGY_VIDEO_SEEKABLE:
+    fctx->fps_probe_size = 60;
+    fctx->max_analyze_duration = 5000000;//1000000;
+	fctx->probesize = 65536*16;
+	break;
   }
 
-  if(avformat_find_stream_info(fctx, NULL) < 0) {
+#define PROBE_ALL_STREAMS 1
+
+#if !PROBE_ALL_STREAMS
+	AVStream *st;
+	if(strategy != FA_LIBAV_OPEN_STRATEGY_AUDIO)
+	{
+		int discard_set = 0;
+		for (int i = 0; i < fctx->nb_streams; i++) {
+			st = fctx->streams[i];
+			if(fctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO && !discard_set)
+			{
+				st->discard = AVDISCARD_NONE;
+				discard_set = 1;
+			}
+			else
+				st->discard = AVDISCARD_ALL;
+		}
+	}
+#endif
+
+  if(avformat_find_stream_info(fctx, NULL) < 0)
+  {
     avformat_close_input(&fctx);
+	if(init_probe_mutex>1) init_probe_mutex--;
+	if(do_lock) hts_mutex_unlock(&probe_mutex);
     if(mimetype != NULL) {
       TRACE(TRACE_DEBUG, "libav",
             "Unable to find stream info using mimetype %s, retrying with probe",
@@ -214,6 +285,15 @@ fa_libav_open_format(AVIOContext *avio, const char *url,
 			       "Unable to handle file contents", err);
   }
 
+  if(init_probe_mutex>1) init_probe_mutex--;
+  if(do_lock) hts_mutex_unlock(&probe_mutex);
+
+#if !PROBE_ALL_STREAMS
+	for (int i = 0; i < fctx->nb_streams; i++) {
+		st = fctx->streams[i];
+		st->discard = AVDISCARD_NONE;
+	}
+#endif
   return fctx;
 }
 
@@ -251,7 +331,7 @@ fa_libav_close_format(AVFormatContext *fctx, int park)
 void
 fa_libav_error_to_txt(int err, char *errbuf, size_t errlen)
 {
-  
+
 if(av_strerror(err, errbuf, errlen))
     snprintf(errbuf, errlen, "libav error %d", err);
 }

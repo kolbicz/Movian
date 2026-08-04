@@ -182,7 +182,7 @@ destroy_frames(vda_decoder_t *vdad)
  *
  */
 static void
-vda_callback(void *aux, CFDictionaryRef frame_info, OSStatus status, 
+vda_callback(void *aux, CFDictionaryRef frame_info, OSStatus status,
 	     uint32_t infoFlags, CVImageBufferRef buf)
 {
   vda_decoder_t *vdad = aux;
@@ -229,7 +229,7 @@ vda_callback(void *aux, CFDictionaryRef frame_info, OSStatus status,
   }
   hts_mutex_unlock(&vdad->vdad_mutex);
 }
-  
+
 
 /**
  *
@@ -394,7 +394,7 @@ video_vda_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   CFDictionarySetValue(ba, kCVPixelBufferPixelFormatTypeKey, cv_pix_fmt);
   CFDictionarySetValue(ba, kCVPixelBufferIOSurfacePropertiesKey, isp);
-  
+
   vda_decoder_t *vdad = calloc(1, sizeof(vda_decoder_t));
   vdad->vdad_zero_copy = zero_copy;
   status = VDADecoderCreate(ci, ba, (void *)vda_callback,

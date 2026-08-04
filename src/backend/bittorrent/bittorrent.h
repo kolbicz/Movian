@@ -59,9 +59,13 @@ typedef struct bt_global {
   int btg_max_peers_torrent;
   int btg_in_flight_requests;
   int btg_active_peers;
+  int btg_peer_requests;
+
   uint8_t btg_peer_id[21];
 
-  int btg_enabled;
+  //int btg_enabled;
+  int btg_tcpudp;
+  int btg_add_trackers;
 
   rstr_t *btg_cache_path;
   prop_t *btg_torrent_status;
@@ -69,6 +73,11 @@ typedef struct bt_global {
 
   int btg_free_space_percentage;
   int btg_max_send_speed;
+  int btg_max_connections;
+
+  uint64_t btg_max_mb_active;
+
+  uint64_t btg_max_mb_cache_per_torrent;
 
   uint64_t btg_total_bytes_inactive;
   uint64_t btg_total_bytes_active;
@@ -232,7 +241,7 @@ typedef struct peer {
 
   int p_block_delay;
 
-  int p_bd[10];
+  //int p_bd[20];
 
   asyncio_timer_t p_ka_send_timer;
   asyncio_timer_t p_data_recv_timer;
@@ -360,7 +369,7 @@ typedef struct torrent_request {
   uint32_t tr_length;
 
   uint8_t tr_req_num;
-  uint8_t tr_qdepth;
+  //uint8_t tr_qdepth;
 
 } torrent_request_t;
 
@@ -429,6 +438,8 @@ typedef struct torrent {
 
   struct torrent_file_queue to_root;
 
+  unsigned int to_active_piece_fh;	// current fh piece
+  unsigned int to_last_active_piece; // could be read-ahead or current fh
   unsigned int to_num_active_pieces;
   unsigned int to_active_pieces_mem;
 
@@ -451,17 +462,21 @@ typedef struct torrent {
 
   fa_handle_t *to_cachefile;
 
-  int to_cachefile_map_offset;
-  int to_cachefile_store_offset;
+  int64_t to_cachefile_map_offset;
+  int64_t to_cachefile_store_offset;
 
   int32_t *to_cachefile_piece_map;
   int32_t *to_cachefile_piece_map_inv;
   int to_next_disk_block;
   int to_total_disk_blocks;
+  int to_add_trackers;
 
   struct asyncio_timer to_output_rate_timer;
   int64_t to_output_rate_refill_time;
   int to_output_rate_tokens;
+
+  //uint8_t *to_mempool;
+  //uint8_t **to_mempool_map;
 
 } torrent_t;
 
@@ -485,8 +500,13 @@ typedef struct torrent_fh {
   prop_t *tfh_known_peers;
   prop_t *tfh_connected_peers;
   prop_t *tfh_recv_peers;
+  prop_t *tfh_act_pieces;
+  prop_t *tfh_act_memory;
+  prop_t *tfh_act_disk;
+  prop_t *tfh_recv_speed;
 
   int64_t tfh_deadline;
+  int tfh_probe;
 
   struct cancellable *tfh_cancellable;
   char tfh_cancelled;
@@ -539,14 +559,14 @@ void torrent_retain(torrent_t *t);
 
 torrent_piece_t *torrent_piece_create(torrent_t *to, int piece_index);
 
-void torrent_piece_release(torrent_piece_t *tp);
+void torrent_piece_release(torrent_t *t, torrent_piece_t *tp);
 
 int torrent_load(torrent_t *to, void *buf, uint64_t offset, size_t size,
 		 torrent_fh_t *tfh);
 
 void torrent_announce_all(torrent_t *to);
 
-void torrent_attempt_more_peers(torrent_t *to);
+void torrent_attempt_more_peers(torrent_t *to, int which);
 
 void torrent_io_do_requests(torrent_t *to);
 
@@ -621,6 +641,10 @@ void tracker_trace(const tracker_t *t, const char *msg, ...)
 tracker_t *tracker_udp_create(const char *hostname, int port);
 
 tracker_t *tracker_http_create(void);
+
+void add_ngosang_trackers(torrent_t *to, int newtrackon);
+
+void torrent_add_tracker(torrent_t *to, const char *url);
 
 /**
  * Misc helpers

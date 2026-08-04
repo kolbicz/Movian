@@ -112,7 +112,7 @@ glw_tex_stash(glw_root_t *gr, glw_loadable_texture_t *glt, int unreferenced)
 
   glt_set_state(glt, GLT_STATE_STASHED);
 
-  int stash = glt->glt_origin_type == IMAGE_JPEG;
+  int stash = (glt->glt_origin_type == IMAGE_JPEG || glt->glt_origin_type == IMAGE_WEBP);
 
   glt->glt_stash = stash;
   glt->glt_q = &gr->gr_tex_stash[stash].q;
@@ -197,7 +197,7 @@ loader_get_work(loaderaux_t *la)
   int i;
   glw_loadable_texture_t *glt;
   int last_queue = la->la_only_fast ? LQ_TENTATIVE : LQ_REFRESH;
-  
+
   while(1) {
     if(gr->gr_tex_threads_running == 0)
       return NULL;
@@ -431,7 +431,7 @@ loader_thread(void *aux)
     }
     glw_tex_deref(gr, glt);
   }
- 
+
   glw_unlock(gr);
   free(la);
   return NULL;
@@ -551,7 +551,7 @@ glw_tex_flush_all(glw_root_t *gr)
 void
 glw_tex_purge(glw_root_t *gr)
 {
-  glw_loadable_texture_t *glt; 
+  glw_loadable_texture_t *glt;
 
   while((glt = TAILQ_FIRST(&gr->gr_tex_rel_queue)) != NULL) {
     TAILQ_REMOVE(&gr->gr_tex_rel_queue, glt, glt_work_link);

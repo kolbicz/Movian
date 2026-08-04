@@ -3,17 +3,17 @@
 #define actionBtn(ICON, EVENT, ENABLED) {
 
   widget(container_y, {
-    
+
     focusable: ENABLED;
     alpha: select(ENABLED, 1, 0.3);
     onEvent(activate, EVENT);
 
     widget(backdrop, {
       alpha: isFocused() + 0.6;
-      
+
       color: iir(0.6 + (isFocused() || isPressed() || isHovered()), 4);
       SquareButtonBack();
-      
+
       widget(frontdrop, {
 	SquareButtonFront();
 	widget(icon, {
@@ -29,17 +29,17 @@
 #define toggleBtn(ICON, STATE, ENABLED) {
 
   widget(container_y, {
-    
+
     focusable: ENABLED;
     alpha: select(ENABLED, 1, 0.3);
     onEvent(activate, { (STATE) = !STATE; });
 
     widget(backdrop, {
       alpha: isFocused() + 0.6;
-      
+
       color: iir(0.6 + (isFocused() || isPressed() || isHovered()), 4);
       SquareButtonBack();
-      
+
       widget(frontdrop, {
 	SquareButtonFront();
 	widget(icon, {
@@ -56,7 +56,7 @@ widget(container_y, {
   padding: [$ui.size, $ui.size, $ui.size, $ui.size + $ui.playdeckheight];
   filterConstraintX: true;
   filterConstraintY: true;
-  
+
 
   widget(container_x, {
     spacing: $ui.size;
@@ -64,7 +64,7 @@ widget(container_y, {
     widget(frontdrop, {
       source: "skin://graphics/boxart-overlay.png";
       border: 8;
-      
+
       widget(icon, {
 	source: $core.media.current.metadata.album_art;
 	sizeScale: 8;
@@ -107,11 +107,11 @@ widget(container_y, {
 
   widget(container_x, {
     filterConstraintY: true;
-    
+
     spacing: $ui.size;
 
     widget(container_y, {
-      
+
       widget(container_x, {
 	align: center;
 	actionBtn("dataroot://res/svg/SkipBack.svg", event(PreviousTrack),
@@ -137,26 +137,26 @@ widget(container_y, {
       filterConstraintX: true;
       source: "skin://graphics/indent.png";
       border: 16;
-      
+
       widget(container_x, {
 	widget(list_y, {
           navWrap: true;
 	  id: "list";
 	  spacing: 3;
-	  
+
 	  cloner($core.playqueue.nodes, loader, {
 	    time: 0.1;
 	    effect: blend;
 	    source: "listitems/audio.view";
 	  });
 	});
-	
+
 	widget(slider_y, {
 	  bind("list");
 	  width: 4;
 	  focusable: canScroll();
 	  alpha: iir(canScroll(), 16);
-	  
+
 	  widget(quad, {
 	    alpha: iir(0.3 + 0.3 * (isFocused() || isPressed()), 4) + isHovered();
 	  });

@@ -51,6 +51,8 @@ extern void panic(const char *fmt, ...)
 
 extern const char *app_dataroot(void);
 
+extern int64_t android_free_mem;
+
 #define BYPASS_CACHE  ((int *)-1)
 #define DISABLE_CACHE ((int *)-2)
 
@@ -74,7 +76,7 @@ struct prop *nls_get_prop(const char *string);
 
 rstr_t *nls_get_rstringp(const char *string, const char *singularis, int val);
 
-#define URL_MAX 2048
+#define URL_MAX 4096 //2048
 #define HOSTNAME_MAX 256 /* FQDN is max 255 bytes including ending dot */
 
 void app_shutdown(int retcode);
@@ -90,6 +92,9 @@ extern int64_t arch_get_ts(void);
 extern int64_t arch_get_avtime(void);
 
 extern const char *arch_get_system_type(void);
+#ifdef __APPLE__
+void arch_open_external_url(const char *url);
+#endif
 
 /**
  *
@@ -99,7 +104,9 @@ enum {
   TRACE_EMERG,
   TRACE_ERROR,
   TRACE_INFO,
-  TRACE_DEBUG
+  TRACE_DEBUG,
+  TRACE_NAV,
+  TRACE_TUN
 };
 
 #define TRACE_NO_PROP 0x1
@@ -158,7 +165,7 @@ static __inline const char *mystrbegins(const char *s1, const char *s2)
 
 /*
  * Memory allocation wrappers
- * These are used whenever the caller can deal with failure 
+ * These are used whenever the caller can deal with failure
  * Some platform may have the standard libc ones to assert() on
  * OOM conditions
  */
@@ -245,6 +252,8 @@ typedef struct gconf {
   int enable_fa_scanner_debug;
   int enable_indexer_debug;
   int enable_smb_debug;
+  int enable_smb_xattr;
+  int enable_smb_large_read;
   int enable_mem_debug;
   int enable_nav_always_close;
   int enable_kvstore_debug;
@@ -258,6 +267,7 @@ typedef struct gconf {
   int enable_input_event_debug;
   int enable_touch_debug;
   int enable_MediaCodec_debug;
+  int hls_limit_sd;
 
 #if ENABLE_BITTORRENT
   int enable_torrent_debug;
@@ -277,6 +287,9 @@ typedef struct gconf {
 
   const char *initial_url;
   const char *initial_view;
+
+  char *plugin_autostart;
+  int64_t android_free_mem;
 
   char *ui;
   char *skin;
@@ -330,6 +343,10 @@ typedef struct gconf {
 
   uint8_t running_instance[16];
 
+  int f_in_video_playback;
+  int f_in_video_duration;
+
+
   void (*arch_dev_opts)(void (*addopt)(const char *title, const char *id,
                                        int *valp));
 
@@ -357,7 +374,7 @@ typedef struct inithelper {
   } group;
 } inithelper_t;
 
-
+#define USE_FMP4 1
 
 extern void inithelper_register(inithelper_t *ih);
 

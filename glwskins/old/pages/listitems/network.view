@@ -1,13 +1,13 @@
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
   focusOnClick: true;
 
  onEvent(activate, deliverEvent($self, "connect"));
-  
+
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 
   widget(container_x, {
@@ -22,7 +22,7 @@ widget(backdrop, {
       sizeScale: 2;
       shadow: true;
     });
- 
+
     widget(icon, {
       color: select(isFocused(), 1.0, 0.6);
       source: translate($self.metadata.state,
@@ -37,13 +37,13 @@ widget(backdrop, {
       sizeScale: 2;
       shadow: true;
     });
-     
+
     widget(label, {
       filterConstraintX: true;
       shadow: true;
       outline: true;
       color: select(isFocused(), 1.0, 0.6);
-	
+
       caption: $self.metadata.title;
       sizeScale: 1.2;
     });
@@ -62,7 +62,7 @@ widget(backdrop, {
     widget(icon, {
       color: select(isFocused(), 1.0, 0.6);
       source: select(isVoid($self.metadata.security),
-		     "", 
+		     "",
 		     "dataroot://res/svg/Lock.svg"
 		    );
       sizeScale: 2;

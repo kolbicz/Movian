@@ -87,7 +87,7 @@ h264_to_annexb(h264_annexb_ctx_t *ctx, uint8_t **datap, size_t *sizep)
   case 4:
     h264_to_annexb_inplace(*datap, *sizep);
   case 0:
-    
+
 
     //    submit_au(vdd, &au, mb->mb_data, mb->mb_size, mb->mb_skip == 1, vd);
     break;
@@ -106,9 +106,9 @@ h264_to_annexb(h264_annexb_ctx_t *ctx, uint8_t **datap, size_t *sizep)
     *sizep = l;
     break;
   }
-  
+
   //    submit_au(vdd, &au, vdd->tmpbuf, l, mb->mb_skip == 1, vd);
- 
+
  return 0;
 }
 
@@ -153,7 +153,7 @@ h264_to_annexb_init(h264_annexb_ctx_t *ctx, const uint8_t *data, int len)
     data += s;
     len -= s;
   }
-  
+
   if(len < 1)
     return;
   n = *data++;
@@ -246,7 +246,7 @@ hata_sps(h264_annexb_to_avc_t *hata, const uint8_t *data, int len)
 
   free(hata->sps[sps_id].data);
   hata->sps[sps_id].width  = sps.mb_width  * 16;
-  hata->sps[sps_id].height = sps.mb_height * 16 * (2 - sps.mbs_only_flag);
+  hata->sps[sps_id].height = sps.mb_height * 16;
   hata->sps[sps_id].data = malloc(len);
   hata->sps[sps_id].len = len;
   memcpy(hata->sps[sps_id].data, data, len);

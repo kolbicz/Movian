@@ -1,60 +1,101 @@
 #import "skin://theme.view"
 
+#define ScrollBarLog(TARGET, TOP_PAD = 0, BOTTOM_PAD = 0) {
+
+widget(container_x, {
+filterConstraintX: true;
+filterConstraintY: true;
+padding: [0,TOP_PAD,0,BOTTOM_PAD];
+
+space(1);
+widget(slider_y, {
+id: "scrollbar";
+bind(TARGET);
+width: 0.6em;
+focusable: 1;
+alpha: iir(canScroll(), 16);
+widget(container_x, {
+padding: [0.2em,0,0.2em, 0];
+widget(quad, {
+alpha: 0.6 + isHovered();
+});
+});
+});
+});
+}
+
 widget(container_z, {
+clickable: true;
+onEvent(click, {
+$ui.logwindow = false;
+}, true, true, true);
 
-  widget(container_x, {
-    padding: [4,0];
-    widget(list_y, {
-      id: "scrollable";
-      bottomGravity: true;
-      clipOffsetTop: 3em;
-      scrollThresholdTop: 5em;
-      scrollThresholdBottom: $ui.universeBottomHeight + 2em;
-      clipOffsetBottom: $ui.universeBottomHeight;
-      clipAlpha: 0.2;
-      clipBlur: 1;
+widget(backdrop, {
+source: "pixmap:gradient:30,30,30:10,10,10";
+zoffset: -1440;
+alpha: 0.75;
+});
 
-      cloner($core.logbuffer, label, {
-	caption: $self.prefix + $self.message;
-	ellipsize: true;
-	font: "dataroot://res/fonts/UbuntuMono-Regular.ttf";
-	size: 0.8em;
+widget(container_x, {
+padding: [0.25em,0];
 
-	color: translate($self.severity, [1,1,1],
-			 "DEBUG", [0.5, 1, 0.5],
-			 "INFO",  [1, 1, 0.5],
-			 "ERROR", [1, 0.5, 0.5]);
-      });
-    });
-  });
-  ScrollBar("scrollable", 3em, $ui.universeBottomHeight);
+widget(list_y, {
+id: "scrollable";
+bottomGravity: true;
+clipOffsetTop: 3em;
+scrollThresholdTop: 5em;
+scrollThresholdBottom: $ui.universeBottomHeight + 2em;
+clipOffsetBottom: $ui.universeBottomHeight;
+clipAlpha: 0.2;
+clipBlur: 1;
 
-  widget(container_y, {
-    align: top;
-    widget(container_z, {
-      height: 3em;
-      zoffset: 10;
-      widget(quad, {
-        color: 0;
-        alpha: 0.2;
-      });
+cloner($core.logbuffer, label, {
+caption: $self.prefix + $self.message;
+ellipsize: true;
+maxlines: 1;
+font: "dataroot://res/fonts/UbuntuMono-Regular.ttf";
+size: 0.8em;
 
-      widget(container_x, {
-        BackButton();
+color: translate($self.severity, [1,1,1],
+ "D", [0.5, 0.5, 0.5],
+ "I",[1, 1, 1],
+ "T",[0, 0.7, 1],
+ "N",[1, 1, 0.5],
+ "E", [0.75, 0.375, 0.375]);
+});
 
-        widget(label, {
-          filterConstraintX: true;
-          padding: [4em, 0];
-          align: center;
-          caption: _("System log");
-          size: 1.5em;
-        });
-      });
+onEvent(back, {$ui.logwindow = false;});
 
-      widget(dummy, {
-        width: 4em;
-      });
-    });
-  });
+});
+});
+ScrollBarLog("scrollable", 3em, $ui.universeBottomHeight);
+
+widget(container_y, {
+align: top;
+widget(container_z, {
+height: 3em;
+zoffset: 10;
+widget(quad, {
+color: 0;
+alpha: 0.2;
+});
+
+widget(container_x, {
+BackButton();
+
+widget(label, {
+filterConstraintX: true;
+padding: [4em, 0];
+align: center;
+caption: _("System log");
+size: 1.5em;
+});
+});
+
+widget(dummy, {
+width: 4em;
+});
+});
+});
 
 });

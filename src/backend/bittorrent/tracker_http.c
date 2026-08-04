@@ -115,7 +115,27 @@ http_callback(http_req_aux_t *req, void *opaque)
 
       const void *data;
       size_t size;
+#if defined(__ANDROID__)
+	  const void *data6;
+	if(gconf.ipv6_address && gconf.ipv6_support)
+	{
+      if(!htsmsg_get_bin(msg, "peers6", &data6, &size)) {
+        net_addr_t na;
+        na.na_family = 6;
+		if(gconf.enable_torrent_tracker_debug && size >= 18)
+			TRACE(TRACE_DEBUG, "TRACKER", "%s: Adding IPv6 peers (peer6 compact)", tt->tt_tracker->t_url);
 
+        while(size >= 18) {
+          memcpy(na.na_addr, data6, 16);
+          na.na_port = rd16_be(data6 + 16);
+          if(na.na_port > 0)
+            peer_add(to, &na);
+          data6 += 18;
+          size -= 18;
+        }
+      }
+	}
+#endif
       if(!htsmsg_get_bin(msg, "peers", &data, &size)) {
         net_addr_t na;
         na.na_family = 4;
@@ -128,6 +148,7 @@ http_callback(http_req_aux_t *req, void *opaque)
           size -= 6;
         }
       }
+
       htsmsg_release(msg);
     }
   }
@@ -173,6 +194,7 @@ tracker_http_torrent_announce(tracker_torrent_t *tt, int event)
                      HTTP_ARGINT64("left", to->to_total_length ?: 16384),
                      HTTP_ARG("event", eventstr),
                      HTTP_ARG("trackerid", tt->tt_trackerid),
+					 HTTP_REQUEST_HEADER("User-agent", "qBittorrent/5.1.6"),
                      HTTP_RESULT_PTR(HTTP_BUFFER_INTERNALLY),
                      HTTP_FLAGS(flags),
                      NULL);

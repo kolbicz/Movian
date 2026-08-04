@@ -140,6 +140,38 @@ data_open(struct fa_protocol *fap, const char *uri,
   return &dh->fh;
 }
 
+static int
+data_stat(struct fa_protocol *fap, const char *uri, struct fa_stat *fs,
+         int flags, char *errbuf, size_t errlen)
+{
+  memset(fs, 0, sizeof(struct fa_stat));
+  const char *sep = strchr(uri, ',');
+  if(sep == NULL) {
+    snprintf(errbuf, errlen, "No comma separator before payload");
+    return FAP_ERROR;
+  }
+  int hdrlen = sep - uri;
+  if(find_str(uri, hdrlen, ";base64") == NULL) {
+    snprintf(errbuf, errlen, "Data not base64 encoded");
+    return FAP_ERROR;
+  }
+  sep++;
+  int len = strlen(sep);
+
+
+  void *data = malloc(len);
+  len = av_base64_decode(data, sep, len);
+  free(data);
+  if(len == -1) {
+    snprintf(errbuf, errlen, "Invalid base64");
+    return FAP_ERROR;
+  }
+	fs->fs_type = CONTENT_FILE;
+	fs->fs_size = len;
+	fs->fs_mtime = 1774615592;
+  return FAP_OK;
+}
+
 
 fa_protocol_t fa_protocol_data = {
   .fap_name  = "data",
@@ -148,5 +180,6 @@ fa_protocol_t fa_protocol_data = {
   .fap_read  = data_read,
   .fap_seek  = data_seek,
   .fap_fsize = data_fsize,
+  .fap_stat  = data_stat,
 };
 

@@ -118,16 +118,22 @@ magnet_parse(struct http_header_list *list, char *errbuf, size_t errlen)
 
   http_header_t *hh;
   int num_trackers = 0;
+
+  /*
   LIST_FOREACH(hh, list, hh_link) {
     if(!strcmp(hh->hh_key, "tr")) {
       num_trackers++;
     }
   }
 
+
   if(num_trackers == 0) {
-    snprintf(errbuf, errlen, "Trackerless torrents is not supported");
-    return NULL;
+    //snprintf(errbuf, errlen, "Trackerless torrents is not supported");
+    //return NULL;
+	add_ngosang_trackers(to);
   }
+  */
+
   TRACE(TRACE_DEBUG, "MAGNET", "Opening magnet for hash %s -- %s",
 	hash, dn ?: "<unknown name>");
 
@@ -136,11 +142,19 @@ magnet_parse(struct http_header_list *list, char *errbuf, size_t errlen)
 
   LIST_FOREACH(hh, list, hh_link) {
     if(!strcmp(hh->hh_key, "tr")) {
+	  num_trackers++;
+	  //TRACE(TRACE_DEBUG, "MAGNET", "Adding tracker: %s", hh->hh_value);
       tracker_t *tr = tracker_create(hh->hh_value);
       if(tr != NULL)
         tracker_add_torrent(tr, to);
     }
   }
+
+  //torrent_add_tracker(to, "udp://tr.movian.eu:1337/announce"); //last working
+  //torrent_add_tracker(to, "http://tr.movian.eu:6969/announce");
+
+  if(!num_trackers || btg.btg_add_trackers) { add_ngosang_trackers(to, 1); add_ngosang_trackers(to, 0); }
+
   return to;
 }
 
@@ -168,7 +182,7 @@ metainfo_load(torrent_t *to, char *errbuf, size_t errlen)
   hts_mutex_assert(&bittorrent_mutex);
 
   // Compute final deadline for getting metadata
-  int64_t deadline = arch_get_ts() + 120 * 1000000LL;
+  int64_t deadline = arch_get_ts() + 30 * 1000000LL;
 
   while(1) {
 
@@ -372,9 +386,13 @@ magnet_open(const char *url0, char *errbuf, size_t errlen)
 
   char *url = mystrdupa(url0);
 
+  //char *url2 = mystrdupa("tr=udp%3A%2F%2Fp4p.arenabg.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fodd-hd.fr%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=udp%3A%2F%2Foh.fuuuuuck.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fttk2.nbaonlineservice.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tryhackx.org%3A6969%2Fannounce&tr=udp%3A%2F%2Finferno.demonoid.is%3A3391%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopentracker.i2p.rocks%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce&tr=udp%3A%2F%2Fodd-hd.fr%3A6969%2Fannounce&tr=udp%3A%2F%2Foh.fuuuuuck.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fttk2.nbaonlineservice.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tryhackx.org%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=http%3A%2F%2Fsub4all.org%3A2710%2Fannounce&tr=http%3A%2F%2Fre-tracker.uz%3A80%2Fannounce&tr=http%3A%2F%2Fretracker.sevstar.net%3A2710%2Fannounce&tr=http%3A%2F%2Ftracker.gbitt.info%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.open-tracker.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.si%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.filepit.to%3A6969%2Fannounce&tr=udp%3A%2F%2Fretracker.lanta-net.ru%3A2710%2Fannounce&tr=udp%3A%2F%2Fbt.oiyo.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.uk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftorrentclub.tech%3A6969%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fhk1.opentracker.ga%3A6969%2Fannounce&tr=udp%3A%2F%2Fretracker.baikal-telecom.net%3A2710%2Fannounce&tr=udp%3A%2F%2Ftracker.port443.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Fdenis.stalker.upeer.me%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce");
+
   struct http_header_list list = {};
 
   http_parse_uri_args(&list, url, 1);
+
+  //http_parse_uri_args(&list, url2, 1);
 
   torrent_t *to = magnet_parse(&list, errbuf, errlen);
   http_headers_free(&list);

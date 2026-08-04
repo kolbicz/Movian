@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2007-2018 Lonelycoder AB
+ *  Copyright (C) 2007-2015 Lonelycoder AB
  *
  *  This program is free software: you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -24,9 +24,8 @@
 
 
 static duk_ret_t
-make_printable(duk_context *ctx, void *udata)
+make_printable(duk_context *ctx)
 {
-  (void)udata;
   if(duk_is_object(ctx, -1)) {
     duk_json_encode(ctx, -1);
   }
@@ -48,7 +47,7 @@ log_concat(duk_context *ctx)
 
   for(int i = 0; i < argc; i++) {
     duk_dup(ctx, i);
-    duk_safe_call(ctx, make_printable, NULL, 1, 1);
+    duk_safe_call(ctx, make_printable, 1, 1);
   }
 
   duk_join(ctx, argc);
@@ -88,6 +87,5 @@ es_console_error(duk_context *ctx)
 const duk_function_list_entry es_fnlist_console[] = {
   { "log",    es_console_log,    DUK_VARARGS },
   { "error",  es_console_error,  DUK_VARARGS },
-  { "warn",   es_console_error,  DUK_VARARGS },
   { NULL, NULL, 0}
 };

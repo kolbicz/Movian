@@ -34,6 +34,12 @@
 #include "misc/minmax.h"
 
 
+#define IO_DELAY_WRITE 		 50000
+
+#define IO_DELAY_READ	 	 33000
+#define IO_DELAY_READ_1MB 	 75000
+#define IO_DELAY_READ_2MB 	150000
+
 static int torrent_write_thread_running;
 
 static void
@@ -60,9 +66,10 @@ diskio_trace(const torrent_t *t, const char *msg, ...)
  *
  */
 static uint64_t
-cache_file_size(const torrent_t *to, int blocks)
+cache_file_size(const torrent_t *to, uint64_t blocks)
 {
-  return blocks * to->to_piece_length + to->to_cachefile_store_offset;
+  return (uint64_t)blocks * (uint64_t)to->to_piece_length + (uint64_t)to->to_cachefile_store_offset;
+  //return blocks * to->to_piece_length + to->to_cachefile_store_offset;
 }
 
 
@@ -72,8 +79,22 @@ cache_file_size(const torrent_t *to, int blocks)
 static void
 update_disk_avail()
 {
+  if(!strncmp(rstr_get(btg.btg_cache_path), "ftp://", 6)) // || !strncmp(rstr_get(btg.btg_cache_path), "smb2://", 7))
+  {
+	  btg.btg_disk_avail = 68719476736;
+	  const torrent_t *to;
+	  uint64_t active_total = 0;
+	  LIST_FOREACH(to, &torrents, to_link)
+		active_total += cache_file_size(to, to->to_total_disk_blocks);
+
+	  btg.btg_disk_avail -= (btg.btg_total_bytes_inactive + active_total);
+	  //TRACE(TRACE_DEBUG, "BT", "FTP REMOTE FREE: 64GB");
+	  return;
+  }
+
   fa_fsinfo_t ffi;
   rstr_t *path = rstr_dup(btg.btg_cache_path);
+
 
   hts_mutex_unlock(&bittorrent_mutex);
   if(!fa_fsinfo(rstr_get(path), &ffi)) {
@@ -81,9 +102,21 @@ update_disk_avail()
     btg.btg_disk_avail = ffi.ffi_avail;
   } else {
     hts_mutex_lock(&bittorrent_mutex);
+	  if(btg.btg_disk_avail<1 && !strncmp(rstr_get(btg.btg_cache_path), "smb2://", 7))
+	  {
+		  btg.btg_disk_avail = 68719476736;
+		  const torrent_t *to;
+		  uint64_t active_total = 0;
+		  LIST_FOREACH(to, &torrents, to_link)
+			active_total += cache_file_size(to, to->to_total_disk_blocks);
+
+		  btg.btg_disk_avail -= (btg.btg_total_bytes_inactive + active_total);
+		  //TRACE(TRACE_DEBUG, "BT", "FTP REMOTE FREE: 64GB");
+		  return;
+	  }
   }
   rstr_release(path);
-}
+ }
 
 
 
@@ -108,16 +141,16 @@ update_disk_usage(void)
   if(gconf.enable_torrent_diskio_debug) {
     TRACE(TRACE_DEBUG, "BITTORRENT",
           "Disk usage %"PRId64" MB / %"PRId64" MB (%d%%)",
-          sum, btg.btg_cache_limit, (int)(sum * 100 / btg.btg_cache_limit));
+          (sum / 1048576), (btg.btg_cache_limit / 1048576), (int)(sum * 100 / btg.btg_cache_limit));
   }
 
   rstr_t *r = _("Cached torrents use %d MB out of allowed %d MB. Total free space on volume: %d MB");
 
   char tmp[256];
   snprintf(tmp, sizeof(tmp), rstr_get(r),
-           (int)(sum / 1000000),
-           (int)(limit / 1000000),
-           (int)( btg.btg_disk_avail / 1000000));
+           (int)(sum / 1048576),
+           (int)(limit / 1048576),
+           (int)( btg.btg_disk_avail / 1048576));
 
   prop_set_string(btg.btg_disk_status, tmp);
   rstr_release(r);
@@ -136,14 +169,24 @@ torrent_write_to_disk(torrent_t *to, torrent_piece_t *tp)
   uint8_t mapdata[4];
   int ok = 0;
 
-  for(int attempt = 0; attempt < 2; attempt++) {
+  for(int attempt = 0; attempt < 3; attempt++) {
 
     update_disk_usage();
 
-    int growth = MAX(to->to_next_disk_block + 1 - to->to_total_disk_blocks, 0);
+	int64_t growth = MAX(to->to_next_disk_block + 1 - to->to_total_disk_blocks, 0);
+
+	if(/*btg.btg_total_bytes_active*/ (int64_t)((int64_t)to->to_total_disk_blocks * (int64_t)to->to_piece_length) + (growth * (uint64_t)to->to_piece_length) >= (int64_t)btg.btg_max_mb_cache_per_torrent /*2097152000*/) // 2GB  2147483648
+	{
+		diskio_trace(to, "Cache roll back (%"PRId64" MB limit reached)", (btg.btg_max_mb_cache_per_torrent/1024/1024));
+		to->to_next_disk_block = MIN(to->to_total_disk_blocks, (btg.btg_max_mb_cache_per_torrent/to->to_piece_length)/8);
+
+		growth = MAX(to->to_next_disk_block + 1 - to->to_total_disk_blocks, 0);
+		torrent_diskio_scan(0);
+	}
 
     if(btg.btg_total_bytes_active + btg.btg_total_bytes_inactive +
-       growth * to->to_piece_length >= btg.btg_cache_limit) {
+       growth * (int64_t)to->to_piece_length >= btg.btg_cache_limit)
+	{
 
       diskio_trace(to, "Write would exceed cache size, need to cleanup");
       if(torrent_diskio_scan(0)) {
@@ -151,18 +194,42 @@ torrent_write_to_disk(torrent_t *to, torrent_piece_t *tp)
         continue;
       }
       // Otherwise, just restart in our file 50% back
-      to->to_next_disk_block /= 2;
+	  diskio_trace(to, "Cache roll back 50%%");
+      //to->to_next_disk_block = to->to_total_disk_blocks / 2;
+	  to->to_next_disk_block = MIN(to->to_total_disk_blocks, (btg.btg_max_mb_cache_per_torrent/to->to_piece_length)/2);
       growth = MAX(to->to_next_disk_block + 1 - to->to_total_disk_blocks, 0);
     }
+	else
+	{
+		//int exceed_2g = (btg.btg_total_bytes_active + growth * to->to_piece_length >= 2147483648); // 2GB
+		if(ok == 2)
+		{
+			if(!strncmp(rstr_get(btg.btg_cache_path), "ftp://", 6) || !strncmp(rstr_get(btg.btg_cache_path), "smb2://", 7))
+			{
+				diskio_trace(to, "Cache roll back 50%% (remote cache)");
+				to->to_next_disk_block = MIN(to->to_total_disk_blocks, (btg.btg_max_mb_cache_per_torrent/to->to_piece_length)/2);
+				torrent_diskio_scan(0);
+			}
+			else
+			{
+				diskio_trace(to, "Cache roll back to start");
+				to->to_next_disk_block = 1;
+				growth = MAX(to->to_next_disk_block + 1 - to->to_total_disk_blocks, 0);
+				torrent_diskio_scan(0);
+			}
+		}
+	}
 
+	ok = 2;
 
     int location = to->to_next_disk_block;
     wr32_be(mapdata, to->to_next_disk_block);
-    to->to_next_disk_block++;
+    if(attempt == 0)
+		to->to_next_disk_block++;
 
 
     if(growth > 0) {
-      btg.btg_disk_avail -= growth * to->to_piece_length;
+      btg.btg_disk_avail -= growth * (int64_t)to->to_piece_length;
       to->to_total_disk_blocks = to->to_next_disk_block;
     }
 
@@ -191,7 +258,7 @@ torrent_write_to_disk(torrent_t *to, torrent_piece_t *tp)
 
 
     uint64_t data_offset =
-      location * to->to_piece_length + to->to_cachefile_store_offset;
+      (uint64_t)location * (uint64_t)to->to_piece_length + (uint64_t)to->to_cachefile_store_offset;
 
     uint64_t map_offset =
       sizeof(uint32_t) * tp->tp_index + to->to_cachefile_map_offset;
@@ -206,10 +273,13 @@ torrent_write_to_disk(torrent_t *to, torrent_piece_t *tp)
 
           if(fa_write(to->to_cachefile, mapdata, 4) == 4) {
             ok = 1;
+			//usleep(IO_DELAY_WRITE);
           }
         }
-      }
-    }
+      } else diskio_trace(to, "WRITE ERROR for piece %d at %d, write-offset %"PRId64" MB: %s (Att: %i)",
+                 tp->tp_index, location, data_offset/1048576, ok==1 ? "OK" : "ERR", attempt);
+    } else diskio_trace(to, "SEEK ERROR for piece %d at %d, seek-offset %"PRId64" MB: %s (Att: %i)",
+                 tp->tp_index, location, data_offset/1048576, ok==1 ? "OK" : "ERR", attempt);
 
     if(old_map_offset) {
       if(fa_seek(to->to_cachefile, old_map_offset, SEEK_SET) ==
@@ -221,18 +291,21 @@ torrent_write_to_disk(torrent_t *to, torrent_piece_t *tp)
 
     hts_mutex_lock(&bittorrent_mutex);
 
-    diskio_trace(to, "Wrote piece %d to disk at %d (%"PRId64"). Result: %s",
-                 tp->tp_index, location, data_offset, ok ? "OK" : "FAIL");
-    break;
+    diskio_trace(to, "Wrote piece %d to disk at %d (%"PRId64" MB): %s (Att: %i)",
+                 tp->tp_index, location, data_offset/1048576, ok==1 ? "OK" : "ERR", attempt);
+    if(ok==1)
+		break;
+
   }
 
-  if(ok) {
+  if(ok==1) {
     tp->tp_on_disk = 1;
   } else {
     tp->tp_disk_fail = 1;
   }
 
-  torrent_piece_release(tp);
+
+  torrent_piece_release(to, tp);
   torrent_release(to);
 }
 
@@ -252,7 +325,7 @@ torrent_read_from_disk(torrent_t *to, torrent_piece_t *tp)
 
   if(idx >= 0) {
     uint64_t data_offset =
-      idx * to->to_piece_length + to->to_cachefile_store_offset;
+      (uint64_t)idx * (uint64_t)to->to_piece_length + (uint64_t)to->to_cachefile_store_offset;
 
     hts_mutex_unlock(&bittorrent_mutex);
     fa_seek(to->to_cachefile, data_offset, SEEK_SET);
@@ -260,8 +333,20 @@ torrent_read_from_disk(torrent_t *to, torrent_piece_t *tp)
     hts_mutex_lock(&bittorrent_mutex);
     ok = len == tp->tp_piece_length;
 
-    diskio_trace(to, "Load piece %d from disk: %s",
-                 tp->tp_index, ok ? "OK" : "FAIL");
+    //diskio_trace(to, "Load piece %d from disk: %s", tp->tp_index, ok ? "OK" : "FAIL");
+#if 0
+	if(ok)
+	{
+		if(tp->tp_piece_length > 2097151)
+			usleep(IO_DELAY_READ_2MB);
+		else
+		if(tp->tp_piece_length > 1048575)
+			usleep(IO_DELAY_READ_1MB);
+		else
+			usleep(IO_DELAY_READ);
+	}
+#endif
+
   } else {
     // Piece no longer exist on disk. We fail silently here and just
     // let the torrent streamer reload it
@@ -278,7 +363,7 @@ torrent_read_from_disk(torrent_t *to, torrent_piece_t *tp)
     tp->tp_loadfail = 1;
     to->to_loadfail = 1;
   }
-  torrent_piece_release(tp);
+  torrent_piece_release(to, tp);
   torrent_release(to);
 }
 
@@ -293,11 +378,15 @@ bt_diskio_thread(void *aux)
 
   hts_mutex_lock(&bittorrent_mutex);
 
+  torrent_diskio_scan(0);
+
   while(1) {
 
   restart:
 
     update_disk_avail();
+
+  restart_read:
 
     LIST_FOREACH(to, &torrents, to_link) {
       if(to->to_cachefile == NULL)
@@ -308,7 +397,7 @@ bt_diskio_thread(void *aux)
 
         if(tp->tp_load_req) {
           torrent_read_from_disk(to, tp);
-          goto restart;
+          goto restart_read;
         }
 
 	if(tp->tp_hash_ok && !tp->tp_on_disk && !tp->tp_disk_fail) {
@@ -369,7 +458,7 @@ torrent_diskio_verify(torrent_t *to)
   }
 
   uint32_t magic = rd32_be(tmp);
-  if(magic != 'bt02') {
+  if(magic != 'bt03') {
     diskio_trace(to, "Bad magic 0x%08x", magic);
     return -1;
   }
@@ -377,7 +466,7 @@ torrent_diskio_verify(torrent_t *to)
   int bencodesize = rd32_be(tmp+4);
   diskio_trace(to, "Size of metainfo: %d", bencodesize);
 
-  if(size < bencodesize + sizeof(tmp) || bencodesize > 1024 * 1024) {
+  if(size < bencodesize + sizeof(tmp) || bencodesize > 8 * 1024 * 1024) {
     diskio_trace(to, "Bad bencode size %d for filesize %"PRId64,
                  bencodesize, size);
     return -1;
@@ -455,6 +544,12 @@ torrent_diskio_verify(torrent_t *to)
 void
 torrent_diskio_open(torrent_t *to)
 {
+  if(!btg.btg_free_space_percentage)
+  {
+    to->to_cachefile = NULL;
+    return;
+  }
+
   char errbuf[256];
   char path[PATH_MAX];
   char str[41];
@@ -478,11 +573,25 @@ torrent_diskio_open(torrent_t *to)
 
   if(!torrent_diskio_verify(to)) {
     diskio_trace(to, "File %s seems valid", path);
-  } else {
+  } else
+	{
+		fa_close(to->to_cachefile);
+		//TRACE(TRACE_ERROR, "BITTORRENT", "Invalid cache file, removing: %s", path);
+		fa_unlink(path, errbuf, sizeof(errbuf));
+
+		to->to_cachefile = fa_open_ex(path, errbuf, sizeof(errbuf),
+					FA_APPEND | FA_WRITE, NULL);
+		if(to->to_cachefile == NULL)
+		{
+			TRACE(TRACE_ERROR, "BITTORRENT", "Unable to open cache file %s -- %s",
+					path, errbuf);
+			return;
+		}
+
 
     fa_seek(to->to_cachefile, 0, SEEK_SET);
     uint8_t tmp[8];
-    wr32_be(tmp, 'bt02');
+    wr32_be(tmp, 'bt03');
     wr32_be(tmp + 4, buf_size(to->to_metainfo));
 
     if(fa_write(to->to_cachefile, tmp, 8) != 8)
@@ -511,10 +620,13 @@ torrent_diskio_open(torrent_t *to)
     to->to_next_disk_block = 0;
     diskio_trace(to, "New disk cache initialized at %s", path);
   }
-  diskio_trace(to, "Disk offsets: map:0x%x store:0x%x next block stored at %d",
+
+  /*
+  diskio_trace(to, "Disk offsets: map:0x%lx store:0x%lx next block stored at %d",
                to->to_cachefile_map_offset,
                to->to_cachefile_store_offset,
                to->to_next_disk_block);
+  */
   return;
 
  err:
@@ -619,6 +731,7 @@ torrent_diskio_scan(int force_flush)
     return 0;
   }
 
+  btg.btg_total_bytes_active = 0;
   btg.btg_total_bytes_inactive = 0;
 
   LIST_FOREACH(sf, &sfl, sf_link) {
@@ -626,6 +739,7 @@ torrent_diskio_scan(int force_flush)
     torrent_t *to = torrent_find_by_hash(sf->sf_info_hash);
     if(to != NULL) {
       sf->sf_active = 1;
+	  btg.btg_total_bytes_active += sf->sf_size;
     } else {
       btg.btg_total_bytes_inactive += sf->sf_size;
     }
@@ -640,8 +754,8 @@ torrent_diskio_scan(int force_flush)
   if(gconf.enable_torrent_diskio_debug) {
     TRACE(TRACE_DEBUG, "BITTORRENT",
           "Disk usage: Active: %"PRId64" MB, Inactive: %"PRId64" MB\n",
-          btg.btg_total_bytes_active / 1000000,
-          btg.btg_total_bytes_inactive / 1000000);
+          btg.btg_total_bytes_active / 1048576,
+          btg.btg_total_bytes_inactive / 1048576);
 
   }
 
@@ -655,8 +769,9 @@ torrent_diskio_scan(int force_flush)
     if(!sf->sf_active) {
 
       if(force_flush ||
-         btg.btg_total_bytes_active + btg.btg_total_bytes_inactive >=
-         btg.btg_cache_limit) {
+			(btg.btg_total_bytes_active + btg.btg_total_bytes_inactive >= btg.btg_cache_limit) ||
+			(sf->sf_size > (btg.btg_max_mb_cache_per_torrent + (8 * 1024 * 1024)))
+		 ) {
         if(fa_unlink(rstr_get(sf->sf_url), errbuf, sizeof(errbuf))) {
           TRACE(TRACE_ERROR, "BITTORRENT",
                 "Unable to delete %s from cache -- %s",
@@ -675,6 +790,34 @@ torrent_diskio_scan(int force_flush)
       }
     }
 
+    /*
+	if(!rval)
+	{
+      if((btg.btg_total_bytes_active + btg.btg_total_bytes_inactive >= btg.btg_cache_limit) ||
+			(sf->sf_size > (btg.btg_max_mb_cache_per_torrent + (8 * 1024 * 1024)))
+		 ) {
+        if(fa_unlink(rstr_get(sf->sf_url), errbuf, sizeof(errbuf))) {
+          TRACE(TRACE_ERROR, "BITTORRENT",
+                "Unable to delete %s from cache -- %s",
+                rstr_get(sf->sf_url), errbuf);
+          rval = 1;
+        } else {
+			if(!sf->sf_active)
+				btg.btg_total_bytes_inactive -= sf->sf_size;
+			else
+				btg.btg_total_bytes_active -= sf->sf_size;
+
+          if(gconf.enable_torrent_diskio_debug) {
+            TRACE(TRACE_DEBUG, "BITTORRENT",
+                  "Removed %s (%"PRId64" bytes) from cache",
+                  rstr_get(sf->sf_url), sf->sf_size);
+          }
+        }
+		continue;
+      }
+    }
+	*/
+
     rstr_release(sf->sf_url);
     free(sf);
   }
@@ -688,6 +831,7 @@ torrent_diskio_scan(int force_flush)
 void
 torrent_diskio_cache_clear(void)
 {
+  torrent_diskio_scan(1);
   torrent_diskio_scan(1);
 }
 
@@ -716,12 +860,12 @@ torrent_diskio_load_infofile_from_hash(const uint8_t *req_hash)
     goto bad;
 
   uint32_t magic = rd32_be(tmp);
-  if(magic != 'bt02')
+  if(magic != 'bt03')
     goto bad;
 
   unsigned int bencodesize = rd32_be(tmp+4);
 
-  if(bencodesize > 1024 * 1024)
+  if(bencodesize > 8 * 1024 * 1024)
     goto bad;
 
   buf_t *b = buf_create(bencodesize);

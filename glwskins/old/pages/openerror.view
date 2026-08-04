@@ -37,7 +37,7 @@ widget(container_y, {
     sizeScale: 1.5;
     maxlines: 10;
   });
-  
+
   space(1);
 });
 });

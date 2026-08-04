@@ -329,7 +329,8 @@ image_decode(image_t *im, const image_meta_t *meta,
     break;
 
   default:
-    abort();
+    r = NULL;//abort();
+	break;
   }
 
   image_release(im);

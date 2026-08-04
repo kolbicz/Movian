@@ -20,13 +20,14 @@
 #include <stdio.h>
 #include <limits.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <fcntl.h>
 
 #include "main.h"
 #include "prop/prop.h"
 #include "misc/str.h"
-
+#include "src/ui/glw/glw_settings.h"
 #if ENABLE_NETLOG
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -56,7 +57,7 @@ extern int trace_level;
 
 static int trace_initialized;
 static int log_fd;
-static int64_t log_start_ts;
+//static int64_t log_start_ts;
 
 
 #if ENABLE_NETLOG
@@ -74,7 +75,7 @@ trace_net_raw(const char *fmt, ...)
   va_list ap;
 
   if(trace_fd == -1 ||
-     logport != gconf.log_server_port || 
+     logport != gconf.log_server_port ||
      logaddr != gconf.log_server_ipv4) {
 
     logport = gconf.log_server_port;
@@ -155,17 +156,19 @@ tracev(int flags, int level, const char *subsys, const char *fmt, va_list ap)
   hts_mutex_lock(&trace_mutex);
 
   switch(level) {
-  case TRACE_EMERG: leveltxt = "EMERG"; break;
-  case TRACE_ERROR: leveltxt = "ERROR"; break;
-  case TRACE_INFO:  leveltxt = "INFO";  break;
-  case TRACE_DEBUG: leveltxt = "DEBUG"; break;
+  case TRACE_DEBUG: leveltxt = "D"; break;
+  case TRACE_INFO:  leveltxt = "I"; break;
+  case TRACE_TUN:   leveltxt = "T"; break;
+  case TRACE_NAV:   leveltxt = "N"; break;
+  case TRACE_ERROR: leveltxt = "E"; break;
+  case TRACE_EMERG: leveltxt = "*"; break;
   default:          leveltxt = "?"; break;
   }
 
   char * const buf = fmtstrv(fmt, ap);
   p = buf;
-
-  snprintf(buf2, sizeof(buf2), "%-15s [%-5s]:", subsys, leveltxt);
+//if(strlen(p)>1024) {free(buf);return;}
+  snprintf(buf2, sizeof(buf2), "%-10s |%-1s| ", subsys, leveltxt);
   l = strlen(buf2);
 
   while((s = strsep(&p, "\n")) != NULL) {
@@ -176,22 +179,30 @@ tracev(int flags, int level, const char *subsys, const char *fmt, va_list ap)
     trace_net(level, buf2, s);
 #endif
 
-    if(level <= gconf.trace_level)
-      trace_arch(level, buf2, s);
-    if(!(flags & TRACE_NO_PROP) && level != TRACE_EMERG) {
-      tt = alloca(sizeof(tracetmp_t));
-      tt->s1 = mystrdupa(buf2);
-      tt->s2 = rstr_alloc(s);
-      SIMPLEQ_INSERT_TAIL(&q, tt, link);
-      entries++;
-    }
-    if(log_fd != -1) {
-      int ts = (arch_get_ts() - log_start_ts) / 1000LL;
+    if(log_fd != -1)
+	{
+#if 0
+      int ts = (arch_get_ts() /*- log_start_ts*/) / 1000LL;
+
       snprintf(buf3, sizeof(buf3), "%02d:%02d:%02d.%03d: ",
 	       ts / 3600000,
 	       (ts / 60000) % 60,
 	       (ts / 1000) % 60,
 	       ts % 1000);
+#endif
+
+time_t now;
+struct tm tm;
+struct timeval tv;
+time(&now);
+localtime_r(&now, &tm);
+gettimeofday(&tv, NULL);
+
+		snprintf(buf3, sizeof(buf3), "%02d:%02d:%02d.%03d: ",
+	       (int) tm.tm_hour,
+	       (int) tm.tm_min,
+	       (int) tm.tm_sec,
+	       (int) (tv.tv_usec/1000));
 
       if(write(log_fd, buf3, strlen(buf3)) != strlen(buf3) ||
 	 write(log_fd, buf2, strlen(buf2)) != strlen(buf2) ||
@@ -201,6 +212,20 @@ tracev(int flags, int level, const char *subsys, const char *fmt, va_list ap)
 	log_fd = -1;
       }
     }
+
+    if(level <= gconf.trace_level)
+      trace_arch(level, buf2, s);
+	//if(strlen(s)>1024) continue;
+
+    if(!(flags & TRACE_NO_PROP) && level != TRACE_EMERG) {
+      tt = alloca(sizeof(tracetmp_t));
+      tt->s1 = mystrdupa(buf2);
+	  if(strlen(s)>512) {s[509]='.';s[510]='.';s[511]='.';s[512]=0;}
+      tt->s2 = rstr_alloc(s);
+      SIMPLEQ_INSERT_TAIL(&q, tt, link);
+      entries++;
+    }
+
     memset(buf2, ' ', l);
   }
 
@@ -244,10 +269,13 @@ tracev(int flags, int level, const char *subsys, const char *fmt, va_list ap)
 void
 tracelog(int flags, int level, const char *subsys, const char *fmt, ...)
 {
+  //if(!glw_settings.gs_debuglog && entries>50) return;
+
   va_list ap;
   va_start(ap, fmt);
   tracev(flags, level, subsys, fmt, ap);
   va_end(ap);
+
 }
 
 
@@ -257,10 +285,12 @@ tracelog(int flags, int level, const char *subsys, const char *fmt, ...)
 void
 hexdump(const char *pfx, const void *data_, int len)
 {
+  //if(!glw_settings.gs_debuglog) return;
+
   int i, j;
   const uint8_t *data = data_;
   char buf[100];
-  
+
   for(i = 0; i < len; i+= 16) {
     int p = snprintf(buf, sizeof(buf), "0x%06x: ", i);
 
@@ -310,11 +340,13 @@ trace_init(void)
   mkdir(p1, 0777);
 
   // Remove legacy logfile names. This can be removed some time in the future
+  /*
   for(i = 0; i <= 5; i++) {
     snprintf(p1, sizeof(p1), "%s/log/showtime.log.%d", gconf.cache_path, i);
     snprintf(p1, sizeof(p1), "%s/log/showtime-%d.log", gconf.cache_path, i);
     unlink(p1);
   }
+  */
 
   // Rotate logfiles
 
@@ -326,7 +358,7 @@ trace_init(void)
     snprintf(p2, sizeof(p2), "%s/log/"APPNAME"-%d.log", gconf.cache_path,i+1);
     rename(p1, p2);
   }
-  
+
   snprintf(p1, sizeof(p1), "%s/log/"APPNAME"-0.log", gconf.cache_path);
   log_fd = open(p1, O_CREAT | O_TRUNC | O_WRONLY, 0644);
   static const char logstartmark[] = "--MARK-- START\n";
@@ -335,14 +367,18 @@ trace_init(void)
     close(log_fd);
     log_fd = -1;
   }
-  log_start_ts = arch_get_ts();
+  //log_start_ts = arch_get_ts();
   log_root = prop_create(prop_get_global(), "logbuffer");
   hts_mutex_init(&trace_mutex);
   trace_initialized = 1;
 
   TRACE(TRACE_INFO, "SYSTEM",
-        APPNAMEUSER" %s starting. %d CPU cores. Systemtype:%s OS:%s",
-        appversion, gconf.concurrency,
-        arch_get_system_type(),
-        gconf.os_info[0] ? gconf.os_info : "<unknown>");
+        //APPNAMEUSER" %s starting. %d CPU cores. System: %s %s",
+		"M7 %s | %s %s | %d CPU cores",
+        appversion,
+		arch_get_system_type(),
+        gconf.os_info[0] ? gconf.os_info : "<unknown>",
+		gconf.concurrency
+		);
+
 }

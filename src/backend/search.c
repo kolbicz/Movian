@@ -43,14 +43,14 @@ search_class_create(prop_t *parent, prop_t **nodesp, prop_t **entriesp,
   prop_t *p = prop_create_root(NULL);
   prop_t *m = prop_create(p, "metadata");
   prop_t *n, *e;
-  
+
   prop_set(p, "url", PROP_ADOPT_RSTRING, backend_prop_make(p, NULL));
 
   prop_set(m, "title", PROP_SET_STRING, title);
   if(icon != NULL)
     prop_set(m, "icon", PROP_SET_STRING, icon);
   prop_set(p, "type", PROP_SET_STRING, "directory");
-      
+
   n = prop_create(p, "nodes");
   e = prop_create(p, "entries");
   prop_set_int(e, 0);
@@ -76,7 +76,7 @@ search_get_settings(void)
 
   if(p == NULL)
     p = settings_add_dir(NULL, _p("Search"), "search", NULL, NULL,
-			 "settings:search");
+			 "settings:search", "98");
   return p;
 }
 
@@ -133,7 +133,7 @@ search_open(prop_t *page, const char *url0, int sync)
   prop_nf_sort(pnf, "node.metadata.title", 0, 2, NULL, 1);
 
   prop_nf_pred_int_add(pnf, "node.entries",
-		       PROP_NF_CMP_EQ, 0, NULL, 
+		       PROP_NF_CMP_EQ, 0, NULL,
 		       PROP_NF_MODE_EXCLUDE);
 
   prop_nf_release(pnf);

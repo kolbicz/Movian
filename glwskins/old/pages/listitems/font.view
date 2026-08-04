@@ -1,7 +1,7 @@
 #import "skin://common.view"
 
 widget(backdrop, {
-  
+
   source: "highlight.png";
   autoRefocusable: true;
   focusable: true;
@@ -18,7 +18,7 @@ widget(backdrop, {
       source: "dataroot://res/svg/Font.svg";
       shadow: true;
     });
-    
+
     widget(label, {
       filterConstraintX: true;
       TextStyleItem();
@@ -53,7 +53,7 @@ widget(backdrop, {
       source: select($self.status.installed,
 		     "plugin-installed.png",
 		     "plugin-notinstalled.png");
-		     
+
     });
 
   });

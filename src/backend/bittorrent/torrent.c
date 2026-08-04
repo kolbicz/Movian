@@ -34,8 +34,38 @@
 #include "misc/minmax.h"
 #include "usage.h"
 
+#include <libavformat/avformat.h>
+
+#include "video/video_settings.h"
+
 #define TORRENT_REQ_SIZE 16384
 
+#if PS3
+
+#define DESTROY_NUM_PIECES 16
+#define MAX_NUM_PIECES 32
+#define MAX_ACT_PIECES_MB 32
+
+#else
+
+#define DESTROY_NUM_PIECES 2
+#define MAX_NUM_PIECES 16384
+
+#define MAX_ACT_PIECES_MB 64*2
+//video_settings.video_buffer_size 384
+
+#endif
+
+// #define POOL_MEM (MAX_ACT_PIECES_MB * 1024 * 1024)
+// #define POOL_MEM_2 (MAX_ACT_PIECES_MB * 1024 * 1536) // POOL_MEM * 1.5 = 96MB
+#define USE_MALLOC 1
+
+//int64_t f_torrent_memory = 0;
+
+#define LOW_MEM 64*1024*1024 // also in media_queue.c
+
+#define POOL_MEM (btg.btg_max_mb_active)
+#define POOL_MEM_2 (btg.btg_max_mb_active + 16*1024*1024)
 //----------------------------------------------------------------
 
 static asyncio_timer_t torrent_periodic_timer;
@@ -63,7 +93,71 @@ static void torrent_piece_destroy(torrent_t *to, torrent_piece_t *tp);
 
 static void torrent_output_timer(void *aux);
 
+static void flush_active_pieces(torrent_t *to);
+
 //----------------------------------------------------------------
+
+#if USE_MALLOC
+#else
+static uint8_t *pool_malloc(torrent_t *to, size_t size)
+{
+	if(!to->to_piece_length) return NULL;
+	int total_pieces = POOL_MEM / to->to_piece_length;
+	if(!to->to_mempool)
+	{
+	  //to->to_mempool_map = malloc( 4096 ); // 4096 pieces * 32K
+	  to->to_mempool_map = malloc(sizeof(int32_t *) * total_pieces);
+	  //memset(to->to_mempool_map, 0, 4096);
+	  to->to_mempool = malloc(POOL_MEM);
+	  if(!to->to_mempool)
+	  {
+		TRACE(TRACE_ERROR, "BT", "Pool memory allocation failed");
+		//f_torrent_memory = 0;
+	  }
+	  else
+	  {
+	    TRACE(TRACE_INFO, "BT", "Allocated %iMB for memory pool (%i pieces)", POOL_MEM/1024/1024, total_pieces);
+		//f_torrent_memory = POOL_MEM;
+
+	  }
+	}
+
+	if(!to->to_mempool)
+		return NULL;
+
+	for(int m=0; m<total_pieces; m++)
+	{
+		if(!to->to_mempool_map[m])
+		{
+			//TRACE(TRACE_DEBUG, "BT", "pool_malloc [%i]", m);
+			to->to_mempool_map[m] = to->to_mempool + (to->to_piece_length * m);
+			return to->to_mempool_map[m]; //*((uint8_t*)(to->to_mempool) + (to->to_piece_length * m);
+		}
+	}
+	//TRACE(TRACE_ERROR, "BT", "pool_malloc - no free slots");
+	return NULL;
+}
+
+static void *pool_free(torrent_t *to, uint8_t *piece)
+{
+	if(!to->to_mempool) return NULL;
+
+	if(!to->to_piece_length) return NULL;
+	int total_pieces = POOL_MEM / to->to_piece_length;
+
+	for(int m = 0; m < total_pieces; m++)
+	{
+		if(to->to_mempool_map[m] == piece)
+		{
+			to->to_mempool_map[m] = 0;
+			//TRACE(TRACE_DEBUG, "BT", "poll_free [%i]", m);
+			return NULL;
+		}
+	}
+
+	return NULL;
+}
+#endif
 
 static void
 torrent_trace(const torrent_t *t, const char *msg, ...)
@@ -89,7 +183,7 @@ torrent_trace(const torrent_t *t, const char *msg, ...)
 /**
  *
  */
-static void
+void
 torrent_add_tracker(torrent_t *to, const char *url)
 {
   tracker_torrent_t *tt;
@@ -169,6 +263,8 @@ torrent_create(const uint8_t *info_hash, const char *initiator)
 
   usage_event("Open Torrent", 1,
               USAGE_SEG("initiator", initiator));
+
+
   return to;
 }
 
@@ -378,6 +474,19 @@ torrent_destroy(torrent_t *to)
   free(to->to_cachefile_piece_map_inv);
   free(to->to_piece_hashes);
   free(to->to_title);
+
+#if USE_MALLOC
+#else
+  if(to->to_mempool)
+  {
+	  //f_torrent_memory = 0;
+	  free(to->to_mempool);
+	  free(to->to_mempool_map);
+	  to->to_mempool_map = NULL;
+	  to->to_mempool = NULL;
+  }
+#endif
+
   free(to);
 }
 
@@ -442,6 +551,7 @@ torrent_piece_peer_destroy(piece_peer_t *pp)
 static void
 torrent_piece_remove_contributors(torrent_piece_t *tp, int hash_ok)
 {
+  if(tp == NULL) return;
   piece_peer_t *pp;
   while((pp = LIST_FIRST(&tp->tp_peers)) != NULL)
     torrent_piece_peer_destroy(pp);
@@ -501,11 +611,14 @@ torrent_receive_block(torrent_block_t *tb, const void *buf,
  *
  */
 void
-torrent_attempt_more_peers(torrent_t *to)
+torrent_attempt_more_peers(torrent_t *to, int which) // which 0=order 1=all
 {
   if(to->to_active_peers  >= btg.btg_max_peers_torrent ||
      btg.btg_active_peers >= btg.btg_max_peers_global)
+  {
+	TRACE(TRACE_ERROR, "BITTORRENT", "Reached max peers: Torrent: %i | Global: %i", to->to_active_peers, btg.btg_active_peers);
     return;
+  }
 
   peer_t *p;
 
@@ -513,21 +626,21 @@ torrent_attempt_more_peers(torrent_t *to)
   if(p != NULL) {
     TAILQ_REMOVE(&to->to_inactive_peers, p, p_queue_link);
     peer_connect(p);
-    return;
+    if(!which) return;
   }
 
   p = TAILQ_FIRST(&to->to_disconnected_peers);
   if(p != NULL) {
     TAILQ_REMOVE(&to->to_disconnected_peers, p, p_queue_link);
     peer_connect(p);
-    return;
+    if(!which) return;
   }
 
   p = TAILQ_FIRST(&to->to_connect_failed_peers);
   if(p != NULL) {
     TAILQ_REMOVE(&to->to_connect_failed_peers, p, p_queue_link);
     peer_connect(p);
-    return;
+    if(!which) return;
   }
 }
 
@@ -683,6 +796,115 @@ torrent_parse_infodict(torrent_t *to, htsmsg_t *info,
   return 0;
 }
 
+void add_ngosang_trackers(torrent_t *to, int newtrackon)
+{
+	fa_handle_t *fh = NULL;
+	char base[128];
+	char suff[32];
+	char local[256];
+	char remote[256];
+
+	if(newtrackon)
+	{
+		if(to->to_add_trackers & 2) return;
+		to->to_add_trackers |= 2;
+
+		sprintf(base, "https://newtrackon.com/api");
+		if(btg.btg_add_trackers==1)
+			sprintf(suff, "live"); //fh = fa_open("https://newtrackon.com/api/live", NULL, 0);
+		else
+		if(btg.btg_add_trackers==3)
+			sprintf(suff, "stable"); //fh = fa_open("https://newtrackon.com/api/stable", NULL, 0);
+		else
+			return;
+	}
+	else
+	{
+		if(to->to_add_trackers & 1) return;
+		to->to_add_trackers |= 1;
+
+		sprintf(base, "https://raw.githubusercontent.com/ngosang/trackerslist/refs/heads/master");
+
+		if(btg.btg_add_trackers==1 || btg.btg_add_trackers>4) // best
+			sprintf(suff, "trackers_best.txt"); //fh = fa_open("https://raw.githubusercontent.com/ngosang/trackerslist/refs/heads/master/trackers_best.txt", NULL, 0);
+		else if(btg.btg_add_trackers==2) // best IP
+			sprintf(suff, "trackers_best_ip.txt"); //fh = fa_open("https://raw.githubusercontent.com/ngosang/trackerslist/refs/heads/master/trackers_best_ip.txt", NULL, 0);
+		else if(btg.btg_add_trackers==3) // all
+			sprintf(suff, "trackers_all.txt"); //fh = fa_open("https://raw.githubusercontent.com/ngosang/trackerslist/refs/heads/master/trackers_all.txt", NULL, 0);
+		else //if(btg.btg_add_trackers==4) // all IP
+			sprintf(suff, "trackers_all_ip.txt"); //fh = fa_open("https://raw.githubusercontent.com/ngosang/trackerslist/refs/heads/master/trackers_all_ip.txt", NULL, 0);
+	}
+
+	sprintf(local, "%s/bc4/%s", gconf.cache_path, suff);
+	sprintf(remote, "%s/%s", base, suff);
+	//TRACE(TRACE_DEBUG, "BT", "local : %s", local);
+	//TRACE(TRACE_DEBUG, "BT", "remote: %s", remote);
+
+	int to_write = 0;
+	fa_stat_t l_stat;
+	fa_stat(local, &l_stat, NULL, 0);
+	//TRACE(TRACE_INFO, "BT", "mtime : %li", time(NULL) - l_stat.fs_mtime);
+	if(time(NULL) - l_stat.fs_mtime > 6*3600 || time(NULL) - l_stat.fs_mtime < 0)
+	{
+		to_write = 1;
+		fh = fa_open(remote, NULL, 0);
+		if(fh == NULL)
+		{
+			to_write = 0;
+			fh = fa_open_ex(local, NULL, 0, 0, NULL);
+		}
+		//TRACE(TRACE_ERROR, "BT", "mtime : %li", time(NULL) - l_stat.fs_mtime);
+	}
+	else
+	{
+		fh = fa_open_ex(local, NULL, 0, 0, NULL);
+		//TRACE(TRACE_DEBUG, "BT", "mtime : %li", time(NULL) - l_stat.fs_mtime);
+		if(fh == NULL)
+		{
+			to_write = 1;
+			fh = fa_open(remote, NULL, 0);
+		}
+	}
+
+	if(fh != NULL)
+	{
+		int num = 0;
+		char buf[1024*16];
+
+		int r = fa_read(fh, buf, 1024*16 -1);
+		for(int i=0;i<r;i++) {if(buf[i]==0) buf[i]=0x0a;} buf[r] = 0;
+		//TRACE(TRACE_INFO, "BT", "Read: %i bytes: ----> %s", r, buf);
+
+		fa_close(fh);
+
+		LINEPARSE(s, buf)
+		{
+			const char *v;
+			if( ( (v = mystrbegins(s, "udp://")) != NULL && btg.btg_tcpudp != 2) ||
+				( ( (v = mystrbegins(s, "http://")) != NULL || (v = mystrbegins(s, "https://")) != NULL ) && btg.btg_tcpudp != 1 )
+			)
+			{
+				num++;
+				torrent_add_tracker(to, s);
+			}
+		}
+
+		TRACE(TRACE_DEBUG, "BITTORRENT", "Injected trackers: %i (%s)", num, (newtrackon?"newtrackon":"ngosang"));
+
+		if(num>0 && to_write)
+		{
+			//TRACE(TRACE_DEBUG, "BT", "Saving %i bytes of list to local file [%s]", r, local);
+			fh = fa_open_ex(local, NULL, 0, FA_WRITE, NULL);
+			if(fh != NULL)
+			{
+				fa_write(fh, buf, r);
+				fa_close(fh);
+			}
+		}
+	}
+	else
+		TRACE(TRACE_ERROR, "BITTORRENT", "Error obtaining tracker list to inject (%s)", (newtrackon?"newtrackon":"ngosang"));
+}
 
 /**
  *
@@ -706,11 +928,50 @@ torrent_parse_torrentfile(torrent_t *to, htsmsg_t *metainfo,
         }
       }
     }
+
+	/*
+	struct http_header_list list = {};
+	char *url2 = mystrdupa("tr=udp%3A%2F%2Fodd-hd.fr%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Foh.fuuuuuck.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fttk2.nbaonlineservice.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tryhackx.org%3A6969%2Fannounce&tr=udp%3A%2F%2Finferno.demonoid.is%3A3391%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopentracker.i2p.rocks%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce&tr=udp%3A%2F%2Fodd-hd.fr%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Foh.fuuuuuck.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fttk2.nbaonlineservice.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tryhackx.org%3A6969%2Fannounce&tr=udp%3A%2F%2Finferno.demonoid.is%3A3391%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopentracker.i2p.rocks%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=http%3A%2F%2Fsub4all.org%3A2710%2Fannounce&tr=http%3A%2F%2Fre-tracker.uz%3A80%2Fannounce&tr=http%3A%2F%2Fretracker.sevstar.net%3A2710%2Fannounce&tr=http%3A%2F%2Ftracker.gbitt.info%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.open-tracker.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.si%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.filepit.to%3A6969%2Fannounce&tr=udp%3A%2F%2Fretracker.lanta-net.ru%3A2710%2Fannounce&tr=udp%3A%2F%2Fbt.oiyo.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.uk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftorrentclub.tech%3A6969%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fhk1.opentracker.ga%3A6969%2Fannounce&tr=udp%3A%2F%2Fretracker.baikal-telecom.net%3A2710%2Fannounce&tr=udp%3A%2F%2Ftracker.port443.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Fdenis.stalker.upeer.me%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce");
+	http_parse_uri_args(&list, url2, 1);
+
+	http_header_t *hh;
+	LIST_FOREACH(hh, &list, hh_link) {
+		if(!strcmp(hh->hh_key, "tr")) {
+		  //TRACE(TRACE_DEBUG, "BT-URLS", "Adding tracker: %s", hh->hh_value);
+			torrent_add_tracker(to, (const char *)hh->hh_value);
+		}
+	}
+
+	http_headers_free(&list);
+	*/
+
   } else {
     const char *announce = htsmsg_get_str(metainfo, "announce");
     if(announce != NULL)
       torrent_add_tracker(to, announce);
+
+	struct http_header_list list = {};
+	//char *url2 = mystrdupa("tr=udp%3A%2F%2Fp4p.arenabg.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.torrent.eu.org%3A451%2Fannounce&tr=udp%3A%2F%2Fopen.stealth.si%3A80%2Fannounce&tr=udp%3A%2F%2Fodd-hd.fr%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.dler.org%3A6969%2Fannounce&tr=udp%3A%2F%2Foh.fuuuuuck.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fttk2.nbaonlineservice.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tryhackx.org%3A6969%2Fannounce&tr=udp%3A%2F%2Finferno.demonoid.is%3A3391%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Fopentracker.i2p.rocks%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce&tr=udp%3A%2F%2Fodd-hd.fr%3A6969%2Fannounce&tr=udp%3A%2F%2Foh.fuuuuuck.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fttk2.nbaonlineservice.com%3A6969%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.tryhackx.org%3A6969%2Fannounce&tr=http%3A%2F%2Ftracker.openbittorrent.com%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fcoppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.zer0day.to%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.internetwarriors.net%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969%2Fannounce&tr=http%3A%2F%2Fsub4all.org%3A2710%2Fannounce&tr=http%3A%2F%2Fre-tracker.uz%3A80%2Fannounce&tr=http%3A%2F%2Fretracker.sevstar.net%3A2710%2Fannounce&tr=http%3A%2F%2Ftracker.gbitt.info%3A80%2Fannounce&tr=udp%3A%2F%2Ftracker.open-tracker.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.demonii.si%3A1337%2Fannounce&tr=udp%3A%2F%2Ftracker.filepit.to%3A6969%2Fannounce&tr=udp%3A%2F%2Fretracker.lanta-net.ru%3A2710%2Fannounce&tr=udp%3A%2F%2Fbt.oiyo.tk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.uw0.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.nyaa.uk%3A6969%2Fannounce&tr=udp%3A%2F%2Ftorrentclub.tech%3A6969%2Fannounce&tr=udp%3A%2F%2Fexplodie.org%3A6969%2Fannounce&tr=udp%3A%2F%2Fhk1.opentracker.ga%3A6969%2Fannounce&tr=udp%3A%2F%2Fretracker.baikal-telecom.net%3A2710%2Fannounce&tr=udp%3A%2F%2Ftracker.port443.xyz%3A6969%2Fannounce&tr=udp%3A%2F%2Fdenis.stalker.upeer.me%3A6969%2Fannounce&tr=udp%3A%2F%2Ftracker.moeking.me%3A6969%2Fannounce");
+	//http_parse_uri_args(&list, url2, 1);
+
+	http_header_t *hh;
+	LIST_FOREACH(hh, &list, hh_link) {
+		if(!strcmp(hh->hh_key, "tr")) {
+		  //TRACE(TRACE_DEBUG, "BT-URLS", "Adding tracker: %s", hh->hh_value);
+			torrent_add_tracker(to, (const char *)hh->hh_value);
+		}
+	}
+
+	http_headers_free(&list);
+
+
+
   }
+
+  //torrent_add_tracker(to, "udp://tr.movian.eu:1337/announce"); //last working
+  //torrent_add_tracker(to, "http://tr.movian.eu:6969/announce");
+
+  if(btg.btg_add_trackers) { add_ngosang_trackers(to, 1); add_ngosang_trackers(to, 0); }
 
   htsmsg_t *info = htsmsg_get_map(metainfo, "info");
   if(info == NULL) {
@@ -762,8 +1023,22 @@ torrent_piece_enqueue_requests(torrent_t *to, torrent_piece_t *tp)
 torrent_piece_t *
 torrent_piece_create(torrent_t *to, int piece_index)
 {
-  to->to_num_active_pieces++;
+
   torrent_piece_t *tp = calloc(1, sizeof(torrent_piece_t));
+  if(!tp) return NULL;
+
+#if USE_MALLOC
+  tp->tp_data = malloc(to->to_piece_length); // 64*1024*1024
+  gconf.android_free_mem = MAX(0, gconf.android_free_mem - tp->tp_piece_length);
+#else
+  tp->tp_data = pool_malloc(to, to->to_piece_length); // 64*1024*1024
+#endif
+  if(!tp->tp_data) { free(tp); return NULL; }
+
+  //usleep(50000);
+
+  to->to_num_active_pieces++;
+
   tp->tp_refcount = 1;
   tp->tp_index = piece_index;
   TAILQ_INSERT_TAIL(&to->to_active_pieces, tp, tp_link);
@@ -771,7 +1046,6 @@ torrent_piece_create(torrent_t *to, int piece_index)
   LIST_INSERT_SORTED(&to->to_serve_order, tp, tp_serve_link, tp_deadline_cmp,
                      torrent_piece_t);
 
-  tp->tp_data = malloc(to->to_piece_length);
   tp->tp_piece_length = to->to_piece_length;
 
   if(piece_index == to->to_num_pieces - 1) {
@@ -779,18 +1053,159 @@ torrent_piece_create(torrent_t *to, int piece_index)
     tp->tp_piece_length = to->to_total_length % to->to_piece_length;
   }
   to->to_active_pieces_mem += tp->tp_piece_length;
+  //f_torrent_memory += tp->tp_piece_length;
+  //if(f_torrent_memory > POOL_MEM_2) f_torrent_memory = POOL_MEM_2;
 
+// TRACE(TRACE_INFO, "BT", "Total allocated: %lliMB (torrent_piece_create)", f_torrent_memory/1024/1024);
   return tp;
 }
 
 
+
+static void
+torrent_piece_destroy_index(torrent_t *to, int piece_index, int keep_pieces, int to_destroy)
+{
+//#if 0
+	torrent_piece_t *tp, *next;
+	torrent_sendreq_t *ts;
+	torrent_block_t *tb;
+	int destroyed = 0;
+	int skip = 0;
+
+	for(int i=0;i<to_destroy;i++)
+	{
+		for(tp = TAILQ_FIRST(&to->to_active_pieces); tp != NULL; tp = next)
+		{
+			next = TAILQ_NEXT(tp, tp_link);
+
+			if(destroyed >= to_destroy) break;
+
+			if((tp->tp_index > 2 || to_destroy > 3) && (tp->tp_index != to->to_active_piece_fh) && (tp->tp_index != to->to_active_piece_fh + 1) &&
+				(
+				   (keep_pieces>0 && tp->tp_index <= (piece_index-keep_pieces))
+				|| (keep_pieces>0 && tp->tp_index >  (piece_index+keep_pieces+1))
+				)
+			)
+			{
+				skip = 0;
+
+				if(tp->tp_load_req)
+				{
+				  //TRACE(TRACE_ERROR, "BT-MEM", "tp_load_req");
+				  skip = 1;
+				  continue;
+				}
+
+				if(LIST_FIRST(&tp->tp_active_fh) != NULL)
+				{
+				  //TRACE(TRACE_ERROR, "BT-MEM", "tp_active_fh");
+				  skip = 1;
+				  continue;
+				}
+
+				if(LIST_FIRST(&tp->tp_waiting_blocks) != NULL)
+				{
+				  skip = 1;
+				  if(to_destroy > 4)
+				  {
+					//TRACE(TRACE_ERROR, "BT-MEM", "tp_waiting_blocks");
+					while((tb = LIST_FIRST(&tp->tp_waiting_blocks)) != NULL)
+					{
+						block_cancel_requests(tb);
+						block_destroy(tb);
+					}
+				  }
+				}
+
+				if(LIST_FIRST(&tp->tp_sent_blocks) != NULL)
+				{
+				  skip = 1;
+				  if(to_destroy > 4)
+				  {
+					//TRACE(TRACE_ERROR, "BT-MEM", "tp_sent_blocks");
+					while((tb = LIST_FIRST(&tp->tp_sent_blocks)) != NULL)
+					{
+						block_cancel_requests(tb);
+						block_destroy(tb);
+					}
+				  }
+				}
+
+				if(LIST_FIRST(&tp->tp_sendreqs) != NULL)
+				{
+				  skip = 1;
+				  if(to_destroy > 4)
+				  {
+				    //TRACE(TRACE_ERROR, "BT-MEM", "tp_sendreqs");
+					while((ts = LIST_FIRST(&tp->tp_sendreqs)) != NULL)
+						torrent_sendreq_destroy(ts);
+				  }
+				}
+
+				if(skip)
+				{
+					//TRACE(TRACE_INFO, "BT-MEM", "skip: %i", tp->tp_index);
+					continue;
+				}
+
+			    //if(to_destroy > 4)
+				//	TRACE(TRACE_ERROR, "BT-MEM", "Destroying pieces (pass: %i) active/keep/remove: %i / %i / %i", i, to->to_active_piece_fh, piece_index, tp->tp_index);
+
+				while((ts = LIST_FIRST(&tp->tp_sendreqs)) != NULL)
+					torrent_sendreq_destroy(ts);
+				while((tb = LIST_FIRST(&tp->tp_waiting_blocks)) != NULL)
+				{
+					block_cancel_requests(tb);
+					block_destroy(tb);
+				}
+				while((tb = LIST_FIRST(&tp->tp_sent_blocks)) != NULL)
+				{
+					block_cancel_requests(tb);
+					block_destroy(tb);
+				}
+
+				torrent_piece_destroy(to, tp);
+				destroyed++;
+				break;
+			}
+		}
+		if(destroyed >= to_destroy) break;
+	}
+//#endif
+}
+
 /**
  *
  */
+static int
+torrent_piece_exists(torrent_t *to, int piece_index) // 1=active 2=on disk
+{
+  torrent_piece_t *tp;
+
+  if(to->to_cachefile_piece_map && to->to_cachefile_piece_map[piece_index] != -1)
+  {
+	  //TRACE(TRACE_INFO, "BT", "Piece %i: DISK", piece_index);
+	  return 2;
+  }
+
+  TAILQ_FOREACH(tp, &to->to_active_pieces, tp_link) {
+    if(tp->tp_index == piece_index) {
+		//TRACE(TRACE_INFO, "BT", "Piece %i: ACTIVE", piece_index);
+      return 1;
+    }
+  }
+  //TRACE(TRACE_INFO, "BT", "Piece %i: NA", piece_index);
+  return 0;
+}
+
 static torrent_piece_t *
 torrent_piece_find(torrent_t *to, int piece_index)
 {
   torrent_piece_t *tp;
+
+  if(/* to->to_num_active_pieces >= MAX_NUM_PIECES || */  to->to_active_pieces_mem > POOL_MEM )
+    torrent_piece_destroy_index(to, /* piece_index */ piece_index, /* keep_pieces */ 5, /* to_destroy */ 2);
+
   TAILQ_FOREACH(tp, &to->to_active_pieces, tp_link) {
     if(tp->tp_index == piece_index) {
       TAILQ_REMOVE(&to->to_active_pieces, tp, tp_link);
@@ -799,7 +1214,27 @@ torrent_piece_find(torrent_t *to, int piece_index)
     }
   }
 
+	if(/* to->to_num_active_pieces >= MAX_NUM_PIECES || */  to->to_active_pieces_mem > POOL_MEM )
+		torrent_piece_destroy_index(to, /* piece_index */ piece_index, /* keep_pieces */ 5, /* to_destroy */ 4);
+
   tp = torrent_piece_create(to, piece_index);
+
+  if(tp && (/* to->to_num_active_pieces >= MAX_NUM_PIECES || */  to->to_active_pieces_mem > POOL_MEM ))
+  {
+	//TRACE(TRACE_ERROR, "BT-MEM", "Exceeding limits, cleaning up...");
+	torrent_piece_destroy_index(to, /* piece_index */ piece_index, /* keep_pieces */ 2, /* to_destroy */ DESTROY_NUM_PIECES);
+  }
+
+  if(tp == NULL)
+  {
+	  //TRACE(TRACE_ERROR, "BT-MEM", "Unable to allocate memory (%i MB), cleaning up...", to->to_piece_length / 1024 / 1024);
+	  torrent_piece_destroy_index(to, /* piece_index */ piece_index, /* keep_pieces */ 1, /* to_destroy */ DESTROY_NUM_PIECES * 4);
+	  tp = torrent_piece_create(to, piece_index);
+  }
+
+  if(tp == NULL) return NULL;
+
+  to->to_last_active_piece = piece_index;
 
   if(to->to_cachefile_piece_map[piece_index] != -1) {
     // We have this piece on disk, signal that we want to load it
@@ -818,7 +1253,7 @@ torrent_piece_find(torrent_t *to, int piece_index)
  *
  */
 static void
-piece_update_deadline(torrent_t *to, torrent_piece_t *tp)
+piece_update_deadline(torrent_t *to, torrent_piece_t *tp)//, int64_t _deadline)
 {
   int64_t deadline = INT64_MAX;
   torrent_fh_t *tfh;
@@ -827,6 +1262,9 @@ piece_update_deadline(torrent_t *to, torrent_piece_t *tp)
 
   if(tp->tp_deadline == deadline)
     return;
+
+//if(deadline!=INT64_MAX)
+//  TRACE(TRACE_ERROR, "BITTORRENT", "Deadline for piece %i (%lli/%lli)", tp->tp_index, deadline, tp->tp_deadline);
 
   tp->tp_deadline = deadline;
 
@@ -840,41 +1278,273 @@ piece_update_deadline(torrent_t *to, torrent_piece_t *tp)
 /**
  *
  */
+//volatile int f_torrent_cancel_piece;
+//volatile int f_torrent_probing;
+
 int
 torrent_load(torrent_t *to, void *buf, uint64_t offset, size_t size,
 	     torrent_fh_t *tfh)
 {
+
+/*
+	if(f_torrent_cancel_piece)
+	{
+		//TRACE(TRACE_ERROR, "BT", "early - f_torrent_cancel_piece=%i", f_torrent_cancel_piece);
+		f_torrent_cancel_piece = 0;
+      return -1;
+	}
+*/
+
   int rval = size;
   // First figure out which pieces we need
 
   int piece = offset        / to->to_piece_length;
   int piece_offset = offset % to->to_piece_length;
 
-  // Poor mans read-ahead
-  if(piece + 1 < to->to_num_pieces)
-    torrent_piece_find(to, piece + 1);
-  if(piece + 2 < to->to_num_pieces)
-    torrent_piece_find(to, piece + 2);
+
+  //if(tfh->tfh_probe) TRACE(TRACE_INFO, "BT", "Piece %i: PROBING: %i", piece, tfh->tfh_probe);
+  //int max_pieces_ahead = MAX(0, (128 - (to->to_piece_length/1024/128))/4) / 3;
+
+  int max_pieces_ahead = 2+(8*1024*1024/to->to_piece_length);
+
+  //to->to_last_active_piece = piece;
+  to->to_active_piece_fh = piece;
+
+  if(/* !f_torrent_cancel_piece &&*/ !tfh->tfh_probe )
+  {
+		int pf_cnt = 0;
+		int pf = 1;
+
+		while(1)
+		{
+
+			if(to->to_active_pieces_mem >= (POOL_MEM_2 - to->to_piece_length))
+			{
+				//TRACE(TRACE_INFO, "BT", "Piece %i: NEW (%i) ABORT %i MB", piece + pf, pf, to->to_active_pieces_mem/1024/1024);
+				break;
+			}
+
+			if( (piece + pf) >= to->to_num_pieces ) break;
+
+			if(!torrent_piece_exists(to, piece + pf))
+			{
+				//TRACE(TRACE_ERROR, "BT-RAHEAD", "Piece %i: NEW (AHEAD: %i)", piece + pf, pf);
+				torrent_piece_find(to, piece + pf);
+				pf_cnt++;
+			}
+
+			pf++;
+
+			if( (pf_cnt >= (max_pieces_ahead)) || (pf > (10 + 1*max_pieces_ahead)) ) break;
+			if( !piece && (pf > 3) ) break;
+		}
+
+	/*
+	if( (piece + 10) < to->to_num_pieces)
+	{
+
+		if( piece > 2 )
+		{
+			torrent_piece_find(to, piece + 10);
+			torrent_piece_find(to, piece + 9);
+			torrent_piece_find(to, piece + 8);
+			torrent_piece_find(to, piece + 7);
+		}
+		if( piece > 1 )
+			torrent_piece_find(to, piece + 6);
+
+		torrent_piece_find(to, piece + 5);
+	}
+	*/
+  }
+
   while(size > 0) {
+
+/*    if(f_torrent_cancel_piece)
+	{
+		//TRACE(TRACE_ERROR, "BT", "loop start - f_torrent_cancel_piece=%i", f_torrent_cancel_piece);
+		f_torrent_cancel_piece = 0;
+      return -1;
+	}
+*/
+	//to->to_last_active_piece = piece;
+	to->to_active_piece_fh = piece;
 
     torrent_piece_t *tp = torrent_piece_find(to, piece);
 
+	if(tp == NULL)
+	{
+		usleep(100000);
+		tp = torrent_piece_find(to, piece);
+		if(tp == NULL)
+		{
+			TRACE(TRACE_ERROR, "BT-MEM", "Unable to allocate memory (%i MB), giving up!", to->to_piece_length / 1024 / 1024);
+			return -1;
+		}
+	}
+
     LIST_INSERT_HEAD(&tp->tp_active_fh, tfh, tfh_piece_link);
 
-    piece_update_deadline(to, tp);
+    piece_update_deadline(to, tp);//, INT64_MAX);
 
-    if(!tp->tp_hash_computed) {
-      asyncio_wakeup_worker(torrent_pendings_signal);
+    if(!tp->tp_hash_computed)
+	{
+		asyncio_wakeup_worker(torrent_pendings_signal);
 
-      while(!tp->tp_hash_ok && !tfh->tfh_cancelled)
-        hts_cond_wait(&torrent_piece_verified_cond, &bittorrent_mutex);
+#define RETRY_TO 1
+
+		int retry = 60/(RETRY_TO);
+		int retry2 = 0;
+
+		while(!tp->tp_hash_ok && !tfh->tfh_cancelled /*&& !f_torrent_cancel_piece*/)
+		{
+			/*
+			int torrent_timeout = 17000;
+			if(to->to_piece_length>(7*1024*1024)) torrent_timeout = 30000;
+			else if(to->to_piece_length<(1*1024*1024)) torrent_timeout = 10000;
+			else if(to->to_piece_length<(2*1024*1024)) torrent_timeout = 12000;
+			else if(to->to_piece_length<(4*1024*1024)) torrent_timeout = 15000;
+
+			if(!to->to_active_peers && !to->to_num_peers)
+				torrent_timeout = 8000;
+			*/
+
+			/*
+			int64_t now = async_current_time();
+			if(tp->tp_deadline != INT64_MAX)
+				TRACE(TRACE_INFO, "BITTORRENT", "Timeout (%i sec) with retry on piece %i (%i KB) DT:%lli, N:%lli, D:%lli", torrent_timeout/1000, piece, (int)(to->to_piece_length/1024),
+				(tp->tp_deadline - now)/1000000, now, tp->tp_deadline);
+			*/
+
+			//hts_cond_wait(&torrent_piece_verified_cond, &bittorrent_mutex);
+
+			if( hts_cond_wait_timeout(&torrent_piece_verified_cond, &bittorrent_mutex, (RETRY_TO*1000) /*torrent_timeout*/ ) )
+			{
+				int64_t deadline_delay = (async_current_time() - tp->tp_deadline)/1000;
+				//TRACE(TRACE_DEBUG, "BITTORRENT", "%i sec (piece %i) Deadline=%lli, %lli, %lli", retry2, piece, deadline_delay/1000, tp->tp_deadline, async_current_time());
+
+				if(retry)
+					retry--;
+
+
+				retry2++;
+				/*
+				if(retry2 == (10/RETRY_TO) || retry2 == (20/RETRY_TO) || retry2 == (30/RETRY_TO))
+				{
+					TRACE(TRACE_INFO, "BT", "Piece %i: Attempt more peers", piece);
+					piece_update_deadline(to, tp);
+					torrent_attempt_more_peers(to, 1);
+				}
+				*/
+
+				if(piece /*&& (retry2 > 0)*/ && !tfh->tfh_probe)// && (retry2 < 7))
+				{
+					int pf_cnt = 0;
+					int pf = 1;
+					while(1)
+					{
+
+						if(to->to_active_pieces_mem >= (POOL_MEM_2 - to->to_piece_length))
+						{
+							//TRACE(TRACE_INFO, "BT", "Piece %i: NEW (%i) ABORT %i MB", piece + pf, pf, to->to_active_pieces_mem/1024/1024);
+							break;
+						}
+
+						if( (piece + pf) >= to->to_num_pieces ) break;
+
+						if(!torrent_piece_exists(to, piece + pf))
+						{
+							//TRACE(TRACE_INFO, "BT", "Piece %i: NEW (AHEAD: %i)", piece + pf, pf);
+							torrent_piece_find(to, piece + pf);
+							pf_cnt++;
+						}
+
+						pf++;
+
+						if(pf_cnt >= (max_pieces_ahead) || (pf > (20 + 1*max_pieces_ahead))) break;
+					}
+				}
+
+				if(retry2 > (2/RETRY_TO))//retry2 == (2/RETRY_TO) || retry2 == (5/RETRY_TO) || retry2 == (10/RETRY_TO) || retry2 == (15/RETRY_TO))
+				{
+					//TRACE(TRACE_INFO, "BT", "Piece %i: Attempt to prioritize (delay: %lli)", piece, deadline_delay);
+
+					if(	retry2 > (7/RETRY_TO) ||
+						!piece ||
+						!tp->tp_deadline ||
+						(tp->tp_deadline != INT64_MAX && tp->tp_deadline && deadline_delay > -90000 && deadline_delay < 60000 )
+					)
+					{
+						//torrent_trace(to, "Piece %i: Will attempt to prioritize - deadline changed after %i seconds of critical delay (%lli -> %lli)", piece, (retry2*RETRY_TO), tp->tp_deadline/1000000, async_current_time()/1000000 );
+						torrent_trace(to, "Piece %i: Will attempt to prioritize - deadline changed after %i seconds of critical delay", piece, (retry2*RETRY_TO));
+						if(tp->tp_deadline && tp->tp_deadline != INT64_MAX)
+							deadline_delay = 0;
+
+						tp->tp_deadline = async_current_time();
+
+						LIST_REMOVE(tp, tp_serve_link);
+						LIST_INSERT_SORTED(&to->to_serve_order, tp, tp_serve_link, tp_deadline_cmp,
+										 torrent_piece_t);
+					}
+				}
+
+				if(	retry2 > (5/RETRY_TO))
+				{
+					//TRACE(TRACE_INFO, "BT", "Piece %i: Probe: %i - Hash Wake-Up and do IO requests", piece, tfh->tfh_probe);
+					torrent_hash_wakeup();
+					torrent_io_do_requests(to);
+				}
+
+				if 	( tp->tp_deadline != INT64_MAX && tfh->tfh_probe &&
+						(
+							   (!piece && (tp->tp_deadline && retry<(30/RETRY_TO)))
+							|| ( piece && !retry && !tp->tp_deadline )
+							|| ( tp->tp_deadline && (deadline_delay > 30000) )
+							|| ( retry2 > (59/RETRY_TO) )
+						)
+					)
+				{
+					LIST_REMOVE(tfh, tfh_piece_link);
+					piece_update_deadline(to, tp);
+					//TRACE(TRACE_INFO, "BITTORRENT", "Probe timeout (%i sec) | Deadline: %i sec | Piece %i (%i KB) | Peers: %i/%i (%s)", (retry2*RETRY_TO), (tp->tp_deadline?((int)(deadline_delay/1000)):0), piece, (int)(to->to_piece_length/1024), to->to_active_peers, to->to_num_peers, to->to_title);
+					torrent_trace(to, "Fast probe timeout (%i sec) | Deadline: %i sec | Piece %i (%i KB) | Peers: %i/%i (this can be ignored!)", (retry2*RETRY_TO), (tp->tp_deadline?((int)(deadline_delay/1000)):0), piece, (int)(to->to_piece_length/1024), to->to_active_peers, to->to_num_peers);
+					return AVERROR(EAGAIN);
+				}
+
+				//TRACE(TRACE_ERROR, "BITTORRENT", "Tick %i (Deadline: %i) on piece %i (%i KB), Peers: %i/%i", retry2*RETRY_TO, (tp->tp_deadline?((int)(deadline_delay/1000)):0), piece, (int)(to->to_piece_length/1024), to->to_active_peers, to->to_num_peers);
+				//piece_update_deadline(to, tp);
+				//continue;
+
+				/*
+				//if(tp->tp_deadline == INT64_MAX) continue;
+				//int64_t now = async_current_time();
+				if(tp->tp_deadline != INT64_MAX && (tp->tp_deadline - async_current_time()) > 3000000) // 3*3 = 9sec // fa_video deadline buffer/3
+				{
+					TRACE(TRACE_INFO, "BITTORRENT", "Timeout (%i sec) ignored, will retry piece %i (%i KB), Peers: %i/%i (%s)", torrent_timeout/1000, piece, (int)(to->to_piece_length/1024), to->to_active_peers, to->to_num_peers, to->to_title);
+					continue;
+				}
+
+				TRACE(TRACE_ERROR, "BITTORRENT", "Timeout (%i sec) on piece %i (%i KB), Peers: %i/%i (%s)", torrent_timeout/1000, piece, (int)(to->to_piece_length/1024), to->to_active_peers, to->to_num_peers, to->to_title);
+
+				LIST_REMOVE(tfh, tfh_piece_link);
+				piece_update_deadline(to, tp);
+				if(!to->to_num_peers) return -1;
+				return 0;
+				break;
+				*/
+			}
+		}
     }
 
     LIST_REMOVE(tfh, tfh_piece_link);
-    piece_update_deadline(to, tp);
+    piece_update_deadline(to, tp);//, INT64_MAX);
 
-    if(tfh->tfh_cancelled)
+    if(tfh->tfh_cancelled /*|| f_torrent_cancel_piece*/)
+	{
+		//TRACE(TRACE_ERROR, "BT", "loop end 2 - f_torrent_cancel_piece=%i", f_torrent_cancel_piece);
+		//f_torrent_cancel_piece = 0;
       return -1;
+	}
 
     int copy = MIN(size, to->to_piece_length - piece_offset);
 
@@ -886,6 +1556,59 @@ torrent_load(torrent_t *to, void *buf, uint64_t offset, size_t size,
     buf += copy;
   }
 
+  // Poor mans read-ahead
+  //TRACE(TRACE_DEBUG, "BT-MEM", "Requested read size: %i KB (ps = %i KB)", size/1024, to->to_piece_length/1024);
+
+/*
+if(!f_torrent_cancel_piece)
+{
+
+  if(piece + 5 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 5);
+
+  if(piece + 4 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 4);
+
+  if(piece + 3 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 3);
+
+  if(piece + 0 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 0);
+
+  if(piece + 1 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 1);
+
+  if(piece + 2 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 2);
+}
+*/
+
+
+
+
+
+/*
+#if PS3
+  if(piece + 1 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 1);
+#else
+
+#if 0
+  if(piece + 3 < to->to_num_pieces) //  && size > (to->to_piece_length * 3)
+    torrent_piece_find(to, piece + 3);
+
+  if(piece + 2 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 2);
+
+  if(piece + 1 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 1);
+#endif
+
+  if(piece + 0 < to->to_num_pieces)
+    torrent_piece_find(to, piece + 0);
+
+#endif
+*/
   return rval;
 }
 
@@ -932,7 +1655,7 @@ add_request(torrent_block_t *tb, peer_t *p, int64_t now)
   peer_send_request(p, tb);
 
   tr->tr_peer = p;
-  tr->tr_qdepth = p->p_active_requests;
+  //tr->tr_qdepth = p->p_active_requests;
 
   if(LIST_FIRST(&p->p_download_requests) == NULL)
     p->p_torrent->to_peers_with_outstanding_requests++;
@@ -982,7 +1705,7 @@ find_optimal_peer(torrent_t *to, const torrent_piece_t *tp)
 
     if(p->p_block_delay == 0) {
       // Delay not known yet
-      
+
       if(p->p_active_requests) {
 	// We have a request already, skip this peer
 	continue;
@@ -1057,6 +1780,8 @@ serve_waiting_blocks(torrent_t *to, torrent_piece_t *tp, int optimal,
     if(optimal) {
       peer_t *p = find_optimal_peer(to, tp);
 
+	//if(p!=NULL) TRACE(TRACE_INFO, "PEERS", "OPT act: %i max: %i", p->p_active_requests, p->p_maxq);
+
       if(p == NULL || p->p_active_requests >= p->p_maxq)
 	break;
 
@@ -1066,7 +1791,7 @@ serve_waiting_blocks(torrent_t *to, torrent_piece_t *tp, int optimal,
       peer_t *p = find_any_peer(to, tp);
       if(p == NULL)
 	break;
-
+	//TRACE(TRACE_INFO, "PEERS", "ANY act: %i max: %i", p->p_active_requests, p->p_maxq);
       add_request(tb, p, now);
 
     }
@@ -1188,16 +1913,29 @@ check_active_requests(torrent_t *to, torrent_piece_t *tp,
  *
  */
 void
-torrent_piece_release(torrent_piece_t *tp)
+torrent_piece_release(torrent_t *to, torrent_piece_t *tp)
 {
   tp->tp_refcount--;
   if(tp->tp_refcount > 0)
+  {
+	//TRACE(TRACE_ERROR, "BT-MEM", "Not releasing piece (REFC=%i)", tp->tp_refcount);
     return;
+  }
 
   torrent_piece_remove_contributors(tp, 0);
 
-  free(tp->tp_data);
-  free(tp);
+  gconf.android_free_mem += tp->tp_piece_length;
+
+  if(tp->tp_data != NULL)
+  {
+#if USE_MALLOC
+	free(tp->tp_data);
+#else
+	pool_free(to, tp->tp_data);
+#endif
+  }
+  if(tp != NULL)
+	  free(tp);
 }
 
 
@@ -1212,12 +1950,20 @@ torrent_piece_destroy(torrent_t *to, torrent_piece_t *tp)
   assert(LIST_FIRST(&tp->tp_sent_blocks) == NULL);
   assert(LIST_FIRST(&tp->tp_sendreqs) == NULL);
   to->to_active_pieces_mem -= tp->tp_piece_length;
+  //f_torrent_memory -= tp->tp_piece_length;
+
+//TRACE(TRACE_INFO, "BT", "Total allocated: %lliMB (torrent_piece_destroy)", f_torrent_memory/1024/1024);
+
   to->to_num_active_pieces--;
+
+  //if(f_torrent_memory<0) f_torrent_memory = 0;
+  if(to->to_active_pieces_mem<0) to->to_active_pieces_mem = 0;
+  if(to->to_num_active_pieces<0) to->to_num_active_pieces = 0;
 
   TAILQ_REMOVE(&to->to_active_pieces, tp, tp_link);
   LIST_REMOVE(tp, tp_serve_link);
 
-  torrent_piece_release(tp);
+  torrent_piece_release(to, tp);
 }
 
 
@@ -1229,11 +1975,34 @@ flush_active_pieces(torrent_t *to)
 {
   torrent_piece_t *tp, *next;
 
+  //TRACE(TRACE_DEBUG, "BT-MEM", "IN- Free: %i MB, Active Memory: %i MB, Pool: %i MB (%i pcs)", (int)android_free_mem/1024/1024, (int)(to->to_active_pieces_mem/1024/1024), (int)(POOL_MEM/1024/1024), to->to_num_active_pieces);
+
+	if(/* to->to_num_active_pieces >= MAX_NUM_PIECES || */  to->to_active_pieces_mem >= POOL_MEM || (gconf.android_free_mem < (LOW_MEM + to->to_piece_length * 2)) )
+	{
+		torrent_piece_destroy_index(to, /* piece_index */ to->to_last_active_piece, /* keep_pieces */ 5, /* to_destroy */ 3);
+
+		if(/* to->to_num_active_pieces >= MAX_NUM_PIECES || */  to->to_active_pieces_mem >= POOL_MEM || (gconf.android_free_mem < (LOW_MEM + to->to_piece_length * 2)) )
+			torrent_piece_destroy_index(to, /* piece_index */ to->to_last_active_piece, /* keep_pieces */ 2, /* to_destroy */ DESTROY_NUM_PIECES);
+	}
+
   for(tp = TAILQ_FIRST(&to->to_active_pieces); tp != NULL; tp = next) {
     next = TAILQ_NEXT(tp, tp_link);
 
-    if(to->to_active_pieces_mem <= 32 * 1024 * 1024)
+#if PS3
+
+    if(to->to_active_pieces_mem <= (MAX_ACT_PIECES_MB - 16) * 1024 * 1024)
       break;
+
+#else
+
+	if(gconf.android_free_mem > (LOW_MEM + to->to_piece_length*20))
+	{
+		//if(to->to_active_pieces_mem <= video_settings.video_buffer_size * 1024 * 512) // less than 50% of video_settings.video_buffer_size
+		//if(to->to_active_pieces_mem < (POOL_MEM_2 - to->to_piece_length)*7/8)
+		  break;
+	}
+
+#endif
 
     if(tp->tp_load_req)
       continue;
@@ -1247,12 +2016,22 @@ flush_active_pieces(torrent_t *to)
     if(LIST_FIRST(&tp->tp_sent_blocks) != NULL)
       continue;
 
-    if(LIST_FIRST(&tp->tp_sendreqs) != NULL &&
-       to->to_active_pieces_mem <= 64 * 1024 * 1024)
+    if(LIST_FIRST(&tp->tp_sendreqs) != NULL)
       continue;
 
+#if PS3
+    if(to->to_active_pieces_mem <= MAX_ACT_PIECES_MB * 1024 * 768) // less than 75% of video_settings.video_buffer_size
+      break;
+#else
+    //if(to->to_active_pieces_mem <= video_settings.video_buffer_size * 1024 * 384) // less than 37,5% of video_settings.video_buffer_size
+	if(to->to_active_pieces_mem <= 16 * 1024 * 1024)
+      break;
+#endif
+	//TRACE(TRACE_INFO, "BT-MEM", "Destroying piece");
     torrent_piece_destroy(to, tp);
+
   }
+  //TRACE(TRACE_DEBUG, "BT-MEM", "OUT Active Memory: %i MB (%i pcs)", (int)(to->to_active_pieces_mem/1024/1024), to->to_num_active_pieces);
 }
 
 
@@ -1350,7 +2129,7 @@ torrent_unchoke_peers(torrent_t *to)
 
   qsort(pv, num_candidates, sizeof(peer_t *), peer_unchoke_sort_cmp);
 
-  int max_unchoked = 5;
+  int max_unchoked = 10;
 
   for(int i = 0; i < num_candidates; i++) {
     peer_t *p = pv[i];
@@ -1453,7 +2232,6 @@ torrent_sendreq_destroy(torrent_sendreq_t *ts)
   LIST_REMOVE(ts, ts_piece_link);
   free(ts);
 }
-
 
 /**
  *
@@ -1585,6 +2363,8 @@ torrent_periodic_one(torrent_t *to, int second)
   int seeders = 0;
   int leechers = 0;
 
+  flush_active_pieces(to);
+
   LIST_FOREACH(tt, &to->to_trackers, tt_torrent_link) {
     seeders  = MAX(seeders,  tt->tt_seeders);
     leechers = MAX(leechers, tt->tt_leechers);
@@ -1593,17 +2373,23 @@ torrent_periodic_one(torrent_t *to, int second)
   LIST_FOREACH(tfh, &to->to_fhs, tfh_torrent_link) {
     if(tfh->tfh_fa_stats != NULL) {
       prop_set(tfh->tfh_fa_stats, "bitrate", PROP_SET_INT, rate);
+
       prop_set_int(tfh->tfh_known_peers, to->to_num_peers);
       prop_set_int(tfh->tfh_connected_peers, to->to_active_peers);
       prop_set_int(tfh->tfh_torrent_seeders, seeders);
-      prop_set_int(tfh->tfh_torrent_leechers, leechers);
-      prop_set_int(tfh->tfh_recv_peers, to->to_peers_with_outstanding_requests);
+      //prop_set_int(tfh->tfh_torrent_leechers, leechers);
+      //prop_set_int(tfh->tfh_recv_peers, to->to_peers_with_outstanding_requests);
+	  prop_set_int(tfh->tfh_act_pieces, to->to_num_active_pieces);
+	  //prop_set_int(tfh->tfh_act_memory, to->to_active_pieces_mem / 1024 / 1024);
+	  prop_set_int(tfh->tfh_act_disk, ((int64_t)to->to_total_disk_blocks * (int64_t)to->to_piece_length) / 1024 / 1024);
+	  prop_set_int(tfh->tfh_recv_speed, rate);
+
     }
   }
 
-  flush_active_pieces(to);
+  //flush_active_pieces(to);
 
-  if(to->to_last_unchoke_check + 5 < second) {
+  if(to->to_last_unchoke_check + 10 < second) {
     to->to_last_unchoke_check = second;
     torrent_unchoke_peers(to);
   }
@@ -1628,6 +2414,19 @@ torrent_periodic(void *aux)
       torrent_destroy(to);
       continue;
     }
+	/*
+	else
+	{
+		if(to->to_refcount == 1)
+		{
+			//TRACE(TRACE_INFO, "BITTORRENT", "torrent_periodic ref: %i", to->to_refcount);
+			TRACE(TRACE_INFO, "BITTORRENT", "Torrent forced destroy: %s:", to->to_title);
+			to->to_refcount = 0;
+			torrent_destroy(to);
+			continue;
+		}
+	}
+	*/
 
     torrent_io_do_requests(to);
     torrent_periodic_one(to, second);
@@ -1668,16 +2467,15 @@ torrent_piece_verify_hash(torrent_t *to, torrent_piece_t *tp)
   torrent_retain(to);
   tp->tp_refcount++;
 
-  hts_mutex_unlock(&bittorrent_mutex);
-  int64_t ts = arch_get_ts();
   sha1_init(shactx);
+  hts_mutex_unlock(&bittorrent_mutex);
+  //int64_t ts = arch_get_ts();
   sha1_update(shactx, tp->tp_data, tp->tp_piece_length);
-  sha1_final(shactx, digest);
-  ts = arch_get_ts() - ts;
+  //ts = arch_get_ts() - ts;
   hts_mutex_lock(&bittorrent_mutex);
+  sha1_final(shactx, digest);
 
   tp->tp_hash_computed = 1;
-
 
   const uint8_t *piecehash = to->to_piece_hashes + tp->tp_index * 20;
   tp->tp_hash_ok = !memcmp(piecehash, digest, 20);
@@ -1698,7 +2496,7 @@ torrent_piece_verify_hash(torrent_t *to, torrent_piece_t *tp)
   if(tp->tp_hash_ok && to->to_cachefile != NULL)
     torrent_diskio_wakeup();
 
-  torrent_piece_release(tp);
+  torrent_piece_release(to, tp);
   torrent_release(to);
 
   hts_cond_broadcast(&torrent_piece_verified_cond);
@@ -1720,6 +2518,7 @@ bt_hash_thread(void *aux)
 
   restart:
 
+	//usleep(50000);
     LIST_FOREACH(to, &torrents, to_link) {
       torrent_piece_t *tp;
       TAILQ_FOREACH(tp, &to->to_active_pieces, tp_link) {
@@ -1800,8 +2599,10 @@ torrent_wakeup_for_metadata_requests(void)
 static void
 torrent_early_init(void)
 {
-  btg.btg_max_peers_global = 60;
-  btg.btg_max_peers_torrent = 50;
+  btg.btg_max_peers_global = btg.btg_max_connections;
+  btg.btg_max_peers_torrent = btg.btg_max_connections * 4 / 5;
+  btg.btg_tcpudp = 0;
+  btg.btg_peer_requests = 15;
 
   asyncio_timer_init(&torrent_periodic_timer, torrent_periodic, NULL);
 
@@ -1824,6 +2625,7 @@ INITME(INIT_GROUP_NET, torrent_early_init, NULL, 0);
 static void
 torrent_asyncio_init(void)
 {
+  //f_torrent_memory = 0;
   hts_mutex_lock(&bittorrent_mutex);
   torrent_settings_init();
   hts_mutex_unlock(&bittorrent_mutex);

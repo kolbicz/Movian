@@ -260,6 +260,18 @@ arch_get_system_type(void)
 }
 
 
+void
+arch_open_external_url(const char *url)
+{
+  NSString *string = [NSString stringWithUTF8String:url];
+  if(string == nil)
+    return;
+  NSURL *nsurl = [NSURL URLWithString:string];
+  if(nsurl != nil)
+    [[NSWorkspace sharedWorkspace] openURL:nsurl];
+}
+
+
 /**
  *
  */

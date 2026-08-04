@@ -346,7 +346,7 @@ rec_thread(void *aux)
   }
 
   /* write the stream header, if any */
-  avformat_write_header(gr->oc, NULL);
+  if(avformat_write_header(gr->oc, NULL));
 
 
   hts_mutex_lock(&glw_rec_mutex);

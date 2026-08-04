@@ -2,84 +2,109 @@
 
 
 widget(container_y, {
-  id: "osd_audio";
+	id: "osd_audio";
+	delta($ui.playbackSelectorOpen, isVisible());
+	onEvent(right, {
+		$clone.osdpage = 0;
+		$clone.showPlaydeck = 1;
+		focus("audio-btn");
+	}, true, false);
 
-  widget(label, {
-    style: "osdsettingtitle";
-    height: 3em;
-    align: center;
-    caption: _("Audio");
-    size: 1.5em;
-  });
+	widget(container_z, {
+		height: 3em;
+		zoffset: 3000;
+		clickable: true;
+		onEvent(activate, {
+			$clone.osdpage = 0;
+			$clone.showPlaydeck = 1;
+			focus("audio-btn");
+		}, true, true, true);
+		widget(quad, {
+			color: 0;
+			alpha: 0.95;
+		});
+		widget(label, {
+			style: "osdsettingtitle";
+			align: center;
+			caption: _("Audio")+" / "+_("Video");
+			size: 1.5em;
+		});
+		widget(container_x, {
+			space(1);
+			widget(icon, {
+				width: 4em;
+				color: 1;
+				size: 1.7em;
+				source: "skin://icons/ic_close_48px.svg";
+			});
+		});
+	});
 
-  onEvent(back, {
-    $clone.osdpage = 0;
-    focus("audio-btn");
-  }, $clone.osdpage);
+	onEvent(back, {
+	$clone.osdpage = 0;
+	$clone.showPlaydeck = 1;
+	focus("audio-btn");
+	}, $clone.osdpage);
 
-  widget(container_x, {
-    widget(list_y, {
-      id: "list";
+	widget(container_x, {
+	widget(list_y, {
+		id: "list";
 
-      cloner($self.media.audio.sorted, container_z, {
-        height: 1.5em;
-        focusable: true;
-        ListItemHighlight();
-        ListItemBevel();
-        onEvent(activate, deliverEvent($parent.control,
-                                       selectAudioTrack($self.url)));
+		cloner($self.media.audio.sorted, container_z, {
+		height: 1.5em;
+		focusable: true;
+		ListItemHighlight();
+		ListItemBevel();
+		onEvent(activate, deliverEvent($parent.control,
+										 selectAudioTrack($self.url)));
 
-        widget(container_x, {
-          padding: [0.5em, 0];
+		widget(container_x, {
+			padding: [0.25em, 0];
 
-          widget(icon, {
-	    source: "skin://icons/ic_favorite_48px.svg";
-	    alpha: iir($self.url == $parent.media.audio.current &&
-                       $parent.media.audio.manual, 4);
-            style: "NavSelectedText";
-	  });
+			widget(icon, {
+		source: "skin://icons/ic_favorite_48px.svg";
+		alpha: iir($self.url == $parent.media.audio.current &&
+						 $parent.media.audio.manual, 4);
+			style: "NavSelectedText";
+	});
 
-          widget(icon, {
-	    source: "skin://icons/ic_check_48px.svg";
-	    alpha: iir($self.url == $parent.media.audio.current, 4);
-            style: "NavSelectedText";
-	  });
+			widget(icon, {
+		source: ($self.url == $parent.media.video.current ? "skin://icons/ic_videocam_48px.svg" : "skin://icons/ic_check_48px.svg");
+		alpha: (iir(($self.url == $parent.media.video.current || $self.url == $parent.media.audio.current), 4));
+			style: "NavSelectedText";
+	});
 
-	  widget(label, {
-            filterConstraintX: true;
-	    weight: 2;
-	    caption: $self.title;
-            style: "NavSelectedText";
-	  });
+	widget(label, {
+			filterConstraintX: true;
+		weight: 1.75;
+		caption: $self.title ? $self.title : _("Audio");
+			style: "NavSelectedText";
+	});
 
-	  widget(label, {
-            filterConstraintX: true;
-	    weight: 1;
-	    caption: $self.language;
-            style: "NavSelectedText";
-	  });
+	widget(label, {
+			filterConstraintX: true;
+		weight: 1;
+		caption: $self.language;
+			style: "NavSelectedText";
+	});
 
-	  widget(label, {
-            filterConstraintX: true;
-	    weight: 0.5;
-	    caption: $self.format;
-            style: "NavSelectedText";
-	  });
-        });
-      });
-    });
-    widget(slider_y, {
-      bind("list");
-      width: 4;
-      focusable: canScroll();
-      alpha: iir(canScroll(), 16);
-      widget(quad, {
+	widget(label, {
+			filterConstraintX: true;
+		weight: 0.75;
+		caption: $self.format;
+			style: "NavSelectedText";
+	});
+		});
+		});
+	});
+	widget(slider_y, {
+		bind("list");
+		width: 4;
+		focusable: canScroll();
+		alpha: iir(canScroll(), 16);
+		widget(quad, {
 	alpha: 1;
-      });
-    });
-  });
+		});
+	});
+	});
 });
-
-
-
-

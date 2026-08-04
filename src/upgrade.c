@@ -26,6 +26,10 @@
 #include <limits.h>
 #include <dirent.h>
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+
 #include "main.h"
 #include "upgrade.h"
 #if ENABLE_UPGRADE
@@ -52,9 +56,13 @@
 #include <sys/utsname.h>
 #endif
 
+#ifdef __ANDROID__
+#include "arch/android/android.h"
+#endif
+
 static HTS_MUTEX_DECL(upgrade_mutex);
 
-static const char *ctrlbase = "http://upgrade.movian.tv/upgrade/3";
+static const char *ctrlbase = "https://repo.movian.eu";
 const char *artifact_type;
 const char *archname;
 
@@ -73,6 +81,14 @@ static char *app_download_name;
 static int notify_upgrades;
 static int inhibit_checks = 1;
 static prop_t *news_ref;
+
+#ifdef __APPLE__
+static void
+open_signed_apple_release(void *opaque)
+{
+  arch_open_external_url("https://github.com/kolbicz/Movian/releases/latest");
+}
+#endif
 
 #if STOS
 static const char *ctrlbase_stos = "http://upgrade.movian.tv/stos/2";
@@ -641,6 +657,63 @@ check_upgrade_err(const char *msg)
 }
 
 
+/*
+ * The legacy M7 update feed has historically contained literal line breaks
+ * inside changelog strings and, at times, trailing commas. Try strict JSON
+ * first, then repair only those two legacy formatting errors.
+ */
+static char *
+normalize_legacy_upgrade_json(const char *src)
+{
+  size_t len = strlen(src);
+  char *dst = malloc(len * 2 + 1);
+  char *d = dst;
+  int in_string = 0;
+  int escaped = 0;
+
+  for(size_t i = 0; i < len; i++) {
+    unsigned char c = src[i];
+
+    if(in_string) {
+      if(escaped) {
+        *d++ = c;
+        escaped = 0;
+      } else if(c == '\\') {
+        *d++ = c;
+        escaped = 1;
+      } else if(c == '"') {
+        *d++ = c;
+        in_string = 0;
+      } else if(c == '\n' || c == '\r' || c == '\t') {
+        *d++ = '\\';
+        *d++ = c == '\t' ? 't' : 'n';
+        if(c == '\r' && i + 1 < len && src[i + 1] == '\n')
+          i++;
+      } else {
+        *d++ = c;
+      }
+      continue;
+    }
+
+    if(c == '"') {
+      in_string = 1;
+      *d++ = c;
+    } else if(c == ',') {
+      size_t j = i + 1;
+      while(j < len && (src[j] == ' ' || src[j] == '\t' ||
+                        src[j] == '\r' || src[j] == '\n'))
+        j++;
+      if(j == len || (src[j] != ']' && src[j] != '}'))
+        *d++ = c;
+    } else {
+      *d++ = c;
+    }
+  }
+  *d = 0;
+  return dst;
+}
+
+
 /**
  *
  */
@@ -679,6 +752,13 @@ check_upgrade(int set_news)
   }
 
   json = htsmsg_json_deserialize(buf_cstr(b));
+  if(json == NULL) {
+    char *normalized = normalize_legacy_upgrade_json(buf_cstr(b));
+    json = htsmsg_json_deserialize(normalized);
+    free(normalized);
+    if(json != NULL)
+      TRACE(TRACE_INFO, "Upgrade", "Repaired legacy update manifest JSON");
+  }
   buf_release(b);
 
   if(json == NULL) {
@@ -1138,6 +1218,11 @@ install_locked(struct artifact_queue *aq)
       return;
   }
 
+#ifdef __ANDROID__
+  android_install_apk(gconf.upgrade_path);
+  return;
+#endif
+
   move_files_into_place(aq);
 
   TRACE(TRACE_INFO, "upgrade", "All done, restarting");
@@ -1194,8 +1279,14 @@ upgrade_cb(void *opaque, prop_event_t event, ...)
       const event_payload_t *ep = (const event_payload_t *)e;
       if(!strcmp(ep->payload, "checkUpdates"))
 	check_upgrade(0);
-      if(!strcmp(ep->payload, "install"))
+      if(!strcmp(ep->payload, "install")) {
+#ifdef __APPLE__
+	/* Apple releases must remain signed as a complete app bundle. */
+	open_signed_apple_release(NULL);
+#else
 	install();
+#endif
+      }
     }
     break;
 
@@ -1251,8 +1342,13 @@ upgrade_init(void)
 {
   const char *fname = gconf.upgrade_path ?: gconf.binary;
 
+#ifdef __APPLE__
+  /* iOS has no standalone executable path, but can still query updates. */
+  (void)fname;
+#else
   if(fname == NULL)
     return;
+#endif
 
 #if STOS
   stos_get_current_version();
@@ -1265,11 +1361,23 @@ upgrade_init(void)
   archname = "ps3";
 #endif
 
+#ifdef __ANDROID__
+  artifact_type = "apk";
+  archname = "android";
+#endif
+
 #ifdef __APPLE__
-  if(gconf.upgrade_path == NULL)
-    return;
+  /*
+   * Keep the repository check and update UI enabled so Apple builds show the
+   * server version and changelog. Installation is redirected in upgrade_cb().
+   */
+  (void)install; /* Retain the shared updater code without invoking it. */
   artifact_type = "bin";
+#if TARGET_OS_OSX && defined(__arm64__)
+  archname = "osx-arm";
+#else
   archname = "osx";
+#endif
 #endif
 
   if(artifact_type == NULL || archname == NULL)
@@ -1290,10 +1398,10 @@ upgrade_init(void)
   setting_create(SETTING_MULTIOPT, dir,
                  SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Upgrade to releases from")),
-                 SETTING_STORE("upgrade", "track-5-0"),
-                 SETTING_OPTION("stable",  _p("Stable")),
-                 SETTING_OPTION("testing", _p("Testing")),
-                 SETTING_OPTION_CSTR("master", "Bleeding Edge (Very unstable)"),
+                 SETTING_STORE("upgrade", "track-7-0-mod"),
+//                 SETTING_OPTION("stable",  _p("Stable")),
+//                 SETTING_OPTION("testing", _p("Testing")),
+                 SETTING_OPTION_CSTR("master", "M7"),
                  SETTING_CALLBACK(set_upgrade_track, NULL),
                  SETTING_MUTEX(&upgrade_mutex),
                  NULL);

@@ -19,9 +19,9 @@
 	<key>CFBundleSignature</key>
 	<string>SHTI</string>
 	<key>CFBundleShortVersionString</key>
-	<string>5.2.0</string>
+	<string>7.0.272</string>
 	<key>CFBundleVersion</key>
-	<string>2026080304</string>
+	<string>2026080305</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>NSMainNibFile</key>

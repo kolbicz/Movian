@@ -92,7 +92,13 @@
       });
 
       widget(container_z, {
-        ListItemHighlight();
+        /* Do not spill slider hover state to the full sidebar row. Without a
+         * focusable separator, that state can appear over adjacent gaps. */
+        widget(quad, {
+          fhpSpill: true;
+          additive: true;
+          alpha: 0.2 * isNavFocused();
+        });
         height: 1em;
 
         widget(container_x, {

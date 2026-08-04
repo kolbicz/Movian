@@ -57,7 +57,7 @@ static htsmsg_t *sp_cfg;
 static int
 subtitle_score(const subtitle_provider_t *sp)
 {
-  return (1 + num_subtitle_providers - sp->sp_prio) * 1000;
+  return (1 + num_subtitle_providers - sp->sp_prio2) * 1000;
 }
 
 /**
@@ -115,6 +115,20 @@ sp_set_autosel(void *aux, int autosel)
   htsmsg_store_save(sp_cfg, "subtitleproviders");
 }
 
+/**
+ *
+ */
+static void
+sp_set_prio(void *aux, int prio)
+{
+  subtitle_provider_t *sp = aux;
+  sp->sp_prio = prio;
+
+  htsmsg_t *c = htsmsg_get_map(sp_cfg, sp->sp_id);
+  htsmsg_delete_field(c, "prio_int");
+  htsmsg_add_u32(c, "prio_int", sp->sp_prio);
+  htsmsg_store_save(sp_cfg, "subtitleproviders");
+}
 
 /**
  *
@@ -122,7 +136,7 @@ sp_set_autosel(void *aux, int autosel)
 static int
 sp_prio_cmp(const subtitle_provider_t *a, const subtitle_provider_t *b)
 {
-  return a->sp_prio - b->sp_prio;
+  return a->sp_prio2 - b->sp_prio2;
 }
 
 
@@ -136,12 +150,13 @@ subtitle_provider_register(subtitle_provider_t *sp, const char *id,
                            int default_autosel)
 {
   sp->sp_id = strdup(id);
-  sp->sp_prio = default_prio ?: 1000000;
+  sp->sp_prio = default_prio ?: 190;
+  sp->sp_prio2 = sp->sp_prio;
 
   sp->sp_enabled = default_enable;
   sp->sp_autosel = default_autosel;
   sp->sp_settings =settings_add_dir(subtitle_settings_group,
-                                    title, subtype, NULL, NULL, NULL);
+                                    title, subtype, NULL, NULL, NULL, "01");
 
   prop_tag_set(sp->sp_settings, &subtitle_providers, sp);
 
@@ -151,7 +166,7 @@ subtitle_provider_register(subtitle_provider_t *sp, const char *id,
   if(c != NULL) {
     sp->sp_enabled = htsmsg_get_u32_or_default(c, "enabled", sp->sp_enabled);
     sp->sp_autosel = htsmsg_get_u32_or_default(c, "autosel", sp->sp_autosel);
-    sp->sp_prio    = htsmsg_get_u32_or_default(c, "prio",    sp->sp_prio);
+    sp->sp_prio    = htsmsg_get_u32_or_default(c, "prio_int",    sp->sp_prio);
   } else {
     htsmsg_add_msg(sp_cfg, sp->sp_id, htsmsg_create_map());
   }
@@ -172,7 +187,20 @@ subtitle_provider_register(subtitle_provider_t *sp, const char *id,
                    SETTING_MUTEX(&subtitle_provider_mutex),
                    NULL);
 
+  sp->sp_setting_prio =
+    setting_create(SETTING_INT, sp->sp_settings, 0,
+                   SETTING_VALUE(sp->sp_prio),
+				   SETTING_RANGE(10, 200),
+				   SETTING_STEP(5),
+                   SETTING_TITLE(_p("Source priority")),
+                   SETTING_CALLBACK(sp_set_prio, sp),
+                   SETTING_MUTEX(&subtitle_provider_mutex),
+                   NULL);
+
+	settings_create_separator(sp->sp_settings, _p("Restart required after 'Source priority' change"));
+
   num_subtitle_providers++;
+  sp->sp_prio2 = sp->sp_prio;
   TAILQ_INSERT_SORTED(&subtitle_providers, sp, sp_link, sp_prio_cmp,
                       subtitle_provider_t);
 
@@ -214,6 +242,7 @@ subtitle_provider_unregister(subtitle_provider_t *sp)
   num_subtitle_providers--;
   setting_destroy(sp->sp_setting_enabled);
   setting_destroy(sp->sp_setting_autosel);
+  setting_destroy(sp->sp_setting_prio);
   hts_mutex_unlock(&subtitle_provider_mutex);
   free(sp->sp_id);
   prop_destroy(sp->sp_settings);
@@ -372,7 +401,7 @@ fs_sub_scan_dir(sub_scanner_t *ss, const char *url, const char *video,
 
     if(fde->fde_type == CONTENT_DIR || fde->fde_type == CONTENT_SHARE) {
 
-      if(descend_all || !strcasecmp(filename, "subs")) {
+      if(descend_all || !strcasecmp(filename, "subs") || !strcasecmp(filename, "subtitle")) {
 	fs_sub_scan_dir(ss, rstr_get(fde->fde_url), video, descend_all,
 			level - 1, sp1, sp2, lang);
 
@@ -451,7 +480,10 @@ sub_scanner_thread(void *aux)
 
   int cnt = 0;
   TAILQ_FOREACH(sp, &subtitle_providers, sp_link)
-    sp->sp_prio = ++cnt;
+    sp->sp_prio2 = ++cnt;
+
+  //TAILQ_FOREACH(sp, &subtitle_providers, sp_link)
+  //  ++cnt;
 
   v = alloca(cnt * sizeof(void *));
   cnt = 0;
@@ -475,8 +507,17 @@ sub_scanner_thread(void *aux)
   if(!(ss->ss_beflags & BACKEND_VIDEO_NO_FS_SCAN)) {
     char parent[URL_MAX];
     if(!fa_parent(parent, sizeof(parent), ss->ss_url))
+    {
       fs_sub_scan_dir(ss, parent, fname, 0, 2,
 		      sp_same_filename, sp_any_filename, NULL);
+	  /*
+	  snprintf(parent, sizeof(parent), "%sSubs", parent);
+	  //TRACE(TRACE_DEBUG, "Subscanner", "Trying %s", parent);
+
+      fs_sub_scan_dir(ss, parent, fname, 1, 2,
+		      sp_any_filename, sp_any_filename, NULL);
+	  */
+	}
   }
 
   hts_mutex_lock(&subtitle_provider_mutex);
@@ -517,6 +558,9 @@ sub_scanner_create(const char *url, prop_t *proproot,
 {
   int noscan = va->title == NULL && va->imdb == NULL && !va->hash_valid;
 
+  if(noscan)
+    return NULL;
+
   TRACE(TRACE_DEBUG, "Subscanner",
         "%s subtitle scan for %s (imdbid:%s) "
         "year:%d season:%d episode:%d duration:%d opensubhash:%016"PRIx64,
@@ -529,8 +573,6 @@ sub_scanner_create(const char *url, prop_t *proproot,
         duration,
         va->opensubhash);
 
-  if(noscan)
-    return NULL;
 
   sub_scanner_t *ss = calloc(1, sizeof(sub_scanner_t));
   hts_mutex_init(&ss->ss_mutex);
@@ -588,10 +630,10 @@ subtitle_provider_handle_move(subtitle_provider_t *sp,
   int prio = 0;
 
   TAILQ_FOREACH(sp, &subtitle_providers, sp_link) {
-    sp->sp_prio = ++prio;
+    sp->sp_prio2 = ++prio;
     htsmsg_t *c = htsmsg_get_map(sp_cfg, sp->sp_id);
-    htsmsg_delete_field(c, "prio");
-    htsmsg_add_u32(c, "prio", sp->sp_prio);
+    htsmsg_delete_field(c, "prio_int");
+    htsmsg_add_u32(c, "prio_int", sp->sp_prio);
   }
   htsmsg_store_save(sp_cfg, "subtitleproviders");
 }
@@ -686,27 +728,32 @@ subtitles_init_settings(prop_concat_t *pc)
 
   //----------------------------------------------------------
 
-  settings_create_separator(s, _p("Central subtitle folder"));
-
-  setting_create(SETTING_STRING, s, SETTINGS_INITIAL_UPDATE | SETTINGS_DIR,
-                 SETTING_TITLE(_p("Path to central folder")),
-                 SETTING_CALLBACK(set_central_dir, NULL),
-                 SETTING_STORE("subtitles", "subtitlefolder"),
-                 NULL);
-
   settings_create_separator(s, _p("Subtitle size and positioning"));
 
   subtitle_settings.scaling_setting =
     setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                    SETTING_TITLE(_p("Subtitle size")),
-                   SETTING_VALUE(100),
+                   SETTING_VALUE(110),
                    SETTING_RANGE(30, 500),
                    SETTING_STEP(5),
                    SETTING_UNIT_CSTR("%"),
                    SETTING_STORE("subtitles", "scale"),
+				   SETTING_WRITE_INT(&subtitle_settings.subtile_scale),
                    SETTING_VALUE_ORIGIN("global"),
                    NULL);
 
+/*
+    setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
+                   SETTING_TITLE(_p("Subtitle size (DRM7)")),
+                   SETTING_VALUE(100),
+                   SETTING_RANGE(30, 200),
+                   SETTING_STEP(5),
+                   SETTING_UNIT_CSTR("%"),
+                   SETTING_STORE("subtitles", "drm_scale"),
+				   SETTING_WRITE_INT(&subtitle_settings.drm_scale),
+                   SETTING_VALUE_ORIGIN("global"),
+                   NULL);
+*/
   subtitle_settings.align_on_video_setting =
     setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
                    SETTING_TITLE(_p("Force subtitles to reside on video frame")),
@@ -728,10 +775,11 @@ subtitles_init_settings(prop_concat_t *pc)
     setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                    SETTING_TITLE(_p("Subtitle vertical displacement")),
                    SETTING_RANGE(-300, 300),
+				   SETTING_VALUE(10),
                    SETTING_STEP(5),
                    SETTING_UNIT_CSTR("px"),
-                   SETTING_UNIT_CSTR("px"),
-                   SETTING_STORE("subtitles", "vdisplace"),
+                   SETTING_STORE("subtitles", "vdisplace2"),
+				   SETTING_WRITE_INT(&subtitle_settings.vdisplace),
                    SETTING_VALUE_ORIGIN("global"),
                    NULL);
 
@@ -739,30 +787,30 @@ subtitles_init_settings(prop_concat_t *pc)
     setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                    SETTING_TITLE(_p("Subtitle horizontal displacement")),
                    SETTING_RANGE(-300, 300),
+				   SETTING_VALUE(0),
                    SETTING_STEP(5),
-                   SETTING_UNIT_CSTR("px"),
-                   SETTING_UNIT_CSTR("px"),
-                   SETTING_STORE("subtitles", "hdisplace"),
+				   SETTING_UNIT_CSTR("px"),
+                   SETTING_STORE("subtitles", "hdisplace2"),
                    SETTING_VALUE_ORIGIN("global"),
                    NULL);
 
   setting_create(SETTING_STRING, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Color")),
-                 SETTING_VALUE("FFFFFF"),
+                 SETTING_VALUE("AAAAAA"),
                  SETTING_STORE("subtitles", "color"),
                  SETTING_CALLBACK(set_subtitle_color, NULL),
                  NULL);
 
   setting_create(SETTING_STRING, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Shadow color")),
-                 SETTING_VALUE("000000"),
+                 SETTING_VALUE("171717"),
                  SETTING_STORE("subtitles", "shadowcolor"),
                  SETTING_CALLBACK(set_subtitle_shadow_color, NULL),
                  NULL);
 
   setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Shadow offset")),
-                 SETTING_VALUE(2),
+                 SETTING_VALUE(3),
                  SETTING_RANGE(0, 10),
                  SETTING_STEP(1),
                  SETTING_UNIT_CSTR("px"),
@@ -779,7 +827,7 @@ subtitles_init_settings(prop_concat_t *pc)
 
   setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Outline size")),
-                 SETTING_VALUE(1),
+                 SETTING_VALUE(2),
                  SETTING_RANGE(0, 4),
                  SETTING_STEP(1),
                  SETTING_UNIT_CSTR("px"),
@@ -787,10 +835,36 @@ subtitles_init_settings(prop_concat_t *pc)
                  SETTING_WRITE_INT(&subtitle_settings.outline_size),
                  NULL);
 
+  setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Bounding box opacity")),
+                 SETTING_VALUE(75),
+                 SETTING_RANGE(0, 100),
+                 SETTING_STEP(5),
+                 SETTING_UNIT_CSTR("%"),
+                 SETTING_STORE("subtitles", "boundingbox"),
+                 SETTING_WRITE_INT(&subtitle_settings.bounding_box),
+                 NULL);
+
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+				 SETTING_VALUE(0),
                  SETTING_TITLE(_p("Ignore embedded styling")),
-                 SETTING_STORE("subtitles", "styleoverride"),
+                 SETTING_STORE("subtitles", "styleoverride3"),
                  SETTING_WRITE_BOOL(&subtitle_settings.style_override),
+                 NULL);
+
+  setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+				 SETTING_VALUE(1),
+                 SETTING_TITLE(_p("Remove SDH commentary")),
+                 SETTING_STORE("subtitles", "sdhoverride"),
+                 SETTING_WRITE_BOOL(&subtitle_settings.sdh_override),
+                 NULL);
+
+  settings_create_separator(s, _p("Central subtitle folder"));
+
+  setting_create(SETTING_STRING, s, SETTINGS_INITIAL_UPDATE | SETTINGS_DIR,
+                 SETTING_TITLE(_p("Path to central folder")),
+                 SETTING_CALLBACK(set_central_dir, NULL),
+                 SETTING_STORE("subtitles", "subtitlefolder"),
                  NULL);
 }
 
@@ -828,42 +902,55 @@ subtitles_init_providers(prop_concat_t *pc)
   sp_embedded =
     subtitle_provider_create("showtime_embedded_subs",
                              _p("Subtitles embedded in video file"),
-                             400000, "video", 1, 1);
+                             10 /*400000*/, "video", 1, 1);
 
   //------------------------------------------------
 
   sp_same_filename =
     subtitle_provider_create("showtime_same_filename",
                              _p("Subtitles with matching filename in same folder as video"),
-                             500000, "subtitle", 1, 1);
-
-  //------------------------------------------------
-
-  sp_any_filename =
-    subtitle_provider_create("showtime_any_filename",
-                             _p("Any subtitle in same folder as video"),
-                             501000, "subtitle", 0, 1);
+                             20 /*500000*/, "subtitle", 1, 1);
 
   //------------------------------------------------
 
   sp_central_dir_same_filename =
     subtitle_provider_create("showtime_central_dir_same_filename",
                              _p("Subtitles with matching filename in central folder"),
-                             502000, "subtitle", 1, 1);
+                             30 /*502000*/, "subtitle", 0, 1);
+
+
+  //------------------------------------------------
+
+  sp_any_filename =
+    subtitle_provider_create("showtime_any_filename",
+                             _p("Any subtitle in same folder as video"),
+                             40 /*501000*/, "subtitle", 0, 0);
 
   //------------------------------------------------
 
   sp_central_dir_any_filename =
     subtitle_provider_create("showtime_central_dir_any_filename",
                              _p("Any subtitle in central folder"),
-                             503000, "subtitle", 0, 1);
+                             50 /*503000*/, "subtitle", 0, 0);
 
 
-  int prio = 0;
+
+  /*subtitle_provider_t *sp;
+  TAILQ_FOREACH(sp, &subtitle_providers, sp_link) {
+    sp->sp_prio2 = sp->sp_prio;
+  }
+  */
+
+  /*int prio = 0;
   subtitle_provider_t *sp;
   TAILQ_FOREACH(sp, &subtitle_providers, sp_link) {
     sp->sp_prio = ++prio;
   }
+  */
+	int prio = 0;
+  subtitle_provider_t *sp;
+  TAILQ_FOREACH(sp, &subtitle_providers, sp_link)
+    sp->sp_prio2 = ++prio;
 
 }
 
@@ -878,10 +965,11 @@ subtitles_init(void)
 
   prop_t *s = settings_add_dir(NULL, _p("Subtitles"), "subtitle", NULL,
                                _p("Generic settings for video subtitles"),
-                               "settings:subtitles");
+                               "settings:subtitles", "03");
 
   prop_concat_t *pc = prop_concat_create(prop_create(s, "nodes"));
 
-  subtitles_init_providers(pc);
   subtitles_init_settings(pc);
+
+  subtitles_init_providers(pc);
 }

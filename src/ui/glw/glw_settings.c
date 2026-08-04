@@ -175,6 +175,7 @@ is_probably_image(const char *filename)
     !strcasecmp(e, "bmp") ||
     !strcasecmp(e, "gif") ||
     !strcasecmp(e, "jpg") ||
+	!strcasecmp(e, "webp") ||
     !strcasecmp(e, "jpeg");
 }
 
@@ -346,6 +347,8 @@ glw_settings_init(void)
 
   prop_t *s = glw_settings.gs_settings;
 
+  settings_create_separator(s, _p("Look"));
+
   glw_settings.gs_setting_size =
     setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                    SETTING_TITLE(_p("Font and icon size")),
@@ -380,7 +383,14 @@ glw_settings_init(void)
                    SETTING_WRITE_BOOL(&glw_settings.gs_wrap),
                    SETTING_STORE("glw", "wrap"),
                    NULL);
-
+/*
+    setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+                   SETTING_TITLE(_p("Debug Log")),
+                   SETTING_VALUE(0),
+                   SETTING_WRITE_BOOL(&glw_settings.gs_debuglog),
+                   SETTING_STORE("glw", "debuglog"),
+                   NULL);
+*/
 #ifdef __linux__
   glw_settings.gs_setting_wheel_mapping =
     setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
@@ -390,11 +400,21 @@ glw_settings_init(void)
                    NULL);
 #endif
 
+	setting_create(SETTING_MULTIOPT, s, SETTINGS_INITIAL_UPDATE,
+                   SETTING_TITLE(_p("Loading Indicator")),
+				   SETTING_OPTION("0", _p("Colors")),
+				   SETTING_OPTION("1", _p("Blue")),
+				   SETTING_OPTION("2", _p("White")),
+                   SETTING_WRITE_INT(&glw_settings.gs_loading_color),
+                   SETTING_STORE("glw", "loading_color"),
+                   NULL);
+
   settings_create_separator(s, _p("Background"));
 
   glw_settings.gs_setting_custom_bg =
     setting_create(SETTING_STRING, s, SETTINGS_INITIAL_UPDATE | SETTINGS_FILE,
                    SETTING_TITLE(_p("Custom background image")),
+				   SETTING_VALUE("dataroot://res/static/m7bg.jpg"),
                    SETTING_STORE("glw", "custom_bg"),
                    SETTING_CALLBACK(set_custom_bg, NULL),
                    NULL);
@@ -404,12 +424,12 @@ glw_settings_init(void)
   glw_settings.gs_setting_screensaver_timer =
     setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                    SETTING_TITLE(_p("Screensaver delay")),
-                   SETTING_VALUE(10),
+                   SETTING_VALUE(1),
                    SETTING_RANGE(0, 60),
 		   SETTING_ZERO_TEXT(_p("Off")),
                    SETTING_UNIT_CSTR("min"),
                    SETTING_WRITE_INT(&glw_settings.gs_screensaver_delay),
-                   SETTING_STORE("glw", "screensaver"),
+                   SETTING_STORE("glw", "screensaver2"),
                    NULL);
 
   glw_settings.gs_setting_bing_image =
@@ -435,9 +455,9 @@ glw_settings_init(void)
     setting_create(SETTING_INT, s, SETTINGS_INITIAL_UPDATE,
                    SETTING_TITLE(_p("Seconds per image")),
                    SETTING_WRITE_PROP(id),
-                   SETTING_VALUE(15),
-                   SETTING_RANGE(5, 60),
-                   SETTING_STORE("glw", "screensaverimageduration"),
+                   SETTING_VALUE(30),
+                   SETTING_RANGE(5, 120),
+                   SETTING_STORE("glw", "screensaverimageduration2"),
                    NULL);
   prop_ref_dec(id);
 

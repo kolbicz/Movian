@@ -12,7 +12,7 @@ widget(backdrop, {
 			      select($self.status.canUpgrade, "upgrade",
 				     select($self.status.canUninstall, "uninstall",
 					    void)))));
-  
+
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
 
   widget(container_x, {
@@ -23,7 +23,7 @@ widget(backdrop, {
       source: "dataroot://res/svg/Plugin.svg";
       shadow: true;
     });
-    
+
     widget(label, {
       TextStyleItem();
       color: select(isFocused(), 1.0, 0.6);
@@ -46,7 +46,7 @@ widget(backdrop, {
       padding: 3;
       alpha: $self.status.canUpgrade || $self.status.cantUpgrade;
       color: select(isFocused(), 1.0, 0.6);
-      source: select($self.status.cantUpgrade, 
+      source: select($self.status.cantUpgrade,
 		     "dataroot://res/svg/Alert.svg",
 		     "dataroot://res/svg/ArrowUp.svg");
     });
@@ -57,7 +57,7 @@ widget(backdrop, {
       source: select($self.status.installed,
 		     "plugin-installed.png",
 		     "plugin-notinstalled.png");
-		     
+
     });
 
   });

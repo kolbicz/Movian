@@ -153,7 +153,8 @@ typedef struct media_buf {
 
 } media_buf_t;
 
-#define mb_buffered_size(mb) MAX((mb)->mb_size, 4096)
+// #define mb_buffered_size(mb) MAX((mb)->mb_size, 4096)
+#define mb_buffered_size(mb) ((mb)->mb_size)
 
 void copy_mbm_from_mb(media_buf_meta_t *mbm, const media_buf_t *mb);
 

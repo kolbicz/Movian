@@ -35,6 +35,7 @@
 #include "notifications.h"
 #include "misc/minmax.h"
 #include "fileaccess/fileaccess.h"
+#include "htsmsg/htsmsg_store.h"
 
 #define bcprintf(x...) // printf(x)
 
@@ -521,7 +522,7 @@ blobcache_get(const char *key, const char *stash, int pad,
 
   now = time(NULL);
 
-  const int clock_ok = now >= 1426926328;
+  const int clock_ok = now >= 1736690590;
 
   int expired = now > p->bi_expiry && clock_ok;
 
@@ -616,7 +617,7 @@ blobcache_get(const char *key, const char *stash, int pad,
  *
  */
 int
-blobcache_get_meta(const char *key, const char *stash, 
+blobcache_get_meta(const char *key, const char *stash,
 		   char **etagp, time_t *mtimep)
 {
   uint64_t dk = digest_key(key, stash);
@@ -865,6 +866,9 @@ cache_clear(void *opaque, prop_event_t event, ...)
   save_index();
   hts_mutex_unlock(&cache_lock);
   notify_add(NULL, NOTIFY_INFO, NULL, 3, _("Cache cleared"));
+
+  htsmsg_store_remove("httpcookies");
+  notify_add(NULL, NOTIFY_INFO, NULL, 2, _("HTTP cookies cleared (restart required)"));
 }
 
 
@@ -877,7 +881,7 @@ flushthread(void *aux)
 {
   blobcache_flush_t *bf;
 
-  sleep(3);
+  //sleep(3);
 
   prune_stale();
 
@@ -897,7 +901,7 @@ flushthread(void *aux)
     time_t now;
     time(&now);
 
-    if(now < 1426926328) { // 2015-03-21 (when this code was written)
+    if(now < 1736690590) { // 2015-03-21 (when this code was written)
       hts_cond_wait_timeout(&cache_cond, &cache_lock, 1000);
     } else {
       bcstate = BLOBCACHE_RUN;

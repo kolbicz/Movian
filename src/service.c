@@ -343,7 +343,7 @@ service_create_managed(const char *id0,
 
   s->s_settings = settings_add_dir(gconf.settings_sd,
                                    prop_create(s->s_root, "title"),
-                                   type, icon, NULL, NULL);
+                                   type, icon, NULL, NULL, "99");
 
   s->s_setting_enabled =
     setting_create(SETTING_BOOL, s->s_settings, SETTINGS_INITIAL_UPDATE,

@@ -333,6 +333,10 @@ widget(container_z, {
 
   widget(container_y, {
     align: top;
+    // The page header is layered above the OSD loaders. Leaving it active
+    // while a selector is open exposes its navigator Back action through the
+    // foreground audio/subtitle window and exits plugin playback on touch.
+    hidden: $clone.osdpage;
     PageHeader(join(" - ",
                     $self.media.metadata.title,
                     translate($clone.osdpage, void,

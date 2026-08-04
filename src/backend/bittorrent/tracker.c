@@ -138,8 +138,20 @@ tracker_create(const char *url)
     if(port == -1)
       port = 6969;
 
+	if(btg.btg_tcpudp == 1) // TCP ONLY
+	{
+		//tracker_trace(t, "Will not add UDP tracker");
+		return NULL;
+	}
+
     t = tracker_udp_create(hostname, port);
   } else if(!strcmp(protostr, "http") || !strcmp(protostr, "https")) {
+
+	if(btg.btg_tcpudp == 2) // UDP ONLY
+	{
+		//tracker_trace(t, "Will not add HTTP tracker");
+		return NULL;
+	}
     t = tracker_http_create();
 
   } else {
@@ -234,12 +246,21 @@ torrent_announce_all(torrent_t *to)
 static void
 tracker_init(void)
 {
+ //-qB5020- -qB5160
+ btg.btg_peer_id[0] = '-';
+ btg.btg_peer_id[1] = 'q';
+ btg.btg_peer_id[2] = 'B';
+ btg.btg_peer_id[3] = '5';
+ btg.btg_peer_id[4] = '1';
+ btg.btg_peer_id[5] = '6';
+ btg.btg_peer_id[6] = '0';
+ btg.btg_peer_id[7] = '-';
   uint32_t x = arch_get_ts();
-  for(int i = 0; i < 20; i++) {
+  for(int i = 8; i < 20; i++) {
     x = x * 1664525 + 1013904223;
     btg.btg_peer_id[i] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_."[x & 0x3f];
   }
-
+  //TRACE(TRACE_INFO, "BITTORRENT", "PeerID: %s", btg.btg_peer_id);
   tracker_new_torrent_signal = asyncio_add_worker(tracker_new_torrent);
 }
 

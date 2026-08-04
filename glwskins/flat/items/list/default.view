@@ -6,7 +6,7 @@ widget(container_z, {
   ListItemBevel();
   ListItemHighlight();
 
-  focusable: true;
+  focusable: select($self.metadata.autofocus, 1.5, 1.0);
   onEvent(activate, navOpen($self.url, void, $self, $parent.model, void, $parent.url));
   onEvent(itemMenu, eventWithProp(defaultInfo, $self));
 
@@ -18,7 +18,7 @@ widget(container_z, {
         "skin://icons/" +
         select($self.subtype,
                "ic_" + $self.subtype + "_48px",
-               translate($self.type,  "ic_help_48px",
+               translate($self.type,  "ic_videocam_48px",
 		         "server",    "server",
 		         "share",     "ic_folder_shared_48px",
 		         "store",     "ic_shopping_cart_48px",

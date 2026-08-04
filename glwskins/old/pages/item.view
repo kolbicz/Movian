@@ -25,9 +25,9 @@
 widget(container_y, {
   alpha: 1 - iir(clamp(getLayer(), 0, 1), 7) * 0.5;
   blur: iir(clamp(getLayer(), 0, 1), 7);
-  
+
   padding: [40, 20];
-  
+
   widget(container_x, {
     spacing: 20;
     widget(image, {
@@ -36,21 +36,21 @@ widget(container_y, {
       align: topLeft;
       aspectConstraint: true;
     });
-    
-    
+
+
     widget(container_y, {
       filterConstraintY: true;
       filterConstraintX: true;
       spacing: 2;
       cloner($self.model.nodes, loader, {
 	source: "skin://itemviews/" + $self.type + ".view";
-      });	  
-      
+      });
+
       VerticalSeparator();
 
       widget(list_x, {
 	spacing: $ui.size * 2;
-	
+
 	cloner($self.model.actions, container_z, {
 	  hidden: !$self.enabled;
 	  widget(label, {
@@ -63,7 +63,7 @@ widget(container_y, {
 			      "pageevent", deliverEvent($self.eventSink, $self.data),
 			      "navopen", navOpen($self.data)
 			     ));
-	  });	
+	  });
 	});
       });
     });

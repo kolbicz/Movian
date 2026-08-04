@@ -45,11 +45,11 @@ service_instance_t *
 si_find(struct service_instance_list *services, const char *id)
 {
   service_instance_t *si;
-  
+
   LIST_FOREACH(si, services, si_link)
   if(!strcmp(si->si_id, id))
     return si;
-  
+
   return NULL;
 }
 
@@ -100,7 +100,7 @@ sd_add_service(service_instance_t *si, const char *title,
 
   si->si_settings = settings_add_dir_cstr(gconf.settings_sd,
 					  title, NULL, NULL,
-					  description, NULL);
+					  description, NULL, "99");
 
   si->si_service = service_create(si->si_id, NULL, si->si_url, NULL, NULL,
 				  si->si_probe, 0,
@@ -139,7 +139,7 @@ sd_add_service(service_instance_t *si, const char *title,
  * HTSP service creator
  */
 void
-sd_add_service_htsp(service_instance_t *si, const char *name, 
+sd_add_service_htsp(service_instance_t *si, const char *name,
 		    const char *host, int port)
 {
   char url[URL_MAX];
@@ -154,7 +154,7 @@ sd_add_service_htsp(service_instance_t *si, const char *name,
  * Webdav service creator
  */
 void
-sd_add_service_webdav(service_instance_t *si, const char *name, 
+sd_add_service_webdav(service_instance_t *si, const char *name,
                       const char *host, int port, const char *path,
 		      const char *contents)
 {

@@ -7,7 +7,7 @@ widget(container_z, {
   onEvent(activate, playTrackFromSource($self, $parent.model));
   onEvent(itemMenu, eventWithProp(defaultInfo, $self));
 
-  focusable: true;
+  focusable: select($self.metadata.autofocus, 1.5, 1.0);
 
   widget(container_x, {
     style: "ListItem";

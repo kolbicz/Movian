@@ -41,8 +41,8 @@ nanosvg_decode(buf_t *buf, const image_meta_t *im,
   buf = buf_make_writable(buf);
 
   NSVGimage *image = nsvgParse(buf_str(buf), "px", 96.0f,
-                               NSVG_RGB(255,255,255),
-                               NSVG_RGB(0,0,0));
+                               (NSVG_RGB(255,255,255)),
+                               (NSVG_RGB(0,0,0)));
   buf_release(buf);
   if(image == NULL) {
     snprintf(errbuf, errlen, "Unable to parse SVG file");

@@ -175,10 +175,12 @@ setting_add_cstr(prop_t *parent, const char *title, const char *type, int flags)
 static void
 settings_add_dir_sup(prop_t *root,
 		     const char *url, const char *icon,
-		     const char *subtype)
+		     const char *subtype, const char *order)
 {
   prop_set(root, "url", PROP_ADOPT_RSTRING, backend_prop_make(root, url));
   prop_set(root, "subtype", PROP_SET_STRING, subtype);
+  if(order != NULL)
+	  prop_setv(root, "metadata", "order", NULL, PROP_SET_STRING, order);
 
   if(icon != NULL)
     prop_setv(root, "metadata", "icon", NULL, PROP_SET_STRING, icon);
@@ -192,14 +194,35 @@ settings_add_dir_sup(prop_t *root,
 prop_t *
 settings_add_dir(prop_t *parent, prop_t *title, const char *subtype,
 		 const char *icon, prop_t *shortdesc,
-		 const char *url)
+		 const char *url, const char *order)
 {
   prop_t *p = setting_add(parent, title, "settings", 0);
 
   if(shortdesc != NULL)
     prop_setv(p, "metadata", "shortdesc", NULL, PROP_SET_LINK, shortdesc);
 
-  settings_add_dir_sup(p, url, icon, subtype);
+  //if(order != NULL)
+	//prop_setv(p, "metadata", "order", NULL, PROP_SET_LINK, order);
+
+  settings_add_dir_sup(p, url, icon, subtype, order);
+  return p;
+}
+
+
+/**
+ *
+ */
+prop_t *
+settings_add_dir_cstr(prop_t *parent, const char *title, const char *subtype,
+		      const char *icon, const char *shortdesc,
+		      const char *url, const char *order)
+{
+  prop_t *p = setting_add_cstr(parent, title, "settings", 0);
+
+  if(shortdesc != NULL)
+    prop_setv(p, "metadata", "shortdesc", NULL, PROP_SET_STRING, shortdesc);
+
+  settings_add_dir_sup(p, url, icon, subtype, order);
   return p;
 }
 
@@ -224,24 +247,6 @@ settings_add_url(prop_t *parent, prop_t *title,
 
   if(icon != NULL)
     prop_setv(p, "metadata", "icon", NULL, PROP_SET_STRING, icon);
-}
-
-
-/**
- *
- */
-prop_t *
-settings_add_dir_cstr(prop_t *parent, const char *title, const char *subtype,
-		      const char *icon, const char *shortdesc,
-		      const char *url)
-{
-  prop_t *p = setting_add_cstr(parent, title, "settings", 0);
-
-  if(shortdesc != NULL)
-    prop_setv(p, "metadata", "shortdesc", NULL, PROP_SET_STRING, shortdesc);
-
-  settings_add_dir_sup(p, url, icon, subtype);
-  return p;
 }
 
 
@@ -717,7 +722,7 @@ setting_create(int type, prop_t *model, int flags, ...)
   const char *str, *str2;
   int initial_int = 0;
   const char *initial_str = NULL;
-  int min = 0, max = 100, step = 1; // Just something
+  int min = INT32_MIN, max = INT32_MAX, step = 1; // Just something
   const char **optlist;
   va_list ap;
   int i32;
@@ -1354,7 +1359,8 @@ settings_init(void)
   struct prop_nf *pnf;
 
   pnf = prop_nf_create(s1, settings_nodes, NULL, PROP_NF_AUTODESTROY);
-  prop_nf_sort(pnf, "node.metadata.title", 0, 0, NULL, 1);
+  //prop_nf_sort(pnf, "node.metadata.title", 0, 0, NULL, 1);
+  prop_nf_sort(pnf, "node.metadata.order", 0, 0, NULL, 1);
 
   gconf.settings_apps = prop_create(settings_root, "apps");
   gconf.settings_sd = prop_create(settings_root, "sd");
@@ -1369,13 +1375,16 @@ settings_init(void)
 
   n = prop_create_root(NULL);
   settings_add_url(n,
-		   _p("About"), "about", NULL, NULL, "page:about",
+		   _p("About"), "movian", NULL, NULL, "page:about",
+		   SETTINGS_RAW_NODES);
+
+  settings_add_url(n,
+		   _p("Developer"), "dev", NULL, NULL, "settings:dev",
 		   SETTINGS_RAW_NODES);
 
   d = prop_create_root(NULL);
   prop_set(d, "type", PROP_SET_STRING, "separator");
   prop_concat_add_source(pc, n, d);
-
 
   // Applications and plugins
 
@@ -1397,9 +1406,9 @@ settings_init(void)
 
 
   gconf.settings_network =
-    settings_add_dir(NULL, _p("Network settings"), "network", NULL,
+    settings_add_dir(NULL, _p("Network"), "network", NULL,
                      _p("Network services, etc"),
-                     "settings:network");
+                     "settings:network", "09");
 
   // Add configurable system name
 
@@ -1411,6 +1420,29 @@ settings_init(void)
                  SETTING_STORE("netinfo", "sysname"),
                  NULL);
 
+  /* Keep the existing high-throughput SMB2 behavior as the default. */
+  gconf.enable_smb_large_read = 1;
+  setting_create(SETTING_BOOL, gconf.settings_network, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("SMB Large Buffer")),
+                 SETTING_VALUE(1),
+                 SETTING_WRITE_BOOL(&gconf.enable_smb_large_read),
+                 SETTING_STORE("netinfo", "smb_large_read"),
+                 NULL);
+
+  /* 1 = SMB1, 2 = SMB2, 3 = both. Preserve our enabled SMB2 EAs. */
+  gconf.enable_smb_xattr = 3;
+  setting_create(SETTING_MULTIOPT, gconf.settings_network,
+                 SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("SMB Extended Attributes")),
+                 SETTING_VALUE("3"),
+                 SETTING_OPTION("0", _p("Off")),
+                 SETTING_OPTION("1", _p("SMBv1")),
+                 SETTING_OPTION("2", _p("SMBv2")),
+                 SETTING_OPTION("3", _p("On")),
+                 SETTING_WRITE_INT(&gconf.enable_smb_xattr),
+                 SETTING_STORE("netinfo", "smb_xattr"),
+                 NULL);
+
 
   // Look and feel settings
 
@@ -1418,7 +1450,7 @@ settings_init(void)
     settings_add_dir(NULL, _p("Look and feel"),
 		     "display", NULL,
 		     _p("Fonts and user interface styling"),
-		     "settings:lookandfeel");
+		     "settings:lookandfeel", "05");
 
   gconf.settings_look_and_feel =
     prop_concat_create(prop_create(lnf, "nodes"));
@@ -1541,14 +1573,15 @@ static void
 init_dev_settings(void)
 {
   gconf.settings_dev = settings_add_dir(prop_create_root(NULL),
-				  _p("Developer settings"), NULL, NULL,
+				  _p("Developer"), NULL, NULL,
 				  _p("Settings useful for developers"),
-				  "settings:dev");
+				  "settings:dev", "99");
 
-  prop_t *r = setting_add(gconf.settings_dev, NULL, "info", 0);
-  prop_set_string(prop_create(r, "description"),
-		  "Settings for developers. If you don't know what this is, don't touch it");
+  //prop_t *r = setting_add(gconf.settings_dev, NULL, "info", 0);
+  //prop_set_string(prop_create(r, "description"),
+	//	  "Settings for developers. If you don't know what this is, don't touch it");
 
+/*
 #if ENABLE_UPGRADE
   add_dev_bool("Enable binreplace",
 	       "binreplace", &gconf.enable_bin_replace);
@@ -1561,12 +1594,29 @@ init_dev_settings(void)
   add_dev_bool("Disable analytics",
 	       "disableanalytics", &gconf.disable_analytics);
 #endif
-
+*/
+  gconf.enable_nav_always_close = 1;
+/*
   add_dev_bool("Always close pages when pressing back",
-	       "navalwaysclose", &gconf.enable_nav_always_close);
+	       "navalwaysclose3", &gconf.enable_nav_always_close);
+*/
 
   add_dev_bool("Disable HTTP connection reuse",
 	       "nohttpreuse", &gconf.disable_http_reuse);
+
+	gconf.hls_limit_sd = 1024;
+	setting_create(SETTING_MULTIOPT, gconf.settings_dev, SETTINGS_INITIAL_UPDATE,
+				 SETTING_TITLE_CSTR("HLS SD width limit"),
+				 SETTING_STORE("dev", "hls_limit_sd"),
+				 SETTING_VALUE("1024"),
+				 SETTING_OPTION_CSTR("1024", "1024 px"),
+				 SETTING_OPTION_CSTR("720", "720 px"),
+				 SETTING_OPTION_CSTR("640", "640 px"),
+				 SETTING_OPTION_CSTR("512", "512 px"),
+				 SETTING_OPTION_CSTR("320", "320 px"),
+				 SETTING_OPTION_CSTR("256", "256 px"),
+				 SETTING_WRITE_INT(&gconf.hls_limit_sd),
+				 NULL);
 
   add_dev_bool("Enable indexer option",
 	       "enable_indexer", &gconf.enable_indexer);
@@ -1695,7 +1745,7 @@ setting_get_dir(const char *key)
       tvsettings = settings_add_dir(NULL, _p("TV Control"),
                                     "display", NULL,
                                     _p("Configure communications with your TV"),
-                                    "settings:tv");
+                                    "settings:tv", "99");
     }
     r = tvsettings;
   } else if((k2 = mystrbegins(key, "general:")) != NULL) {
@@ -1712,7 +1762,7 @@ setting_get_dir(const char *key)
     if(general == NULL) {
       general = settings_add_dir(NULL, _p("General"), NULL, NULL,
                                  _p("System related settings"),
-                                 "settings:general");
+                                 "settings:general", "00");
       prop_concat_t *pc = prop_concat_create(prop_create(general, "nodes"));
 
 

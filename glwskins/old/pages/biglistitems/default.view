@@ -13,8 +13,8 @@ widget(container_x, {
 /*
     widget(image, {
       color: select(isFocused(), 1.0, 0.6);
-      source: 
-      "dataroot://res/svg/" + 
+      source:
+      "dataroot://res/svg/" +
 	translate($self.type,  "File",
 		  "archive",   "Archive",
 		  "artist",    "User",
@@ -30,12 +30,12 @@ widget(container_x, {
 	.shadow = true;
     });
 */
-    
+
     widget(image, {
       source: $self.metadata.icon;
       align: right;
     });
-    
+
   });
 
 

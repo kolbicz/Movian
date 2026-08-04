@@ -1,6 +1,6 @@
 
 widget(backdrop, {
-  
+
   source: "skin://pages/listitems/highlight.png";
 
   alphaSelf: iir(isFocused() * 1, 8) + isHovered() * 0.1;
@@ -13,12 +13,12 @@ widget(backdrop, {
       shadow: true;
       outline: true;
       color: select(isFocused(), 1.0, 0.6);
-      
+
       caption: $self.metadata.title + ":";
       ellipsize: true;
     });
 
-    
+
     widget(backdrop, {
       filterConstraintX: true;
       source: "skin://graphics/plate8.png";
@@ -35,7 +35,7 @@ widget(backdrop, {
 	padding: [8, -4];
 	alphaSelf: 0.5;
 	borderOnly: true;
-	
+
 	widget(text, {
 	  filterConstraintX: true;
 	  focusable: true;

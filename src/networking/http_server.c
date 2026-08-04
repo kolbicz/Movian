@@ -492,9 +492,7 @@ http_error(http_connection_t *hc, int error, const char *fmt, ...)
   }
 
 
-  TRACE(TRACE_ERROR, "HTTPSRV", "%d %s%s%s", error, hc->hc_url_orig,
-	*extra ? " -- " : "", extra),
-
+  //TRACE(TRACE_ERROR, "HTTPSRV", "%d %s%s%s", error, hc->hc_url_orig, *extra ? " -- " : "", extra);
 
     htsbuf_qprintf(&hq,
 		   "<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\r\n"
