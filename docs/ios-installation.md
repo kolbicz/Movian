@@ -60,7 +60,8 @@ and Zebra:
 - `Movian-iOS-7.0.272-rootless.deb`: modern rootless jailbreaks, Debian
   architecture `iphoneos-arm64`, installed below `/var/jb`.
 - `Movian-iOS-7.0.272-roothide.deb`: RootHide environments, including Relaxin
-  on supported iOS 17 devices; Debian architecture `iphoneos-arm64e`.
+  on supported iOS 17 devices; Debian architecture `iphoneos-arm64e`. Use the
+  newest available Relaxin release before installing this package.
 
 Download the package matching the jailbreak, open it in the package manager,
 and install it. The package refreshes the application cache automatically. If
@@ -76,7 +77,9 @@ entitlements required by the official RootHide developer specification.
 Relaxin is new jailbreak software. Confirm that the exact Relaxin release,
 device and iOS version are supported before installing packages, and keep a
 working backup. This package targets the RootHide architecture used by Relaxin;
-it does not install or modify the jailbreak itself.
+it does not install or modify the jailbreak itself. The package includes the
+GPU and IOSurface user-client entitlements required by Movian's OpenGL ES
+renderer; older Relaxin builds may not handle that configuration reliably.
 
 To rebuild both packages after building the IPA:
 

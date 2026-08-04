@@ -43,6 +43,10 @@ make_package() {
   SUFFIX=$4
   MINIMUM_IOS=$5
   ENTITLEMENTS=${6:-}
+  CONTROL_VERSION=$VERSION
+  if [ "$SCHEME" = roothide ]; then
+    CONTROL_VERSION="${VERSION}-1"
+  fi
   PKGROOT="$WORKDIR/$SCHEME"
   APPDIR="$PKGROOT$PREFIX/Applications"
   CONTROL="$WORKDIR/control-$SCHEME"
@@ -60,7 +64,7 @@ make_package() {
   cat > "$CONTROL/control" <<EOF
 Package: $PACKAGE_ID
 Name: Movian M7
-Version: $VERSION
+Version: $CONTROL_VERSION
 Architecture: $ARCH
 Description: Media center with modern HLS, plugins and SMB2/SMB3 support.
 Section: Multimedia
@@ -124,6 +128,27 @@ cat > "$ROOTHIDE_ENTITLEMENTS" <<'EOF'
   <true/>
   <key>com.apple.private.security.storage.AppDataContainers</key>
   <true/>
+  <!-- RootHide platform applications do not inherit the ordinary third-party
+       app sandbox's OpenGL ES allowance. Movian needs these GPU and IOSurface
+       user clients to create its EAGLContext on iOS 17. -->
+  <key>com.apple.security.exception.iokit-user-client-class</key>
+  <array>
+    <string>AGXCommandQueue</string>
+    <string>AGXDevice</string>
+    <string>AGXDeviceUserClient</string>
+    <string>AGXSharedUserClient</string>
+    <string>IOGPUDeviceUserClient</string>
+    <string>IOAccelContext</string>
+    <string>IOAccelContext2</string>
+    <string>IOAccelDevice</string>
+    <string>IOAccelDevice2</string>
+    <string>IOAccelSharedUserClient</string>
+    <string>IOAccelSharedUserClient2</string>
+    <string>IOAccelSubmitter2</string>
+    <string>IOSurfaceAcceleratorClient</string>
+    <string>IOSurfaceRootUserClient</string>
+    <string>IOMobileFramebufferUserClient</string>
+  </array>
 </dict>
 </plist>
 EOF
