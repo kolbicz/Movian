@@ -6,9 +6,14 @@ ROOTDIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUILDDIR="${ROOTDIR}/build.ios"
 VERSION=${VERSION:-7.0.272}
 IPA=${IPA:-"${BUILDDIR}/Movian-iOS-${VERSION}-unsigned.ipa"}
+PACKAGE_REVISION=${PACKAGE_REVISION:-1}
+ROOTLESS_MINIMUM_IOS=${ROOTLESS_MINIMUM_IOS:-16.0}
+ROOTLESS_SUFFIX=${ROOTLESS_SUFFIX:-rootless}
+BUILD_ROOTLESS_ONLY=${BUILD_ROOTLESS_ONLY:-0}
 PACKAGE_ID=${PACKAGE_ID:-tv.movian.m7}
 LDID=${LDID:-ldid}
 DPKG_DEB=${DPKG_DEB:-dpkg-deb}
+DEB_COMPRESSION=${DEB_COMPRESSION:-gzip}
 
 if [ ! -f "$IPA" ]; then
   echo "Missing IPA: $IPA" >&2
@@ -49,7 +54,7 @@ make_package() {
   SUFFIX=$4
   MINIMUM_IOS=$5
   ENTITLEMENTS=${6:-}
-  CONTROL_VERSION="${VERSION}-1"
+  CONTROL_VERSION="${VERSION}-${PACKAGE_REVISION}"
   PKGROOT="$WORKDIR/$SCHEME"
   APPDIR="$PKGROOT$PREFIX/Applications"
   CONTROL="$PKGROOT/DEBIAN"
@@ -98,7 +103,8 @@ EOF
   chmod 0755 "$CONTROL/postinst" "$CONTROL/prerm"
 
   rm -f "$OUTPUT"
-  "$DPKG_DEB" --build --root-owner-group -Zgzip "$PKGROOT" "$OUTPUT"
+  "$DPKG_DEB" --build --root-owner-group -Z"$DEB_COMPRESSION" \
+    "$PKGROOT" "$OUTPUT"
   echo "Jailbreak package: $OUTPUT"
 }
 
@@ -111,6 +117,16 @@ cat > "$ROOTLESS_ENTITLEMENTS" <<'EOF'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>platform-application</key>
+  <true/>
+  <key>com.apple.private.security.no-container</key>
+  <true/>
+  <key>com.apple.private.security.no-sandbox</key>
+  <true/>
+  <key>com.apple.private.security.storage.AppBundles</key>
+  <true/>
+  <key>com.apple.private.security.storage.AppDataContainers</key>
+  <true/>
   <key>com.apple.security.exception.iokit-user-client-class</key>
   <array>
     <string>AGXCommandQueue</string>
@@ -132,8 +148,13 @@ cat > "$ROOTLESS_ENTITLEMENTS" <<'EOF'
 </dict>
 </plist>
 EOF
-make_package rootless iphoneos-arm64 /var/jb rootless 16.0 \
+make_package rootless iphoneos-arm64 /var/jb "$ROOTLESS_SUFFIX" \
+  "$ROOTLESS_MINIMUM_IOS" \
   "$ROOTLESS_ENTITLEMENTS"
+
+if [ "$BUILD_ROOTLESS_ONLY" = 1 ]; then
+  exit 0
+fi
 
 # RootHide is a distinct scheme. Its package manager maps /Applications into
 # the randomized jailbreak root and identifies packages as iphoneos-arm64e.

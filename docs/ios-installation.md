@@ -1,8 +1,9 @@
 # Installing Movian on iOS and iPadOS
 
-Movian 7.0.272 requires iOS or iPadOS 16 or newer on an arm64 device. Choose
-one installation method; do not install the IPA and a jailbreak package at the
-same time because both provide the same application.
+The current Movian 7.0.272 IPA and conventional rootless package require iOS
+or iPadOS 15 or newer on an arm64 device. The RootHide/Relaxin package requires
+iOS 17 or newer. Choose one installation method; do not install the IPA and a
+jailbreak package at the same time because both provide the same application.
 
 ## TrollStore
 
@@ -58,8 +59,8 @@ The release supplies two Debian packages for package managers such as Sileo
 and Zebra:
 
 - `Movian-iOS-7.0.272-rootless.deb`: modern rootless jailbreaks, Debian
-  architecture `iphoneos-arm64`, installed below `/var/jb`. It includes the
-  GPU/IOSurface permissions needed by Movian's OpenGL ES renderer.
+  architecture `iphoneos-arm64`, iOS 15 or newer, installed below `/var/jb`.
+  It includes the platform-app and GPU/IOSurface permissions needed by Movian.
 - `Movian-iOS-7.0.272-roothide.deb`: RootHide environments, including Relaxin
   on supported iOS 17 devices; Debian architecture `iphoneos-arm64e`. Use the
   newest available Relaxin release before installing this package.

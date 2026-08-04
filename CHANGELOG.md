@@ -9,6 +9,11 @@
   (`iphoneos-arm64e`) Debian package generation from the unsigned IPA.
 - Added the GPU/IOSurface user-client entitlements required for Movian's
   OpenGL ES renderer in RootHide and conventional rootless environments.
+- Fixed jailbreak installs starting without an Apple application container,
+  which caused `(null)/kvstore` and `(null)/bc2` errors and a black screen.
+  Movian now verifies its data directories, uses a writable mobile-library
+  fallback, and gives conventional rootless builds the required platform-app
+  entitlements.
 - Integrated M7 7.0.271 network updates: WS-Discovery for modern Windows SMB
   hosts and Network settings for SMB2 large reads and per-protocol extended
   attributes, while retaining SMB2 administrative shares and EA support.

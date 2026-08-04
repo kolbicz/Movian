@@ -8,6 +8,7 @@ OBJDIR="${OUTDIR}/obj"
 LIBDIR="${OUTDIR}/lib"
 SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
 CC=$(xcrun --sdk iphoneos -f clang)
+IOS_DEPLOYMENT_TARGET=${IOS_DEPLOYMENT_TARGET:-16.0}
 
 rm -rf "${OUTDIR}"
 mkdir -p "${OBJDIR}" "${LIBDIR}"
@@ -31,7 +32,7 @@ for SOURCE in ${SOURCES}; do
   "${CC}" \
     -arch arm64 \
     -isysroot "${SDKROOT}" \
-    -miphoneos-version-min=16.0 \
+    -miphoneos-version-min="${IOS_DEPLOYMENT_TARGET}" \
     -O2 \
     -fPIC \
     -std=gnu99 \

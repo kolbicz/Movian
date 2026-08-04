@@ -23,6 +23,42 @@
 
 const char *appversion;
 
+static char *
+ios_storage_path(NSSearchPathDirectory directory, NSString *leaf)
+{
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+  NSString *primary = [NSSearchPathForDirectoriesInDomains(directory,
+                                                            NSUserDomainMask,
+                                                            YES) firstObject];
+  if(primary != nil)
+    [candidates addObject:[primary stringByAppendingPathComponent:leaf]];
+
+  // Platform applications installed by jailbreak package managers do not
+  // always receive an Apple application container. Keep their state in the
+  // mobile user's Library instead of constructing paths from a nil result.
+  [candidates addObject:[[ @"/var/mobile/Library/Movian"
+                           stringByAppendingPathComponent:leaf]
+                         stringByStandardizingPath]];
+  [candidates addObject:[[[NSTemporaryDirectory()
+                           stringByAppendingPathComponent:@"Movian"]
+                          stringByAppendingPathComponent:leaf]
+                         stringByStandardizingPath]];
+
+  for(NSString *candidate in candidates) {
+    NSError *error = nil;
+    if([fm createDirectoryAtPath:candidate
+      withIntermediateDirectories:YES
+                       attributes:nil
+                            error:&error] &&
+       access([candidate fileSystemRepresentation], W_OK) == 0)
+      return strdup([candidate fileSystemRepresentation]);
+
+    NSLog(@"Movian cannot use storage directory %@: %@", candidate, error);
+  }
+  return NULL;
+}
+
 void
 arch_open_external_url(const char *url)
 {
@@ -240,8 +276,6 @@ static void set_media_type(void *opaque, const char *str)
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     // Override point for customization after application launch.
 
-  char path[PATH_MAX];
-
   NSDictionary* infoDict = [[NSBundle mainBundle] infoDictionary];
   NSString* version = [infoDict objectForKey:@"CFBundleShortVersionString"];
   appversion = strdup([version UTF8String]);
@@ -249,30 +283,22 @@ static void set_media_type(void *opaque, const char *str)
   gconf.concurrency = (int)[[NSProcessInfo processInfo] activeProcessorCount];
 
 #ifdef TARGET_OS_TV
-  NSArray *paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+  gconf.persistent_path = ios_storage_path(NSCachesDirectory, @"persistent");
 #else
-  NSArray *paths = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES);
+  gconf.persistent_path = ios_storage_path(NSLibraryDirectory, @"persistent");
 #endif
-  NSString *libraryDirectory = [paths objectAtIndex:0];
-  snprintf(path, sizeof(path), "%s/persistent", [libraryDirectory UTF8String]);
-  mkdir(path, 0777);
-  gconf.persistent_path = strdup(path);
-  
-  paths = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
-  libraryDirectory = [paths objectAtIndex:0];
-  snprintf(path, sizeof(path), "%s/cache", [libraryDirectory UTF8String]);
-  mkdir(path, 0777);
-  gconf.cache_path = strdup(path);
+  gconf.cache_path = ios_storage_path(NSCachesDirectory, @"cache");
   
   posix_init();
   
   main_init();
   
-  paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-  NSString *docsdir = [paths objectAtIndex:0];
-
-  service_createp("Files", _p("Files"), [docsdir UTF8String],
-                  "files", NULL, 0, 1, SVC_ORIGIN_SYSTEM);
+  NSString *docsdir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
+                                                            NSUserDomainMask,
+                                                            YES) firstObject];
+  if(docsdir != nil)
+    service_createp("Files", _p("Files"), [docsdir fileSystemRepresentation],
+                    "files", NULL, 0, 1, SVC_ORIGIN_SYSTEM);
 
   MPRemoteCommandCenter *remoteCommandCenter = [MPRemoteCommandCenter sharedCommandCenter];
   
