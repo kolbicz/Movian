@@ -323,7 +323,9 @@ tcp_connect_arch(const net_addr_t *addr,
 
   fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK);
 
-  net_change_ndelay(fd, 1);
+  // getstreamsocket() already enabled TCP_NODELAY on this socket. Repeating
+  // the option after connect is redundant and fails spuriously on some iOS
+  // versions even though the option remains enabled.
   tc->read = tcp_read;
   tc->write = tcp_write;
   return tc;

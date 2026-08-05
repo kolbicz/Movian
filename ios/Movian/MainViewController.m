@@ -15,6 +15,7 @@
 #include "ui/glw/glw.h"
 #include "ui/longpress.h"
 #include "navigator.h"
+#include "main.h"
 
 #include "media/media.h"
 
@@ -173,8 +174,10 @@
   field.secureTextEntry = password != 0;
   field.textColor = UIColor.whiteColor;
   field.tintColor = UIColor.systemBlueColor;
-  field.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.96];
-  field.borderStyle = UITextBorderStyleRoundedRect;
+  // The GLW search field already paints its own background. UIKit's rounded
+  // border adds an extra left inset, making the caret jump when editing starts.
+  field.backgroundColor = UIColor.clearColor;
+  field.borderStyle = UITextBorderStyleNone;
   field.clearButtonMode = UITextFieldViewModeWhileEditing;
   field.returnKeyType = UIReturnKeyDone;
   field.autocorrectionType = UITextAutocorrectionTypeNo;
@@ -275,6 +278,39 @@ glw_in_fullwindow(void *opaque, int val)
   });
 }
 
+static void
+glw_share_log(void *opaque, int val)
+{
+  if(!val)
+    return;
+
+  MainViewController *controller = (__bridge MainViewController *)opaque;
+  prop_t *share = prop_create(controller.gr->gr_prop_ui, "shareLog");
+  prop_set_int(share, 0);
+
+  if(gconf.cache_path == NULL)
+    return;
+
+  NSString *path = [NSString stringWithFormat:@"%s/log/%s-0.log",
+                                             gconf.cache_path, APPNAME];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if(![[NSFileManager defaultManager] fileExistsAtPath:path])
+      return;
+
+    NSURL *url = [NSURL fileURLWithPath:path];
+    UIActivityViewController *activity =
+      [[UIActivityViewController alloc] initWithActivityItems:@[url]
+                                       applicationActivities:nil];
+    UIPopoverPresentationController *popover = activity.popoverPresentationController;
+    if(popover != nil) {
+      popover.sourceView = controller.view;
+      popover.sourceRect = CGRectMake(CGRectGetMidX(controller.view.bounds),
+                                      0, 1, 1);
+    }
+    [controller presentViewController:activity animated:YES completion:nil];
+  });
+}
+
 
 
 
@@ -314,6 +350,13 @@ glw_in_fullwindow(void *opaque, int val)
                  PROP_TAG_NAME("ui", "fullwindow"),
                  PROP_TAG_COURIER, gr->gr_courier,
                  PROP_TAG_CALLBACK_INT, glw_in_fullwindow, NULL,
+                 PROP_TAG_ROOT, gr->gr_prop_ui,
+                 NULL);
+
+  prop_subscribe(0,
+                 PROP_TAG_NAME("ui", "shareLog"),
+                 PROP_TAG_COURIER, gr->gr_courier,
+                 PROP_TAG_CALLBACK_INT, glw_share_log, (__bridge void *)self,
                  PROP_TAG_ROOT, gr->gr_prop_ui,
                  NULL);
 

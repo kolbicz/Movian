@@ -14,6 +14,14 @@
   Movian now verifies its data directories, uses a writable mobile-library
   fallback, and gives conventional rootless builds the required platform-app
   entitlements.
+- Added native iOS log sharing through the system Share Sheet and AirDrop.
+- Fixed iOS playback-menu caption hit testing, selector buttons reopening after
+  dismissal, and the horizontal alignment of the native search editor.
+- Moved iOS persistent databases out of the purgeable cache directory while
+  automatically migrating existing settings and bookmarks.
+- Replaced the unavailable iOS Arial Unicode probe with a bundled fallback,
+  classified successful SQLite WAL recovery correctly, and removed a redundant
+  TCP option call that generated a false playback error.
 - Integrated M7 7.0.271 network updates: WS-Discovery for modern Windows SMB
   hosts and Network settings for SMB2 large reads and per-protocol extended
   attributes, while retaining SMB2 administrative shares and EA support.

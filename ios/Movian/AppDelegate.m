@@ -59,6 +59,31 @@ ios_storage_path(NSSearchPathDirectory directory, NSString *leaf)
   return NULL;
 }
 
+static void
+ios_migrate_legacy_persistent_path(void)
+{
+#if !TARGET_OS_TV
+  NSString *library = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory,
+                                                            NSUserDomainMask,
+                                                            YES) firstObject];
+  NSString *caches = [NSSearchPathForDirectoriesInDomains(NSCachesDirectory,
+                                                           NSUserDomainMask,
+                                                           YES) firstObject];
+  if(library == nil || caches == nil)
+    return;
+
+  NSString *destination = [library stringByAppendingPathComponent:@"persistent"];
+  NSString *legacy = [caches stringByAppendingPathComponent:@"persistent"];
+  NSFileManager *fm = [NSFileManager defaultManager];
+  if(![fm fileExistsAtPath:destination] && [fm fileExistsAtPath:legacy]) {
+    NSError *error = nil;
+    if(![fm moveItemAtPath:legacy toPath:destination error:&error])
+      NSLog(@"Movian could not migrate persistent data to %@: %@",
+            destination, error);
+  }
+#endif
+}
+
 void
 arch_open_external_url(const char *url)
 {
@@ -282,9 +307,10 @@ static void set_media_type(void *opaque, const char *str)
 
   gconf.concurrency = (int)[[NSProcessInfo processInfo] activeProcessorCount];
 
-#ifdef TARGET_OS_TV
+#if TARGET_OS_TV
   gconf.persistent_path = ios_storage_path(NSCachesDirectory, @"persistent");
 #else
+  ios_migrate_legacy_persistent_path();
   gconf.persistent_path = ios_storage_path(NSLibraryDirectory, @"persistent");
 #endif
   gconf.cache_path = ios_storage_path(NSCachesDirectory, @"cache");

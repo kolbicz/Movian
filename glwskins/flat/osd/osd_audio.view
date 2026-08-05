@@ -16,8 +16,7 @@ widget(container_y, {
 		clickable: true;
 		onEvent(activate, {
 			$clone.osdpage = 0;
-			$clone.showPlaydeck = 1;
-			focus("audio-btn");
+			$clone.showPlaydeck = 0;
 		}, true, true, true);
 		widget(quad, {
 			color: 0;

@@ -6,8 +6,14 @@ widget(container_y, {
 	width: 22em;
 	id: "osd_main";
 
-	widget(container_x, {
+	widget(container_z, {
 		height: 3em;
+		clickable: true;
+		onEvent(activate, {
+			$clone.osdpage = 0;
+			$clone.showPlaydeck = 0;
+		}, true, true, true);
+		widget(container_x, {
 		widget(container_y, {
 			align: center;
 			width: 4em;
@@ -24,6 +30,7 @@ widget(container_y, {
 			});
 		});
 		space(1);
+		});
 	});
 
 	widget(list_y, {

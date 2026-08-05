@@ -8,6 +8,11 @@
 
     widget(container_z, {
       height: 3em;
+      clickable: true;
+      onEvent(activate, {
+        $clone.osdpage = 0;
+        $clone.showPlaydeck = 0;
+      }, true, true, true);
       widget(label, {
         style: "osdsettingtitle";
         align: center;

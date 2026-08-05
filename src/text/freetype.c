@@ -1637,7 +1637,12 @@ freetype_init(void)
   //freetype_load_default_font(url, 0);
 
 #ifdef __APPLE__
+#if TARGET_OS_IPHONE
+  freetype_load_default_font(
+    "dataroot://res/fonts/liberation/LiberationSans-Regular.ttf", 1);
+#else
   freetype_load_default_font("file:///Library/Fonts/Arial Unicode.ttf", 1);
+#endif
 #endif
 }
 

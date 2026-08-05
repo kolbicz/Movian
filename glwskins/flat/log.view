@@ -90,10 +90,19 @@ align: center;
 caption: _("System log");
 size: 1.5em;
 });
-});
 
-widget(dummy, {
+widget(container_y, {
+align: center;
 width: 4em;
+clickable: true;
+navFocusable: false;
+onEvent(activate, {$ui.shareLog = 1;});
+widget(icon, {
+color: 0.5 + iir(isHovered(), 4);
+size: 1.7em;
+source: "dataroot://res/svg/Share.svg";
+});
+});
 });
 });
 });

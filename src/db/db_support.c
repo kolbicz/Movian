@@ -685,7 +685,10 @@ db_log(void *aux, int code, const char *str)
      non_extended_code == SQLITE_SCHEMA)
     return;
 
-  TRACE(code == 0 ? TRACE_INFO : TRACE_ERROR,
+  // SQLITE_NOTICE includes successful automatic recovery operations such as
+  // replaying a WAL after an unclean exit. It is diagnostic, not corruption.
+  TRACE(code == 0 || non_extended_code == SQLITE_NOTICE ?
+        TRACE_INFO : TRACE_ERROR,
         "SQLITE", "%s (code: 0x%x)", str, code);
 }
 
