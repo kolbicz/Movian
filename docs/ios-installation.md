@@ -88,3 +88,6 @@ To rebuild both packages after building the IPA:
 
 The packaging script requires `ldid` (`brew install ldid` on macOS). RootHide
 packaging follows the [official RootHide developer guide](https://github.com/roothide/Developer).
+The Debian package version matches the Movian application version without a
+separate packaging suffix; subsequent public releases increment the final
+version component.
