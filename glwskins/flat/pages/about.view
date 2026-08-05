@@ -28,6 +28,13 @@ widget(container_y, {
     align: center;
   });
 
+  widget(label, {
+    hidden: isVoid($core.app.installationType);
+    caption: $core.app.installationType;
+    alpha: 0.5;
+    align: center;
+  });
+
   widget(dummy, {
     height: 2em;
   });
@@ -52,19 +59,33 @@ widget(container_y, {
     height: 0.5em;
   });
 
-  widget(label, {
-    caption: "https://movian.eu";
-    alpha: 0.7;
+  widget(container_x, {
     align: center;
+    clickable: true;
+    focusable: true;
+    onEvent(activate, navOpen("showtime:about-movian"));
+    widget(label, {
+      caption: "https://movian.eu";
+      color: [0.35, 0.65, 1];
+      alpha: 0.7 + 0.3 * isHovered();
+      align: center;
+    });
   });
 
   widget(dummy, {
     height: 0.5em;
   });
 
-  widget(label, {
-    caption: "https://paypal.me/webpluginsBG";
-    alpha: 0.6;
+  widget(container_x, {
     align: center;
+    clickable: true;
+    focusable: true;
+    onEvent(activate, navOpen("showtime:about-donate"));
+    widget(label, {
+      caption: "https://paypal.me/webpluginsBG";
+      color: [0.35, 0.65, 1];
+      alpha: 0.6 + 0.4 * isHovered();
+      align: center;
+    });
   });
 });

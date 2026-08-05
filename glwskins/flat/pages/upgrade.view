@@ -55,6 +55,7 @@ zbox({
       padding: 1em;
 
       widget(container_x, {
+        hidden: $core.upgrade.releaseNotesOnly;
         spacing: 1em;
         widget(label, {
           filterConstraintX: true;
@@ -68,7 +69,14 @@ zbox({
         });
       });
 
+      widget(label, {
+        hidden: !$core.upgrade.releaseNotesOnly;
+        caption: fmt(_("Current version: %s"), $core.app.version);
+        align: center;
+      });
+
       widget(container_x, {
+        hidden: $core.upgrade.releaseNotesOnly;
         spacing: 1em;
         widget(label, {
           filterConstraintX: true;
@@ -84,6 +92,7 @@ zbox({
 
 
       widget(deck, {
+        hidden: $core.upgrade.releaseNotesOnly;
         filterConstraintY: true;
 
         widget(label, {
@@ -166,6 +175,7 @@ zbox({
       widget(label, {
         caption: fmt(_("Changelog for %s releases"),
 		     translate($core.upgrade.track, $core.upgrade.track,
+			       "master", _("M7"),
 			       "testing", _("Testing"),
 			       "stable", _("Stable")));
         align: center;

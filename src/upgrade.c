@@ -81,6 +81,7 @@ static char *app_download_name;
 static int notify_upgrades;
 static int inhibit_checks = 1;
 static prop_t *news_ref;
+static int release_notes_only;
 
 #ifdef __APPLE__
 static void
@@ -833,20 +834,22 @@ check_upgrade(int set_news)
 
   ver = htsmsg_get_str(json, "version");
 
-  if(dlurl == NULL || dlsize == 0 || sha1 == NULL || ver == NULL) {
+  if(ver == NULL || (!release_notes_only &&
+                     (dlurl == NULL || dlsize == 0 || sha1 == NULL))) {
     prop_set_string(upgrade_error, "No URL or size present");
     goto err;
   }
 
-  hex2bin(app_download_digest, sizeof(app_download_digest), sha1);
+  if(!release_notes_only) {
+    hex2bin(app_download_digest, sizeof(app_download_digest), sha1);
 
-  mystrset(&app_download_url, dlurl);
-  mystrset(&app_download_name, name);
+    mystrset(&app_download_url, dlurl);
+    mystrset(&app_download_name, name);
+    app_download_size = dlsize;
+  }
 
   prop_set(upgrade_root, "track", PROP_SET_STRING, upgrade_track);
   prop_set(upgrade_root, "availableVersion", PROP_SET_STRING, ver);
-
-  app_download_size = dlsize;
 
   int canUpgrade = gconf.enable_omnigrade;
 
@@ -858,7 +861,9 @@ check_upgrade(int set_news)
     }
   }
 
-  if(canUpgrade) {
+  if(release_notes_only) {
+    prop_set_string(upgrade_status, "upToDate");
+  } else if(canUpgrade) {
     prop_set_string(upgrade_status, "canUpgrade");
   } else {
     prop_set_string(upgrade_status, "upToDate");
@@ -868,7 +873,7 @@ check_upgrade(int set_news)
   prop_ref_dec(news_ref);
   news_ref = NULL;
 
-  if(set_news && canUpgrade) {
+  if(set_news && canUpgrade && !release_notes_only) {
     rstr_t *r = _("%s version %s is available");
     rstr_t *s = _("Open download page");
     char buf[128];
@@ -1373,7 +1378,12 @@ upgrade_init(void)
    */
   (void)install; /* Retain the shared updater code without invoking it. */
   artifact_type = "bin";
-#if TARGET_OS_OSX && defined(__arm64__)
+#if TARGET_OS_IPHONE
+  // iOS displays the M7 master changelog but never offers in-app updates.
+  // Reuse the macOS feed because M7 does not publish a separate iOS manifest.
+  archname = "osx";
+  release_notes_only = 1;
+#elif TARGET_OS_OSX && defined(__arm64__)
   archname = "osx-arm";
 #else
   archname = "osx";
@@ -1388,6 +1398,8 @@ upgrade_init(void)
   upgrade_progress = prop_create(upgrade_root, "progress");
   upgrade_error    = prop_create(upgrade_root, "error");
   upgrade_task     = prop_create(upgrade_root, "task");
+  prop_set_int(prop_create(upgrade_root, "releaseNotesOnly"),
+               release_notes_only);
 
   // Set status to "upToDate" until we know better
 
@@ -1395,6 +1407,17 @@ upgrade_init(void)
 
   prop_t *dir = setting_get_dir("general:upgrade");
 
+#if TARGET_OS_IPHONE
+  mystrset(&upgrade_track, "master");
+
+  prop_t *p = prop_create_root(NULL);
+  prop_setv(p, "metadata", "title", NULL, PROP_SET_LINK,
+            _p("Release notes"));
+  prop_set(p, "type", PROP_SET_STRING, "movian");
+  prop_set(p, "url", PROP_SET_STRING, "showtime:upgrade");
+  if(prop_set_parent(p, prop_create(dir, "nodes")))
+    abort();
+#else
   setting_create(SETTING_MULTIOPT, dir,
                  SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Upgrade to releases from")),
@@ -1424,6 +1447,7 @@ upgrade_init(void)
 
   if(prop_set_parent(p, prop_create(dir, "nodes")))
      abort();
+#endif
 
   inhibit_checks = 0;
 
@@ -1454,7 +1478,9 @@ upgrade_refresh(void)
 static int
 upgrade_canhandle(const char *url)
 {
-  return !strcmp(url, "showtime:upgrade");
+  return !strcmp(url, "showtime:upgrade") ||
+         !strcmp(url, "showtime:about-movian") ||
+         !strcmp(url, "showtime:about-donate");
 }
 
 
@@ -1469,6 +1495,14 @@ upgrade_open_url(prop_t *page, const char *url, int sync)
     backend_page_open(page, "page:upgrade", sync);
     upgrade_refresh();
     prop_set(page, "directClose", PROP_SET_INT, 1);
+#ifdef __APPLE__
+  } else if(!strcmp(url, "showtime:about-movian")) {
+    arch_open_external_url("https://movian.eu");
+    prop_set(page, "close", PROP_SET_INT, 1);
+  } else if(!strcmp(url, "showtime:about-donate")) {
+    arch_open_external_url("https://paypal.me/webpluginsBG");
+    prop_set(page, "close", PROP_SET_INT, 1);
+#endif
   } else {
     nav_open_error(page, "Invalid URI");
   }

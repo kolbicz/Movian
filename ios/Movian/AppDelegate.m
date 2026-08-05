@@ -318,6 +318,36 @@ static void set_media_type(void *opaque, const char *str)
   posix_init();
   
   main_init();
+
+#if !TARGET_OS_TV
+  NSString *iosVersion = [[UIDevice currentDevice] systemVersion];
+#if defined(__arm64__)
+  NSString *architecture = @"ARM64";
+#elif defined(__x86_64__)
+  NSString *architecture = @"x86_64 simulator";
+#else
+  NSString *architecture = @"unknown architecture";
+#endif
+  NSString *versionDisplay = [NSString stringWithFormat:@"%s (iOS %@, %@)",
+                              appversion, iosVersion, architecture];
+
+  NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
+  NSString *installationType;
+  if([bundlePath containsString:@"/var/jb/Applications/"])
+    installationType = @"Jailbreak package (rootless)";
+  else if([bundlePath containsString:@"/var/containers/Bundle/tweaksupport/"])
+    installationType = @"Jailbreak package (RootHide)";
+  else if([bundlePath hasPrefix:@"/Applications/"])
+    installationType = @"Jailbreak package";
+  else
+    installationType = @"Sideloaded / TrollStore";
+
+  prop_t *appInfo = prop_create(prop_get_global(), "app");
+  prop_set(appInfo, "versionDisplay", PROP_SET_STRING,
+           [versionDisplay UTF8String]);
+  prop_set(appInfo, "installationType", PROP_SET_STRING,
+           [installationType UTF8String]);
+#endif
   
   NSString *docsdir = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
                                                             NSUserDomainMask,
