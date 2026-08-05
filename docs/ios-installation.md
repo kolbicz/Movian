@@ -49,6 +49,19 @@ require **Settings > Privacy & Security > Developer Mode**.
 3. Keep AltServer reachable and refresh the app before its signing period
    expires.
 
+### Impactor
+
+[Impactor](https://github.com/claration/Impactor) is an open-source,
+cross-platform sideloading application for macOS, Windows, and Linux. It can
+sign and install the Movian IPA with an Apple Account.
+
+1. Download the current Impactor build from its
+   [releases page](https://github.com/claration/Impactor/releases).
+2. Connect and trust the iOS or iPadOS device, then select
+   `Movian-iOS-7.0.272-unsigned.ipa` in Impactor.
+3. Sign and install it using the selected Apple Account. With a free account,
+   reinstall or refresh the app before its seven-day signing period expires.
+
 Do not download re-signed Movian copies from unknown IPA sites. Use the IPA
 attached to this repository's GitHub release and let the selected installer
 sign it locally.
