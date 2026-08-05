@@ -997,7 +997,16 @@ http_headers_init(struct http_header_list *l, const http_file_t *hf)
 	)
 	{ snprintf(str, sizeof(str), "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.154 Safari/537.36"); }
 	else
-	{ snprintf(str, sizeof(str), APPNAMEUSER" %s %s",	arch_get_system_type(), appversion); }
+	{
+#if defined(__APPLE__)
+	  /* Keep plugin-facing compatibility tied to the imported M7 core. */
+	  snprintf(str, sizeof(str), APPNAMEUSER" %s 7.0.272",
+	           arch_get_system_type());
+#else
+	  snprintf(str, sizeof(str), APPNAMEUSER" %s %s",
+	           arch_get_system_type(), appversion);
+#endif
+	}
 
   /*else
   if(strstr(hc->hc_hostname, "invivo.bg"))

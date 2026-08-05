@@ -1,5 +1,19 @@
 # Changelog
 
+## 7.0.272.1 - 2026-08-05
+
+### Fixed
+
+- Fixed a crash while generating thumbnails from BitTorrent-backed videos.
+  Torrent retry requests are now dispatched through the asyncio worker instead
+  of sending network data from the GLW texture-loader thread.
+- Kept the plugin-facing Apple HTTP user agent at `Movian Apple 7.0.272` while
+  introducing the independent Apple maintenance version `7.0.272.1`.
+
+### Compatibility
+
+- iOS/iPadOS 15 or newer, arm64; unsigned IPA for sideloading or TrollStore.
+
 ## 7.0.272 - 2026-08-03
 
 ### Added

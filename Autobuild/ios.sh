@@ -6,8 +6,8 @@ ROOTDIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUILDDIR="${ROOTDIR}/build.ios"
 DERIVED_DATA="${BUILDDIR}/DerivedData"
 APP="${DERIVED_DATA}/Build/Products/Release-iphoneos/Movian-iOS.app"
-IOS_DEPLOYMENT_TARGET=${IOS_DEPLOYMENT_TARGET:-16.0}
-IPA=${IPA:-"${BUILDDIR}/Movian-iOS-7.0.272-unsigned.ipa"}
+IOS_DEPLOYMENT_TARGET=${IOS_DEPLOYMENT_TARGET:-15.0}
+IPA=${IPA:-"${BUILDDIR}/Movian-iOS-7.0.272.1-unsigned.ipa"}
 
 rm -rf "${BUILDDIR}"
 mkdir -p "${BUILDDIR}/Payload"

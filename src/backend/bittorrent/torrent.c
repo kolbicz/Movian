@@ -1492,7 +1492,16 @@ torrent_load(torrent_t *to, void *buf, uint64_t offset, size_t size,
 				{
 					//TRACE(TRACE_INFO, "BT", "Piece %i: Probe: %i - Hash Wake-Up and do IO requests", piece, tfh->tfh_probe);
 					torrent_hash_wakeup();
-					torrent_io_do_requests(to);
+
+					/*
+					 * torrent_load() runs on the file-access caller's thread.  In
+					 * particular, video thumbnail generation calls it from the GLW
+					 * texture loader.  Scheduling requests directly here eventually
+					 * reaches asyncio_send(), which must only run on the asyncio
+					 * thread.  The normal load path already uses this worker; keep
+					 * retries on that same thread as well.
+					 */
+					asyncio_wakeup_worker(torrent_pendings_signal);
 				}
 
 				if 	( tp->tp_deadline != INT64_MAX && tfh->tfh_probe &&

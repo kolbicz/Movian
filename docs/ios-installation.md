@@ -14,7 +14,7 @@ iOS 17.0.1 or newer are not supported.
 
 1. Confirm that the exact device and OS version has a supported TrollStore
    installation method using the guide linked by the TrollStore project.
-2. Download `Movian-iOS-7.0.272-unsigned.ipa` on the device.
+2. Download `Movian-iOS-7.0.272.1-unsigned.ipa` on the device.
 3. Open the IPA with TrollStore, then choose **Install**.
 4. Future Movian releases can be installed over the existing app. Uninstall
    TrollStore-installed apps from inside TrollStore.
@@ -58,7 +58,7 @@ sign and install the Movian IPA with an Apple Account.
 1. Download the current Impactor build from its
    [releases page](https://github.com/claration/Impactor/releases).
 2. Connect and trust the iOS or iPadOS device, then select
-   `Movian-iOS-7.0.272-unsigned.ipa` in Impactor.
+   `Movian-iOS-7.0.272.1-unsigned.ipa` in Impactor.
 3. Sign and install it using the selected Apple Account. With a free account,
    reinstall or refresh the app before its seven-day signing period expires.
 
@@ -103,6 +103,7 @@ The packaging script requires `ldid` (`brew install ldid` on macOS). RootHide
 packaging follows the [official RootHide developer guide](https://github.com/roothide/Developer).
 The three-part application/core version remains aligned with the corresponding
 M7 source release. Apple-only revisions use a fourth public component (for
-example `7.0.272.001`) for release tags, artifacts and Debian packages, while
-the core/plugin version and Apple `CFBundleShortVersionString` remain
-`7.0.272`. A new M7 source import advances the first three components instead.
+example `7.0.272.1`) for release tags, artifacts and Debian packages. The Apple
+application displays this maintenance version, while its plugin-facing HTTP
+user agent remains aligned with the three-part M7 core version (`7.0.272`). A
+new M7 source import advances the first three components instead.
