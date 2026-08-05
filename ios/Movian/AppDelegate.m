@@ -333,10 +333,12 @@ static void set_media_type(void *opaque, const char *str)
 
   NSString *bundlePath = [[NSBundle mainBundle] bundlePath];
   NSString *installationType;
-  if([bundlePath containsString:@"/var/jb/Applications/"])
-    installationType = @"Jailbreak package (rootless)";
-  else if([bundlePath containsString:@"/var/containers/Bundle/tweaksupport/"])
+  if([bundlePath containsString:@"/var/containers/Bundle/tweaksupport/"])
     installationType = @"Jailbreak package (RootHide)";
+  else if([bundlePath containsString:@"/var/jb/Applications/"] ||
+          ([bundlePath containsString:@"/private/preboot/"] &&
+           [bundlePath containsString:@"/procursus/Applications/"]))
+    installationType = @"Jailbreak package (rootless)";
   else if([bundlePath hasPrefix:@"/Applications/"])
     installationType = @"Jailbreak package";
   else
