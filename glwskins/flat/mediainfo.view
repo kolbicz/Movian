@@ -1,132 +1,65 @@
 #import "info_include.view"
 
-#define InfoBarIn(TITLE, VAL, TEXT, HIDDEN) {
-  widget(container_x, {
-    spacing: 0.25em;
-    tableMode: true;
-    hidden: HIDDEN;
-    widget(label, {
-      InfoLabel();
-      align: right;
-      caption: TITLE + ":";
-    });
-
-    widget(container_z, {
-      width: 10em;
-      margin: [0.5em, 0, 0, 0];
-      widget(quad, {
-        color: 0.25;
-      });
-
-      widget(bar, {
-        color1: 0.5;
-        color2: 0.7;
-        fill: VAL;
-      });
-
-      widget(label, {
-        width: 10em;
-        shadow: true;
-        outline: true;
-        color: 0.95;
-        margin: [5, 3, 0, 1];
-        size: 0.83em;
-        caption: TEXT;
-        align: left;
-      });
-    });
-  });
-}
-
 widget(container_x, {
   widget(container_z, {
     widget(quad, {
-      alpha: 0.75;
+      alpha: 0.9;
       color: 0;
     });
     widget(container_y, {
       padding: 1em;
-      widget(label, {
-        hidden: !isVoid($core.media.current.url);
-        caption: _("No media loaded");
-      });
 
       widget(table, {
-        hidden: isVoid($core.media.current.url);
-
         widget(container_y, {
           InfoLine(_("Source"),
-                   $core.media.current.metadata.format ?? $core.media.current.format,
-                   isVoid($core.media.current.metadata.format ?? $core.media.current.format));
+                   $core.media.current.metadata.format ?? $core.media.current.format);
 
           InfoLine(_("Video codec"),
                    $core.media.current.video.codec,
                    isVoid($core.media.current.video.codec));
 
-          InfoLine(_("Video info"),
-                   select($core.media.current.video.bitrate > 4499,
-                     fmt("%2d fps • %d Mb/s", $core.media.current.fps,
-                         ($core.media.current.video.bitrate + 500) / 1000),
-                     fmt("%2d fps • %d kb/s", $core.media.current.fps,
-                         $core.media.current.video.bitrate)),
+          InfoLine(_("Video framerate"),
+                   fmt("%2.2f", $core.media.current.fps),
                    isVoid($core.media.current.fps));
 
+          InfoLine(_("Video bitrate"),
+                   fmt("%d kb/s", $core.media.current.video.bitrate),
+                   isVoid($core.media.current.video.codec));
+
           InfoLine(_("Audio codec"),
-                   fmt("%s • %d kb/s", $core.media.current.audio.codec,
-                       $core.media.current.audio.bitrate),
-                   isVoid($core.media.current.audio.codec));
+                   $core.media.current.audio.codec);
 
-          InfoLine(_("Audio output"),
-                   $core.media.current.audio.audio_codec_out,
-                   isVoid($core.media.current.audio.audio_codec_out));
+          InfoLine(_("Audio bitrate"),
+                   fmt("%d kb/s", $core.media.current.audio.bitrate));
 
-          InfoLine(_("Transfer speed"),
-                   fmt("%i Mb/s", $core.media.current.video.bandwidth),
-                   isVoid($core.media.current.video.bandwidth));
+          InfoLine(_("A/V diff"),
+                   translate($core.media.current.avdiffError,
+                     fmt("%d ms", $core.media.current.avdiff * 1000),
+                     1, "Huge diff",
+                     2, "Epoch mismatch",
+                     3, fmt("%d ms holding",
+                            $core.media.current.avdiff * 1000),
+                     4, fmt("%d ms catching up",
+                            $core.media.current.avdiff * 1000)),
+                   isVoid($core.media.current.avdiffError));
 
-          InfoLine(_("Connected to"),
-                   fmt("%d %s • %s %d • %s %d",
-                       $core.media.current.io.infoNodes1.conn,
-                       _("Peers"),
-                       _("Seeders"),
-                       $core.media.current.io.infoNodes1.seed,
-                       _("Peers"),
-                       $core.media.current.io.infoNodes1.peer),
-                   isVoid($core.media.current.io.infoNodes1.conn));
+          InfoBar(_("Buffer usage"),
+                  $core.media.current.buffer.current /
+                  $core.media.current.buffer.limit);
 
-          InfoLine(_("Active"),
-                   fmt("%d pcs • %s %d MB • %s %d %sb/s",
-                       $core.media.current.io.infoNodes2.pcs,
-                       _("Cache"),
-                       $core.media.current.io.infoNodes2.cch,
-                       _("Speed"),
-                       ($core.media.current.io.infoNodes2.spd > 4500 ?
-                         ($core.media.current.io.infoNodes2.spd / 1000) :
-                         $core.media.current.io.infoNodes2.spd),
-                       ($core.media.current.io.infoNodes2.spd > 4500 ? "M" : "k")),
-                   isVoid($core.media.current.io.infoNodes2.pcs));
+          InfoLine(_("Remaining buffer"),
+                   fmt("%ds", $core.media.current.buffer.delay));
 
-          InfoBarIn(_("Buffer usage"),
-                    $core.media.current.buffer.current /
-                    $core.media.current.buffer.limit,
-                    select($core.media.current.buffer.delay > 0 &&
-                           ($core.media.current.buffer.current * 8 /
-                            $core.media.current.buffer.delay) / 1000 > 4499,
-                      fmt("%d sec • %d MB • %.0f Mb/s",
-                          $core.media.current.buffer.delay,
-                          $core.media.current.buffer.current / 1048576,
-                          select($core.media.current.buffer.delay > 0,
-                            (($core.media.current.buffer.current * 8 /
-                              $core.media.current.buffer.delay) / 1000000) + 0.5f,
-                            0)),
-                      fmt("%d sec • %d MB • %.0f kb/s",
-                          $core.media.current.buffer.delay,
-                          $core.media.current.buffer.current / 1048576,
-                          select($core.media.current.buffer.delay > 0,
-                            ($core.media.current.buffer.current * 8 /
-                             $core.media.current.buffer.delay) / 1000,
-                            0))),
-                    0);
+          InfoLine(_("Video packets"),
+                   $core.media.current.video.dqlen,
+                   isVoid($core.media.current.video.codec));
+
+          InfoLine(_("Audio packets"),
+                   $core.media.current.audio.dqlen);
+
+          cloner($core.media.current.io.infoNodes, container_z, {
+            InfoLine($self.title, $self.info);
+          });
         });
       });
     });

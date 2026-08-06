@@ -119,6 +119,8 @@ glw_view_error(glw_t *parent, const char *error, const char *file, int line,
     snprintf(buf, sizeof(buf), "Error: %s", error);
   }
 
+  TRACE(TRACE_ERROR, "GLW", "%s", buf);
+
   glw_t *w = glw_create(parent->glw_root, glw_class_find_by_name("label"),
                         parent, NULL, NULL, scope, NULL, 0);
   w->glw_class->gc_set_caption(w, buf, 0);
