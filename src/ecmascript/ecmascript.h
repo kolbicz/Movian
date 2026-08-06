@@ -84,6 +84,8 @@ typedef struct es_context {
   atomic_t ec_refcount;
 
   hts_mutex_t ec_mutex;
+  hts_cond_t ec_suspend_cond;
+  int ec_suspended;
   duk_context *ec_duk;
 
   duk_context *ec_thread;

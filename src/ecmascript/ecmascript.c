@@ -608,6 +608,7 @@ es_context_create(const char *id, int flags, const char *url,
   ec->ec_bypass_file_acl_write = !!(flags & ECMASCRIPT_FILE_BYPASS_ACL_WRITE);
 
   hts_mutex_init(&ec->ec_mutex);
+  hts_cond_init(&ec->ec_suspend_cond, &ec->ec_mutex);
   atomic_set(&ec->ec_refcount, 1);
 
   ec->ec_prop_unload_destroy = prop_vec_create(16);
@@ -642,6 +643,7 @@ es_context_release(es_context_t *ec)
   if(atomic_dec(&ec->ec_refcount))
     return;
 
+  hts_cond_destroy(&ec->ec_suspend_cond);
   hts_mutex_destroy(&ec->ec_mutex);
   rstr_release(ec->ec_id);
   free(ec->ec_path);
@@ -692,6 +694,7 @@ void
 es_context_suspend(es_context_t *ec, duk_context *ctx, duk_thread_state *state)
 {
   duk_suspend(ctx, state);
+  ec->ec_suspended++;
   hts_mutex_unlock(&ec->ec_mutex);
 }
 
@@ -704,6 +707,10 @@ es_context_resume(es_context_t *ec, duk_context *ctx, duk_thread_state *state)
 {
   hts_mutex_lock(&ec->ec_mutex);
   duk_resume(ctx, state);
+  assert(ec->ec_suspended > 0);
+  ec->ec_suspended--;
+  if(ec->ec_suspended == 0)
+    hts_cond_broadcast(&ec->ec_suspend_cond);
 }
 
 
@@ -1018,7 +1025,27 @@ ecmascript_plugin_unload(const char *id)
   if(ec == NULL)
     return;
 
-  duk_context *ctx = es_context_begin(ec);
+  /*
+   * A native call may have suspended a Duktape thread while doing blocking
+   * I/O.  Do not unregister roots or destroy the heap until that thread has
+   * resumed; otherwise uninstalling a busy plugin can make duk_resume() use
+   * heap state which teardown has already invalidated.
+   */
+  atomic_inc(&ec->ec_refcount);
+  hts_mutex_lock(&ec->ec_mutex);
+  while(ec->ec_suspended)
+    hts_cond_wait(&ec->ec_suspend_cond, &ec->ec_mutex);
+
+  duk_context *ctx;
+  if(ec->ec_thread != NULL) {
+    ctx = ec->ec_thread;
+    ec->ec_thread = NULL;
+  } else {
+    int idx = duk_push_thread(ec->ec_duk);
+    ctx = duk_get_context(ec->ec_duk, idx);
+    es_root_register(ec->ec_duk, idx, ctx);
+    duk_pop(ec->ec_duk);
+  }
 
   while((er = LIST_FIRST(&ec->ec_resources_permanent)) != NULL)
     es_resource_destroy(er);
