@@ -13,7 +13,14 @@ widget(container_x, {
     widget(container_y, {
       padding: 1em;
 
+      widget(label, {
+        hidden: !isVoid($core.media.current.url);
+        caption: _("No media loaded");
+      });
+
       widget(table, {
+        hidden: isVoid($core.media.current.url);
+
         widget(container_y, {
           InfoLine(_("Source"),
                    $core.media.current.metadata.format ??
