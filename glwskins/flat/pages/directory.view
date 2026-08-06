@@ -145,7 +145,11 @@ widget(container_z, {
 	widget(container_y, {
 
 	alpha: iir($ui.showTopIcons, 4); 
-	padding: [0, 0, ($core.clock.timeFormat=="1" ? 2.5em : 3.5em), 0];
+	padding: [0, 0,
+	          select($core.app.platform == "ios" &&
+	                 $ui.orientation == "portrait",
+	                 0,
+	                 ($core.clock.timeFormat=="1" ? 2.5em : 3.5em)), 0];
 	
 	widget(container_x, {
 	space(1);

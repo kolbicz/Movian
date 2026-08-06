@@ -336,7 +336,9 @@ widget(loader, {
 time: 0.1;
 effect: blend;
 autohide: true;
-source: select($ui.mediainfo, "mediainfo.view", "");
+source: select($ui.mediainfo,
+               select($core.app.platform == "ios",
+                      "mediainfo_ios.view", "mediainfo.view"), "");
 });
 
 widget(loader, {
@@ -353,7 +355,10 @@ widget(underscan, {
 
 widget(container_y, {
 widget(label, {
-alpha: (!$ui.hideClock);
+hidden: $ui.hideClock ||
+        ($core.app.platform == "ios" &&
+         $ui.orientation == "portrait" &&
+         $nav.currentpage.model.type != "home");
 padding: [1em, 0];
 height: 3em;
 align: right;

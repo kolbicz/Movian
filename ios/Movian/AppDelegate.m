@@ -422,6 +422,7 @@ static void set_media_type(void *opaque, const char *str)
     installationType = @"Sideloaded / TrollStore";
 
   prop_t *appInfo = prop_create(prop_get_global(), "app");
+  prop_set(appInfo, "platform", PROP_SET_STRING, "ios");
   prop_set(appInfo, "versionDisplay", PROP_SET_STRING,
            [versionDisplay UTF8String]);
   prop_set(appInfo, "installationType", PROP_SET_STRING,

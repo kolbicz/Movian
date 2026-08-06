@@ -111,6 +111,9 @@ i18n_init(void)
                                 _p("System default")),
                  SETTING_OPTION("1", _p("24 Hour")),
                  SETTING_OPTION("2", _p("12 Hour")),
+                 SETTING_WRITE_PROP(prop_create(prop_create(prop_get_global(),
+                                                            "clock"),
+                                                "timeFormat")),
                  NULL);
 
 
