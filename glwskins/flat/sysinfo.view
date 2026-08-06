@@ -1,6 +1,11 @@
 #import "info_include.view"
 
 widget(container_x, {
+  clickable: true;
+  onEvent(click, {
+    $ui.sysinfo = false;
+  }, true, true, true);
+
   widget(container_z, {
     widget(quad, {
       alpha: 0.9;

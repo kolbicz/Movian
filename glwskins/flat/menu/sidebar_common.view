@@ -19,6 +19,9 @@ SIDEBAR_ACTION(select($ui.mediainfo,
 		"skin://icons/ic_info_outline_48px.svg"),
 	 {
 	 toggle($ui.mediainfo);
+	 $clone.showSidebar = false;
+	 $clone.osdpage = 0;
+	 $clone.showPlaydeck = 0;
 	 });
 
 SIDEBAR_ACTION(select($ui.sysinfo,
@@ -29,6 +32,9 @@ SIDEBAR_ACTION(select($ui.sysinfo,
 		"skin://icons/ic_info_outline_48px.svg"),
 	 {
 	 toggle($ui.sysinfo);
+	 $clone.showSidebar = false;
+	 $clone.osdpage = 0;
+	 $clone.showPlaydeck = 0;
 	 });
 
 SIDEBAR_ACTION(_("View log"),
