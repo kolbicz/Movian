@@ -63,6 +63,7 @@ $self.model.loading = ($self.media.loading==1);
 $self.model.io <- $self.media.io;
 
 $clone.osdpage = 0;
+delta($ui.playbackMenuOpen, $clone.osdpage > 0);
 
 $view.iconPad = select($ui.aspect < 1.33 ||
 						 isVoid($self.media.metadata.icon), 0, 3em);
@@ -133,33 +134,6 @@ widget(container_z, {
 
 		bottomOverlayDisplacement: iir($clone.showPlaydeck > 0, 4) * ($clone.bottomOsdHeight + 0.25em);
 
-	});
-
-	// Mouse and touch users need an explicit way to leave playback. Hide this
-	// while an OSD submenu owns the back action.
-	widget(container_y, {
-		align: top;
-		zoffset: 3000;
-		hidden: $clone.osdpage || $ui.playbackSelectorOpen ||
-		        !($ui.pointerVisible || $ui.touch);
-		widget(container_x, {
-			height: 3em;
-			widget(container_y, {
-				align: center;
-				width: 4em;
-				clickable: true;
-				onEvent(activate,
-					deliverEvent($core.media.eventSink, "Stop"));
-				navFocusable: false;
-				widget(icon, {
-					color: 1;
-					alpha: 0.9 + 0.1 * isHovered();
-					size: 2em;
-					source: "skin://icons/ic_chevron_left_48px.svg";
-				});
-			});
-			space(1);
-		});
 	});
 
 	widget(container_y, {
@@ -822,6 +796,16 @@ widget(container_x, {
 	});
 
 	});
+	});
+
+	widget(container_y, {
+		align: top;
+		widget(container_x, {
+			height: 3em;
+			BackButton($clone.showPlaydeck, {
+				$self.close = true;
+			});
+		});
 	});
 
 });

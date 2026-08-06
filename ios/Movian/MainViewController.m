@@ -19,6 +19,8 @@
 
 #include "media/media.h"
 
+extern int ios_landscape_only;
+
 @interface MainViewController () {
   lphelper_t longpress;
 }
@@ -318,6 +320,31 @@ glw_share_log(void *opaque, int val)
 
 
 @implementation MainViewController
+
+- (BOOL)shouldAutorotate
+{
+  return YES;
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations
+{
+#if TARGET_OS_IOS == 1
+  return ios_landscape_only ? UIInterfaceOrientationMaskLandscape :
+                              UIInterfaceOrientationMaskAll;
+#else
+  return UIInterfaceOrientationMaskLandscape;
+#endif
+}
+
+- (UIInterfaceOrientation)preferredInterfaceOrientationForPresentation
+{
+#if TARGET_OS_IOS == 1
+  return ios_landscape_only ? UIInterfaceOrientationLandscapeRight :
+                              UIInterfaceOrientationPortrait;
+#else
+  return UIInterfaceOrientationLandscapeRight;
+#endif
+}
 
 - (void)viewDidLoad
 {

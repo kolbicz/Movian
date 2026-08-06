@@ -41,6 +41,7 @@ typedef struct clipboard_copy_job {
 
   prop_t *total_prop;
   prop_t *completed_prop;
+  prop_t *current_file_prop;
   prop_t *files_prop;
 
   char errbuf[256];
@@ -66,7 +67,8 @@ clipboard_copy_file(const char *src, const char *dst, clipboard_copy_job_t *j)
     return 1;
   }
 
-  const size_t bufsize = 32768;
+  prop_set_string(j->current_file_prop, filename);
+  const size_t bufsize = 2 * 1024 * 1024;
   char *buf = malloc(bufsize);
   int r;
   int rcode = 0;
@@ -167,6 +169,7 @@ clipboard_copy_files(const char *src, const char *dst)
     abort();
   j.total_prop = prop_create(n, "total");
   j.completed_prop = prop_create(n, "completed");
+  j.current_file_prop = prop_create(n, "filename");
   j.files_prop = prop_create(n, "files");
 
   if(clipboard_copy_files0(src, NULL, &j)) {
@@ -302,4 +305,3 @@ clipboard_init(void)
 }
 
 INITME(INIT_GROUP_IPC, clipboard_init, NULL, 10);
-

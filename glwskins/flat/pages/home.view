@@ -180,8 +180,10 @@ widget(container_z, {
   });
 
   widget(container_y, {
-
-    alpha: iir($ui.showTopIcons, 4);
+    // Home already exposes Settings and its primary destinations as tiles.
+    // Keep the sidebar available through the Menu event, but do not replace
+    // the clock with a redundant touch-only hamburger button.
+    hidden: true;
 
     widget(container_x, {
       space(1);

@@ -171,10 +171,18 @@ widget(container_z, {
 
             hbox({
               margin: [2em, 0.5em];
-              spacing: 2em;
+              spacing: 1em;
 
               label({
                 caption: fmt(_("Copying %d files"), $self.files);
+              });
+
+              label({
+                caption: select($self.total > 0,
+                                fmt(_("(%.0f%%) - %s"),
+                                    ($self.completed * 100) / $self.total,
+                                    $self.filename),
+                                $self.filename);
               });
 
               vbox({
@@ -329,6 +337,7 @@ widget(container_z, {
 
     widget(container_y, {
       spacing: 0.5em;
+      hidden: $ui.playbackMenuOpen;
 
       widget(loader, {
         time: 0.1;
@@ -351,7 +360,8 @@ widget(container_z, {
 
     widget(container_y, {
       widget(label, {
-        hidden: ($ui.showTopIcons || $ui.hideClock); //alpha: iir(!$ui.showTopIcons && !$ui.hideClock, 4);
+        hidden: $ui.hideClock ||
+                ($ui.showTopIcons && $nav.currentpage.model.type != "home");
         padding: [1em, 0];
         height: 3em;
         align: right;

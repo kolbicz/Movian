@@ -121,6 +121,10 @@ widget(container_z, {
       $clone.itemMenu = void;
     }, "skin://icons/ic_play_arrow_48px.svg");
 
+    ITEM(_("Copy to location..."), {
+      fireEvent(deliverRef($core.clipboard.copyItem, $args));
+      $clone.itemMenu = void;
+    }, void, !$args.canCopy);
 
     ITEM(_("Delete"), {
       delete($args);

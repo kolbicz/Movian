@@ -16,12 +16,85 @@
 #include "arch/posix/posix.h"
 #include "main.h"
 #include "service.h"
+#include "settings.h"
+#include "prop/prop_concat.h"
 #include "networking/asyncio.h"
 #include "arch/atomic.h"
 
 @import MediaPlayer;
 
 const char *appversion;
+int ios_landscape_only;
+
+#if !TARGET_OS_TV
+static UIViewController *
+ios_root_view_controller(void)
+{
+  for(UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+    if(scene.activationState != UISceneActivationStateUnattached &&
+       [scene isKindOfClass:[UIWindowScene class]]) {
+      UIWindowScene *windowScene = (UIWindowScene *)scene;
+      for(UIWindow *window in windowScene.windows) {
+        if(window.rootViewController != nil)
+          return window.rootViewController;
+      }
+    }
+  }
+  return nil;
+}
+
+static void
+ios_apply_orientation_mode(void)
+{
+  dispatch_async(dispatch_get_main_queue(), ^{
+    UIViewController *controller = ios_root_view_controller();
+    if(controller == nil)
+      return;
+
+    if(@available(iOS 16.0, *)) {
+      [controller setNeedsUpdateOfSupportedInterfaceOrientations];
+      UIWindowScene *scene = controller.view.window.windowScene;
+      if(scene != nil) {
+        UIInterfaceOrientationMask mask = ios_landscape_only ?
+          UIInterfaceOrientationMaskLandscape : UIInterfaceOrientationMaskAll;
+        UIWindowSceneGeometryPreferencesIOS *preferences =
+          [[UIWindowSceneGeometryPreferencesIOS alloc]
+            initWithInterfaceOrientations:mask];
+        [scene requestGeometryUpdateWithPreferences:preferences
+                                       errorHandler:^(NSError *error) {
+          NSLog(@"Movian could not update screen orientation: %@", error);
+        }];
+      }
+    } else {
+      [UIViewController attemptRotationToDeviceOrientation];
+    }
+  });
+}
+
+static void
+ios_set_orientation_mode(void *opaque, const char *value)
+{
+  ios_landscape_only = value != NULL && !strcmp(value, "1");
+  ios_apply_orientation_mode();
+}
+
+static void
+ios_create_orientation_setting(void)
+{
+  prop_t *settings = prop_create_root(NULL);
+  prop_concat_add_source(gconf.settings_look_and_feel,
+                         prop_create(settings, "nodes"), NULL);
+  settings_create_separator(settings, _p("iOS"));
+  setting_create(SETTING_MULTIOPT, settings, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Screen orientation")),
+                 SETTING_VALUE("0"),
+                 SETTING_OPTION("0", _p("Automatic")),
+                 SETTING_OPTION("1", _p("Landscape only")),
+                 SETTING_CALLBACK(ios_set_orientation_mode, NULL),
+                 SETTING_STORE("ios", "orientation"),
+                 NULL);
+}
+#endif
 
 static char *
 ios_storage_path(NSSearchPathDirectory directory, NSString *leaf)
@@ -320,6 +393,8 @@ static void set_media_type(void *opaque, const char *str)
   main_init();
 
 #if !TARGET_OS_TV
+  ios_create_orientation_setting();
+
   NSString *iosVersion = [[UIDevice currentDevice] systemVersion];
 #if defined(__arm64__)
   NSString *architecture = @"ARM64";
