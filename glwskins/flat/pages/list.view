@@ -1,7 +1,7 @@
 #import "skin://theme.view"
 #import "skin://styles/style_list.view"
 
-$view.rightPaneExpansion = scurve($view.showRightPane, 0.3);
+$view.rightPaneExpansion = scurve($view.showRightPane, 0.5);
 
 widget(container_z, {
 
@@ -15,9 +15,11 @@ widget(container_z, {
         chaseFocus: true;
 
         clipOffsetTop: 3em;
-        scrollThresholdTop: 4em;
 
-        scrollThresholdBottom: $ui.universeBottomHeight + 2em;
+		scrollThresholdTop: 3em;
+		scrollThresholdBottom: $ui.height/4;
+        //scrollThresholdBottom: $ui.universeBottomHeight + 2em;
+		
         clipOffsetBottom: $ui.universeBottomHeight;
         clipAlpha: 0.2;
         clipBlur: 1;
@@ -44,13 +46,13 @@ widget(container_z, {
     });
 
     widget(expander_x, {
-      expansion: iir(delay(select($view.expanded, 1.0, 0.0), 0.1, 1.0), 4);
+      expansion: iir(delay(select($view.expanded, 1.0, 0.0), 0.1, 1.0), 3);
       alwaysLayout: true;
       widget(deck, {
-        width: $ui.width / 2;
+        width: $ui.width / 2.5;
 
-        effect: slideVertical;
-        time: 0.4;
+        effect: blend;//slideVertical;
+        time: 0.2;
         noInitialTransform: true;
 
         keepPreviousActive: true;

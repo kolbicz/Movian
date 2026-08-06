@@ -114,7 +114,7 @@ widget(container_z, {
 	widget(container_z, {
 	height: 2.2em;
 	//delta($clone.bottomOsdHeight, isVisible() * getHeight());
-
+	
 	onEvent(up, {
 	$clone.showSidebar = 0;
 	$clone.showPlaydeck = 0;
@@ -155,7 +155,7 @@ widget(container_z, {
 	$clone.showSidebar > 0);
 
 	});
-	});
+	}); 
 	});
 	});
 

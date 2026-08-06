@@ -68,7 +68,7 @@ clipboard_copy_file(const char *src, const char *dst, clipboard_copy_job_t *j)
   }
 
   prop_set_string(j->current_file_prop, filename);
-  const size_t bufsize = 2 * 1024 * 1024;
+  const size_t bufsize = 2*1024*1024;//32768;
   char *buf = malloc(bufsize);
   int r;
   int rcode = 0;
@@ -305,3 +305,4 @@ clipboard_init(void)
 }
 
 INITME(INIT_GROUP_IPC, clipboard_init, NULL, 10);
+

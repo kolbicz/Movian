@@ -1,12 +1,13 @@
 #import "skin://theme.view"
 #import "skin://styles/style_list.view"
 
+$clone.intensity = select(isVoid($self.media.video.user_video_hdr), 1.0, select(isVoid($core.osd.infoIntensity), 0.7, $core.osd.infoIntensity/100.f));
 
 #define PLAYDECK_BUTTON(ICON, TITLE, EVENT, ENABLED, ID, ROTATED = 0, VISIBLE = 1, FOCUS_LEFT = "", FOCUS_RIGHT = "") {
 
 	widget(container_z, {
 	id: ID;
-	hidden: !VISIBLE;
+	hidden: !VISIBLE;	
 	onEvent(activate, EVENT);
 	onEvent(left, {focus(FOCUS_LEFT);}, true, false);
 	onEvent(right, {focus(FOCUS_RIGHT);}, true, false);
@@ -15,15 +16,15 @@
 	widget(quad, {
 	margin: select($ui.aspect < 1.33, [0, 0.15em, 0.1em, 0.15em], [0.2em, 0.15em, 0.2em, 0.15em]);
 		additive: true;
-		alpha: 0.1 * isHovered() + 0.6 * isNavFocused();
+		alpha: 0.1 * isHovered() + 0.6 * isNavFocused() * $clone.intensity;
 	});
 	widget(icon, {
 	margin: select($ui.aspect < 1.33, [0, 0.25em, 0.1em, 0.25em], [0.4em, 0.25em, 0.4em, 0.25em]);
 		angle: iir(ROTATED, 4) * -90;
 		size: select($ui.aspect < 1.33, 1.5em, 2em);
 		source: ICON;
-		color: select(isNavFocused(), 0, 1);
-		alpha: 0.7 * iir(ENABLED, 8) + 0.3;
+		color: select(isNavFocused(), 0, 1) * $clone.intensity;
+		alpha: 0.7 * iir(ENABLED, 8) * $clone.intensity + 0.3;
 	});
 	});
 }
@@ -32,7 +33,7 @@
 
 	widget(container_z, {
 	id: ID;
-	hidden: !VISIBLE;
+	hidden: !VISIBLE;	
 	onEvent(activate, EVENT);
 	onEvent(left, {focus(FOCUS_LEFT);}, true, false);
 	onEvent(right, {focus(FOCUS_RIGHT);}, true, false);
@@ -41,15 +42,15 @@
 	widget(quad, {
 	margin: select($ui.aspect < 1.33, [0, 0.15em, 0.1em, 0.15em], [0.2em, 0.15em, 0.2em, 0.15em]);
 		additive: true;
-		alpha: 0.1 * isHovered() + 0.6 * isNavFocused();
+		alpha: 0.1 * isHovered() + 0.6 * isNavFocused() * $clone.intensity;
 	});
 	widget(icon, {
 	margin: select($ui.aspect < 1.33, [0, 0.25em, 0.1em, 0.25em], [0.4em, 0.25em, 0.4em, 0.25em]);
 		angle: iir(ROTATED, 4) * -90;
 		size: select($ui.aspect < 1.33, 1.0em, 1em);
 		source: ICON;
-		color: select(isNavFocused(), 0, 1);
-		alpha: 0.5 * iir(ENABLED, 8) + 0.3;
+		color: select(isNavFocused(), 0, 1) * $clone.intensity;
+		alpha: 0.5 * iir(ENABLED, 8) * $clone.intensity + 0.3;
 	});
 	});
 }
@@ -63,7 +64,6 @@ $self.model.loading = ($self.media.loading==1);
 $self.model.io <- $self.media.io;
 
 $clone.osdpage = 0;
-delta($ui.playbackMenuOpen, $clone.osdpage > 0);
 
 $view.iconPad = select($ui.aspect < 1.33 ||
 						 isVoid($self.media.metadata.icon), 0, 3em);
@@ -78,7 +78,7 @@ onEvent(back, {
 	focus("menu-btn");
 }, $clone.osdpage);
 
-onEvent(back,	deliverEvent($core.media.eventSink, "Stop"), !$clone.showPlaydeck && !$clone.osdpage && !$self.model.loading && ($self.media.playstatus == "play" || $self.media.playstatus == "pause"));
+onEvent(back,	deliverEvent($core.media.eventSink, "Stop"), !$clone.showPlaydeck && !$clone.osdpage && !$self.model.loading && isVoid($self.media.error) && ($self.media.playstatus == "play" || $self.media.playstatus == "pause") && $core.media.current.buffer.delay>0);
 
 onEvent(menu, {
 	$clone.osdpage = 1;
@@ -99,7 +99,7 @@ onInactivity(select($clone.osdpage == 0, select($self.media.playstatus == "pause
 });
 
 $view.showSeekBar =
-	($ui.pointerVisible ||
+	(changed($ui.pointerVisible, 3, true) ||
 	changed($self.media.seektime, 3, true) ||
 	changed($self.url, 3, true)
 	) && !$clone.showPlaydeck;
@@ -155,8 +155,7 @@ widget(container_z, {
 		hidden: !$clone.osdpage;
 		zoffset: 1000;
 		width: $clone.osdpage==1?16em:20em;
-		clickable: true;
-
+		
 			onEvent(left, {
 				$clone.osdpage = 0;
 			}, true, false);
@@ -166,7 +165,7 @@ widget(container_z, {
 				color: 0;
 				alpha: 0.8;
 			});
-				widget(layer, {
+			widget(layer, {
 #import "skin://styles/style_sidebar.view"
 				widget(loader, {
 				time: 0.25;
@@ -186,26 +185,26 @@ widget(container_z, {
 									100, "skin://osd/osd_subs.view",
 									101, "skin://osd/osd_audio.view"
 								 );
-					});
-				});
-
 				});
 			});
+			});
+		});
 
 
 		// OSD buttons row
 
 	widget(container_y, {
-	hidden: $ui.aspect < 1.33 || !$clone.showPlaydeck || $clone.osdpage;
+	hidden: $ui.aspect < 1.33 || !$clone.showPlaydeck || $clone.osdpage || isVoid($self.media.metadata.icon);
 	padding: [1em, 0, 0.5em, $ui.universeBottomHeight + 0.5em];
 	align: bottom;
 	space(1);
 	widget(container_x, {
 	widget(image, {
-		alpha: iir($clone.showPlaydeck || changed($self.media.metadata.icon, 3, true), 3);
+		//alpha: iir($clone.showPlaydeck || changed($self.media.metadata.icon, 3, true), 3);
 		width: 4.5em;
 		//cornerRadius: 0.3em;
 		shadow: true;
+		color: 1.0 * $clone.intensity;
 		source: $self.media.metadata.icon;
 	});
 	space(1);
@@ -218,12 +217,16 @@ widget(container_z, {
 	padding: [0em, 0em];
 	align: bottom;
 
+	// move video layer up
+	//delta($self.media.ctrl.panvertical,   select(getHeight() * isVisible(), select(1, (000.f + (isVisible() * ((100.f * (getHeight() + 0)) / $ui.height))), 0), 0));
+	//delta($self.media.ctrl.scalevertical, select(getHeight() * isVisible(), select(1, (000.f - (isVisible() * ((100.f * (getHeight() + 0)) / $ui.height))), 0), 0));
+
 	widget(quad, {
 	hidden: !$core.osd.infoTracks && !$core.osd.infoTitle;
 	alpha: 0.6;
 	height: 1;
-	color: 1;
-	});
+	color: 1 * $clone.intensity;
+	});	
 
 	widget(container_z, {
 
@@ -248,20 +251,22 @@ widget(container_y, {
 		hidden: !$core.osd.infoTitle;
 		padding: [0em, 0, 0.5em, 0em];
 		caption: $self.media.metadata.title;
+		color: 1.0 * $clone.intensity;
 		shadow: true;
 		outline: true;
 		size: 1.25em;
+		bold: true;
 		//font: isVoid($core.androidTV.isAndroidTV) ? select(isVoid($core.fonts.main), "skin://fonts/RobotoCondensed-Regular.ttf", $core.fonts.main) : select(isVoid($core.fonts.main), "RobotoMain.ttf", $core.fonts.main);
 		ellipsize: true;
 	});
-
+	
 widget(label, {
     hidden: $ui.aspect < 1.33 || !isVoid($self.media.metadata.startts);
 	padding: [0.5em, 0.12em, 0.75em, 0];
 	align: right;
 	caption: select(($self.media.metadata.duration - $self.media.currenttime) > 3600, fmt("+ %d h %d min", ($self.media.metadata.duration - $self.media.currenttime)/3600, (($self.media.metadata.duration - $self.media.currenttime)%3600)/60), fmt("+ %d min", ($self.media.metadata.duration - $self.media.currenttime)/60));
 	shadow: true;
-	color: 0.5;
+	color: 0.5 * $clone.intensity;
 	outline: true;
 });
 widget(label, {
@@ -269,6 +274,7 @@ hidden: $core.clock.showDuringVideo;
 padding: [0.5em, 0.12em, 0.75em, 0];
 align: right;
 caption: $core.clock.localtimeofday;
+color: 1.0 * $clone.intensity;
 shadow: true;
 outline: true;
 });
@@ -297,14 +303,14 @@ outline: true;
 	hidden: !$core.osd.infoTitle || (!$core.osd.infoTracks && (!$core.osd.infoDescription || isVoid($self.media.metadata.description))) ;
 		height: 1;
 		//alpha: 0.6;
-		color: 0.6;
+		color: 0.6 * $clone.intensity;
 		});
 
 	 widget(container_x, {
 		hidden: isVoid($self.media.metadata.description) || $ui.height < 360 || (!$core.osd.infoDescription || isVoid($self.media.metadata.description));
 		padding: [1.0em, 0.25em, 0.5em, 0em];
 	spacing: 1.0em;
-
+	
 	/*widget(icon, {
 	hidden: !isVoid($self.media.metadata.image);
 	alpha: 0.7;
@@ -316,13 +322,14 @@ outline: true;
 	widget(image, {
 		width: 4.5em;
 		cornerRadius: 0.3em;
+		color: 1.0 * $clone.intensity;
 		source: $self.media.metadata.image;
 	});
 	space(1);
 	});
 	widget(label, {
 		alpha: 1;
-		color: 0.6;
+		color: 0.6 * $clone.intensity;
 		outline: true;
 		shadow: true;
 		padding: [0.0em, 0.0em];
@@ -339,7 +346,7 @@ outline: true;
 		widget(quad, {
 			height: 1;
 			//alpha: 0.6;
-			color: 0.6;
+			color: 0.6 * $clone.intensity;
 		});
 	});
 
@@ -347,19 +354,21 @@ outline: true;
 		shadow: true;
 		filterConstraintX: true;
 		size: 0.8em;
+		color: 0.9 * $clone.intensity;
 	});
 
 
 	widget(container_y, {
 	hidden: ($self.media.metadata.trackinfo == 0) || !$core.osd.infoTracks;
 	padding: [1.0em, 0.25em, 0em, 0em];
-
+	
 	widget(container_x, {
 		spacing: 0.5em;
 		//alpha: select(isVoid($self.media.audio.active.url), 0, 0.6);
 		hidden: select(isVoid($self.media.audio.active.url), 1, 0);
 		widget(icon, {
 		source:	"skin://icons/ic_speaker_48px.svg";
+		color: 0.9 * $clone.intensity;
 		});
 		widget(label, {
 		style: "notifications";
@@ -378,6 +387,7 @@ outline: true;
 		hidden: select(isVoid($self.media.subtitle.active.url), 1, 0);
 		widget(icon, {
 		source: "skin://icons/ic_subtitles_48px.svg";
+		color: 0.9 * $clone.intensity;
 		});
 		widget(label, {
 		style: "notifications";
@@ -401,13 +411,14 @@ outline: true;
 		caption: fmt(_("Audio volume adjustment: %d dB"),
 					 $self.media.ctrl.audiovolume);
 		});
-	});
+	});	
 
 widget(container_x, {
 		spacing: 1.0em;
 		hidden: select($self.media.error, false, true);
 		widget(icon, {
 	source: "skin://icons/ic_error_48px.svg";
+	color: 0.9 * $clone.intensity;
 		});
 		widget(label, {
 	caption: $self.media.error;
@@ -420,6 +431,7 @@ widget(container_x, {
 		hidden: select($self.media.video.too_slow, false, true);
 		widget(icon, {
 	source: "skin://icons/ic_error_48px.svg";
+	color: 0.9 * $clone.intensity;
 		});
 		widget(label, {
 	caption: _("CPU is too slow to decode this video");
@@ -446,7 +458,7 @@ widget(container_x, {
 		 "error", [1, 0.5, 0.5]);
 		});
 	});
-
+	
 	});
 
 	});
@@ -459,7 +471,7 @@ widget(container_x, {
 	hidden: !$clone.showPlaydeck || $self.media.canSeek || $clone.osdpage;
 	height: 1;
 			//alpha: 0.6;
-			color: 0.6;
+			color: 0.6 * $clone.intensity;
 		});
 
 	widget(container_y, {
@@ -507,6 +519,7 @@ widget(container_x, {
 			secondBarValue: $core.media.current.buffer.delay;
 			widget(icon, {
 				source: "skin://icons/dot.png";
+				color: 1.0 * $clone.intensity;
 			});
 			widget(container_y, {
 				space(1);
@@ -514,6 +527,7 @@ widget(container_x, {
 				height: 4;
 				padding: 1;
 				alpha: 0.9;
+				color: 1.0 * $clone.intensity;
 				additive: true;
 				});
 				space(1);
@@ -524,6 +538,7 @@ widget(container_x, {
 				height: 4;
 				padding: [1, 0, 0, 0];
 				alpha: 0.5;
+				color: 1.0 * $clone.intensity;
 				additive: true;
 				});
 				space(1);
@@ -534,7 +549,7 @@ widget(container_x, {
 		});
 	});
 	});
-
+	
 		widget(container_z, {
 		hidden: $clone.osdpage;
 		height: $ui.touch ? 2.25em : 1.5em;
@@ -557,7 +572,7 @@ widget(container_x, {
 		});
 
 		widget(container_z, {
-
+	
 		widget(container_x, {
 
 		padding: [0em, 0.0em, 0em, 0.1em];
@@ -568,6 +583,7 @@ widget(container_x, {
 			hidden: !$self.media.canSeek;
 			padding: [1em, 0.0em, 0.5em, 0];
 			caption: value2duration($view.tentativeSeekPosition ?? $self.media.currenttime);
+			color: 1.0 * $clone.intensity;
 			align: left;
 		});
 
@@ -590,21 +606,22 @@ widget(container_x, {
 			 "pip-btn", 0, $core.supportsPIP.hasSupport, 0, "prev-btn");
 
 		widget(container_z, {
-			hidden: isVoid($self.media.video.user_video_q) || $ui.aspect < 1.32 || $ui.height < 360;
+			hidden: isVoid($self.media.video.user_video_hdr) || $ui.aspect < 1.32 || $ui.height < 360;
 			margin: [0.1em, 0em, 0em, 0em];
 			alpha: 1;
 			widget(quad, {
-			width: select(isVoid($self.media.audio.user_audio_q), 1.8em, select( ($self.media.audio.user_audio_q == "DTS-HD"), 3.4em, 2.6em));
+			width: select( ($self.media.video.user_video_hdr == "DV HDR"), 2.6em, 1.8em);
 			margin: $ui.touch ? [0em, 0.4em, 0em, 0.4em] : [0em, 0.3em, 0em, 0.3em];
 			padding: $ui.touch ? [0.25em, 0.3em, 0.25em, 0.35em] : [0.25em, 0.02em, 0.25em, 0.05em];
-			color: 0.7;
+			color: 0.7 * $clone.intensity;
 			//alpha: 0.7;
 			});
 
 			widget(label, {
-			width: select(isVoid($self.media.audio.user_audio_q), 2em, 3em);
-			caption: select(isVoid($self.media.audio.user_audio_q), $self.media.video.user_video_q, $self.media.video.user_video_q + " " + $self.media.audio.user_audio_q);
+			//width: select(isVoid($self.media.audio.user_audio_q), 2em, 3em);
+			caption: $self.media.video.user_video_hdr;
 			size: 0.65em;
+			bold: true;
 			shadow: true;
 			color: 0;
 			alpha: 1;
@@ -612,7 +629,31 @@ widget(container_x, {
 			});
 		});
 
+		widget(container_z, {
+			hidden: isVoid($self.media.video.user_video_q) || $ui.aspect < 1.32 || $ui.height < 360;
+			margin: [0.1em, 0em, 0em, 0em];
+			alpha: 1;
+			widget(quad, {
+			width: select(isVoid($self.media.audio.user_audio_q), 1.8em, select( ($self.media.audio.user_audio_q == "DTS-HD"), 3.6em, 2.6em));
+			margin: $ui.touch ? [0em, 0.4em, 0em, 0.4em] : [0em, 0.3em, 0em, 0.3em];
+			padding: $ui.touch ? [0.25em, 0.3em, 0.25em, 0.35em] : [0.25em, 0.02em, 0.25em, 0.05em];
+			color: 0.7 * $clone.intensity;
+			//alpha: 0.7;
+			});
+
+			widget(label, {
+			//width: select(isVoid($self.media.audio.user_audio_q), 2em, 3em);
+			caption: select(isVoid($self.media.audio.user_audio_q), $self.media.video.user_video_q, $self.media.video.user_video_q + " " + $self.media.audio.user_audio_q);
+			size: 0.65em;
+			bold: true;
+			shadow: true;
+			color: 0;
+			alpha: 1;
+			align: center;
+			});
 		});
+
+		});	
 	});
 
 		widget(container_x, {
@@ -675,15 +716,16 @@ widget(container_x, {
 				_("Settings"),
 				{
 				toggle($clone.osdpage);
-
+				
 				focus("osd_main");
 				}, true, "menu-btn",
-				$clone.osdpage > 0 && $clone.osdpage < 100);
-
+				$clone.osdpage > 0 && $clone.osdpage < 100);		
+		
 		widget(label, {
 			hidden: !$self.media.canSeek;
 			padding: [0.5em, 0.0em, 0.75em, 0];
 			caption: value2duration($self.media.metadata.duration);
+			color: 1.0 * $clone.intensity;
 			align: right;
 		});
 
@@ -697,8 +739,8 @@ widget(container_x, {
 
 	});
 	});
-
-
+	
+	
 	// Seekbar row
 
 	widget(container_y, {
@@ -722,6 +764,7 @@ widget(container_x, {
 		widget(label, {
 			width: 4em;
 			caption: value2duration($view.tentativeSeekPosition ?? $self.media.currenttime);
+			color: 1.0 * $clone.intensity;
 		hidden: !$self.media.canSeek;
 			align: right;
 		});
@@ -735,6 +778,7 @@ widget(container_x, {
 				padding: 1;
 				widget(quad, {
 					alpha: 0.3;
+					color: 1.0 * $clone.intensity;
 					additive: true;
 				});
 				});
@@ -752,12 +796,14 @@ widget(container_x, {
 			secondBarValue: $core.media.current.buffer.delay;
 			widget(icon, {
 				source: "skin://icons/dot.png";
+				color: 1.0 * $clone.intensity;
 			});
 			widget(container_y, {
 				space(1);
 				widget(quad, {
 				height: 3;
 				alpha: 0.9;
+				color: 1.0 * $clone.intensity;
 				additive: true;
 				});
 				space(1);
@@ -768,6 +814,7 @@ widget(container_x, {
 				height: 3;
 				alpha: 0.5;
 				additive: true;
+				color: 1.0 * $clone.intensity;
 				});
 				space(1);
 			});
@@ -776,6 +823,7 @@ widget(container_x, {
 		widget(label, {
 			width: 4em;
 			caption: value2duration($self.media.metadata.duration);
+			color: 1.0 * $clone.intensity;
 		});
 		});
 	});
@@ -794,18 +842,18 @@ widget(container_x, {
 	alpha: iir($self.media.loading==2, 6);
 	});
 	});
-
+	
 	});
 	});
-
+ 
 	widget(container_y, {
-		align: top;
-		widget(container_x, {
-			height: 3em;
-			BackButton($clone.showPlaydeck, {
-				$self.close = true;
-			});
+	align: top;
+	hidden: !$clone.showPlaydeck || $clone.osdpage;
+	widget(container_x, {
+		height: 3em;
+		BackButton($clone.showPlaydeck, {
+		$self.close = true;
 		});
 	});
-
+	});
 });
