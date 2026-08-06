@@ -60,6 +60,7 @@ typedef struct vtb_decoder {
   int64_t vtbd_last_pts;
   int vtbd_estimated_duration;
   int vtbd_pixel_format;
+  int vtbd_codec_id;
 } vtb_decoder_t;
 
 
@@ -157,7 +158,9 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   vtbd->vtbd_last_pts = vf->vf_mbm.mbm_pts;
 
   char fmt[64];
-  snprintf(fmt, sizeof(fmt), "h264 (VTB) %d x %d", fi.fi_width, fi.fi_height);
+  snprintf(fmt, sizeof(fmt), "%s (VTB) %d x %d",
+           vtbd->vtbd_codec_id == AV_CODEC_ID_HEVC ? "HEVC" : "H264",
+           fi.fi_width, fi.fi_height);
   prop_set_string(mq->mq_prop_codec, fmt);
 }
 
@@ -353,21 +356,45 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 		       media_pipe_t *mp)
 {
   OSStatus status;
+  CMVideoCodecType codec_type;
+  CFStringRef config_atom;
 
   if(!video_settings.video_accel)
     return 1;
 
   switch(mc->codec_id) {
   case AV_CODEC_ID_H264:
+    codec_type = kCMVideoCodecType_H264;
+    config_atom = CFSTR("avcC");
+    break;
+  case AV_CODEC_ID_HEVC:
+    codec_type = kCMVideoCodecType_HEVC;
+    config_atom = CFSTR("hvcC");
     break;
   default:
     return 1;
   }
 
+  if(!VTIsHardwareDecodeSupported(codec_type)) {
+    TRACE(TRACE_DEBUG, "VTB", "No hardware decoder for %s",
+          mc->codec_id == AV_CODEC_ID_HEVC ? "HEVC" : "H264");
+    return 1;
+  }
 
   if(mcp == NULL || mcp->extradata == NULL || mcp->extradata_size == 0 ||
-     ((const uint8_t *)mcp->extradata)[0] != 1)
+     ((const uint8_t *)mcp->extradata)[0] != 1) {
+    if(mc->codec_id == AV_CODEC_ID_HEVC)
+      return 1;
     return h264_annexb_to_avc(mc, mp, &video_vtb_codec_create);
+  }
+
+  /* Start conservatively with HEVC Main (8-bit) in an hvcC record. Main10
+   * needs a 10-bit-capable renderer before it can preserve the source. */
+  if(mc->codec_id == AV_CODEC_ID_HEVC) {
+    const uint8_t *hvcC = mcp->extradata;
+    if(mcp->extradata_size < 23 || (hvcC[1] & 0x1f) != 1)
+      return 1;
+  }
 
   CFMutableDictionaryRef config_dict =
     CFDictionaryCreateMutable(kCFAllocatorDefault,
@@ -393,14 +420,13 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   CFDataRef extradata = CFDataCreate(kCFAllocatorDefault, mcp->extradata,
                                      mcp->extradata_size);
-  CFDictionarySetValue(extradata_dict, CFSTR("avcC"), extradata);
+  CFDictionarySetValue(extradata_dict, config_atom, extradata);
   CFRelease(extradata);
   CFDictionarySetValue(config_dict,
                        kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms,
                        extradata_dict);
   CFRelease(extradata_dict);
 
-#if !TARGET_OS_IPHONE
   // Enable and force HW accelration
   CFDictionarySetValue(config_dict,
                        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder,
@@ -409,12 +435,11 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   CFDictionarySetValue(config_dict,
                        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder,
                        kCFBooleanTrue);
-#endif
 
   CMVideoFormatDescriptionRef fmt;
 
   status = CMVideoFormatDescriptionCreate(kCFAllocatorDefault,
-                                          kCMVideoCodecType_H264,
+                                          codec_type,
                                           mcp->width,
                                           mcp->height,
                                           config_dict,
@@ -440,6 +465,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
                        kCFBooleanTrue);
 
   vtb_decoder_t *vtbd = calloc(1, sizeof(vtb_decoder_t));
+  vtbd->vtbd_codec_id = mc->codec_id;
 
   dict_set_int32(surface_dict, kCVPixelBufferWidthKey, mcp->width);
   dict_set_int32(surface_dict, kCVPixelBufferHeightKey, mcp->height);
