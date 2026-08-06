@@ -456,7 +456,7 @@ nls_load_from_data(char *s)
       continue;
 
     if((s2 = mystrbegins(s, "id:")) != NULL) {
-      while(*s2 <33 && *s2)
+      while((uint8_t)*s2 < 33 && *s2)
 	s2++;
 
       deescape_cstyle((char *)s2);
@@ -470,7 +470,7 @@ nls_load_from_data(char *s)
 
     if((s2 = mystrbegins(s, "msg:")) != NULL) {
 
-      while(*s2 <33 && *s2)
+      while((uint8_t)*s2 < 33 && *s2)
 	s2++;
 
       if(*s2) {
@@ -482,7 +482,7 @@ nls_load_from_data(char *s)
     }
 
     if((s2 = mystrbegins(s, "msg[")) != NULL) {
-      while(*s2 <33 && *s2)
+      while((uint8_t)*s2 < 33 && *s2)
 	s2++;
 
       int i = atoi(s2);
@@ -490,12 +490,12 @@ nls_load_from_data(char *s)
 	s2++;
       if(*s2)
 	s2++;
-      while(*s2 <33 && *s2)
+      while((uint8_t)*s2 < 33 && *s2)
 	s2++;
       if(*s2 != ':')
 	continue;
       s2++;
-      while(*s2 <33 && *s2)
+      while((uint8_t)*s2 < 33 && *s2)
 	s2++;
 
       if(*s2) {
