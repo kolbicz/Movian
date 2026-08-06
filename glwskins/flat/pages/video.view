@@ -832,6 +832,7 @@ widget(container_x, {
 	widget(underscan, {
 	widget(container_y, {
 	align: top;
+	hidden: !$clone.showPlaydeck || $clone.osdpage;
 	widget(container_x, {
 	space(7);
 	widget(throbber_fwd, {
