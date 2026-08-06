@@ -3199,7 +3199,7 @@ hls_play(hls_t *h, media_pipe_t *mp, char *errbuf, size_t errlen,
   }
   // Shutdown
 
-  event_dispatch(event_create_action(ACTION_PAUSE));
+  // event_dispatch(event_create_action(ACTION_PAUSE));
 	usleep(500000);
 
   mp_event_set_callback(mp, NULL, NULL);
