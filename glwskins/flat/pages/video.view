@@ -99,7 +99,7 @@ onInactivity(select($clone.osdpage == 0, select($self.media.playstatus == "pause
 });
 
 $view.showSeekBar =
-	($ui.pointerVisible ||
+	(changed($ui.pointerVisible, 3, true) ||
 	changed($self.media.seektime, 3, true) ||
 	changed($self.url, 3, true)
 	) && !$clone.showPlaydeck;
@@ -832,7 +832,6 @@ widget(container_x, {
 	widget(underscan, {
 	widget(container_y, {
 	align: top;
-	hidden: !$clone.showPlaydeck || $clone.osdpage;
 	widget(container_x, {
 	space(7);
 	widget(throbber_fwd, {
@@ -849,6 +848,7 @@ widget(container_x, {
  
 	widget(container_y, {
 	align: top;
+	hidden: !$clone.showPlaydeck || $clone.osdpage;
 	widget(container_x, {
 		height: 3em;
 		BackButton($clone.showPlaydeck, {
