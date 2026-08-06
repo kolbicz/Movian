@@ -452,7 +452,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   CFMutableDictionaryRef surface_dict =
     CFDictionaryCreateMutable(kCFAllocatorDefault,
-                              2,
+                              4,
                               &kCFTypeDictionaryKeyCallBacks,
                               &kCFTypeDictionaryValueCallBacks);
 
@@ -463,6 +463,21 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
                        kCVPixelBufferOpenGLESCompatibilityKey,
 #endif
                        kCFBooleanTrue);
+
+#if TARGET_OS_IPHONE
+  /* Ensure VideoToolbox returns IOSurface-backed pixel buffers.  The iOS GLW
+   * renderer imports these through CVOpenGLESTextureCache, avoiding a CPU copy
+   * of both NV12 planes on older devices such as the A9 iPhone SE. */
+  CFMutableDictionaryRef iosurface_dict =
+    CFDictionaryCreateMutable(kCFAllocatorDefault,
+                              0,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+  CFDictionarySetValue(surface_dict,
+                       kCVPixelBufferIOSurfacePropertiesKey,
+                       iosurface_dict);
+  CFRelease(iosurface_dict);
+#endif
 
   vtb_decoder_t *vtbd = calloc(1, sizeof(vtb_decoder_t));
   vtbd->vtbd_codec_id = mc->codec_id;
@@ -522,7 +537,30 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   mc->close = vtb_close;
   mc->flush = vtb_flush;
 
-  TRACE(TRACE_DEBUG, "VTB", "Opened decoder");
+  CFTypeRef hw_value = NULL;
+  const int hw_active =
+    !VTSessionCopyProperty(vtbd->vtbd_session,
+                          kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
+                          kCFAllocatorDefault, &hw_value) &&
+    hw_value != NULL && CFEqual(hw_value, kCFBooleanTrue);
+  if(hw_value != NULL)
+    CFRelease(hw_value);
+
+  TRACE(TRACE_INFO, "VTB",
+        "Opened %s decoder %dx%d, hardware=%s, pixel-format=%s, renderer=%s",
+        mc->codec_id == AV_CODEC_ID_HEVC ? "HEVC" : "H264",
+        mcp->width, mcp->height, hw_active ? "yes" : "no",
+        vtbd->vtbd_pixel_format ==
+          kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ? "NV12 full-range" :
+        vtbd->vtbd_pixel_format ==
+          kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ? "NV12 video-range" :
+                                                           "planar 4:2:0",
+#if TARGET_OS_IPHONE
+        "IOSurface zero-copy"
+#else
+        "OpenGL"
+#endif
+        );
   return 0;
 }
 
