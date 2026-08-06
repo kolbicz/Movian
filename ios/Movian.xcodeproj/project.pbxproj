@@ -43,6 +43,9 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		F40000000000000000000011 /* es_faprovider.c in Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000001 /* es_faprovider.c */; };
+		F40000000000000000000012 /* es_websocket.c in Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000002 /* es_websocket.c */; };
+		F40000000000000000000013 /* es_scrobble.c in Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000003 /* es_scrobble.c */; };
 		6A04C0381C2156080043FA93 /* fa_filepicker.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C0361C2156080043FA93 /* fa_filepicker.c */; };
 		6A04C0391C2156110043FA93 /* fa_filepicker.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C0361C2156080043FA93 /* fa_filepicker.c */; };
 		6A04C0451C21A2C80043FA93 /* vtb.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C0441C21A2C80043FA93 /* vtb.c */; };
@@ -696,6 +699,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		F40000000000000000000001 /* es_faprovider.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = es_faprovider.c; sourceTree = "<group>"; };
+		F40000000000000000000002 /* es_websocket.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = es_websocket.c; sourceTree = "<group>"; };
+		F40000000000000000000003 /* es_scrobble.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = es_scrobble.c; sourceTree = "<group>"; };
 		6A04C0361C2156080043FA93 /* fa_filepicker.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = fa_filepicker.c; sourceTree = "<group>"; };
 		6A04C0371C2156080043FA93 /* fa_filepicker.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = fa_filepicker.h; sourceTree = "<group>"; };
 		6A04C0441C21A2C80043FA93 /* vtb.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = vtb.c; sourceTree = "<group>"; };
@@ -1554,6 +1560,7 @@
 				6ADCCD4A1B30154E0099FB5A /* es_console.c */,
 				6ADCCD4B1B30154E0099FB5A /* es_crypto.c */,
 				6ADCCD4C1B30154E0099FB5A /* es_fs.c */,
+				F40000000000000000000001 /* es_faprovider.c */,
 				6ADCCD4D1B30154E0099FB5A /* es_gumbo.c */,
 				6ADCCD4E1B30154E0099FB5A /* es_hook.c */,
 				6ADCCD4F1B30154E0099FB5A /* es_htsmsg.c */,
@@ -1565,6 +1572,7 @@
 				6ADCCD551B30154E0099FB5A /* es_prop.c */,
 				6ADCCD561B30154E0099FB5A /* es_root.c */,
 				6ADCCD571B30154E0099FB5A /* es_route.c */,
+				F40000000000000000000003 /* es_scrobble.c */,
 				6ADCCD581B30154E0099FB5A /* es_searcher.c */,
 				6ADCCD591B30154E0099FB5A /* es_service.c */,
 				6ADCCD5A1B30154E0099FB5A /* es_sqlite.c */,
@@ -1572,6 +1580,7 @@
 				6ADCCD5C1B30154E0099FB5A /* es_string.c */,
 				6ADCCD5D1B30154E0099FB5A /* es_subtitles.c */,
 				6ADCCD5E1B30154E0099FB5A /* es_timer.c */,
+				F40000000000000000000002 /* es_websocket.c */,
 			);
 			name = ecmascript;
 			path = ../src/ecmascript;
@@ -2285,6 +2294,9 @@
 				6ADCCE171B30165E0099FB5A /* fa_zip.c in Sources */,
 				6ADCCCB11B3000CC0099FB5A /* rstr.c in Sources */,
 				6ADCCD641B30154E0099FB5A /* es_hook.c in Sources */,
+				F40000000000000000000011 /* es_faprovider.c in Sources */,
+				F40000000000000000000012 /* es_websocket.c in Sources */,
+				F40000000000000000000013 /* es_scrobble.c in Sources */,
 				6ADCCFE31B30785D0099FB5A /* glw_rotator.c in Sources */,
 				6ADCCE5F1B304C280099FB5A /* ssdp.c in Sources */,
 				6ADCCCAA1B3000CC0099FB5A /* dbl.c in Sources */,
@@ -3090,6 +3102,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				OTHER_CFLAGS = (
+					"-ffile-prefix-map=$(SRCROOT:dir)=",
 					"-DSQLITE_ENABLE_UNLOCK_NOTIFY",
 					"-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
 					"-DSQLITE_OMIT_LOAD_EXTENSION",
@@ -3142,6 +3155,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				OTHER_CFLAGS = (
+					"-ffile-prefix-map=$(SRCROOT:dir)=",
 					"-DSQLITE_ENABLE_UNLOCK_NOTIFY",
 					"-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
 					"-DSQLITE_OMIT_LOAD_EXTENSION",

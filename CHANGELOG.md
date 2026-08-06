@@ -1,5 +1,32 @@
 # Changelog
 
+## 7.0.272.2 - 2026-08-06
+
+### Added
+
+- Added the missing M7 ECMAScript file-access provider and WebSocket native
+  modules to the iOS target, restoring `native/faprovider` support required by
+  plugins such as pluginsBG.
+- Added the M7 ECMAScript video-scrobble integration that was also absent from
+  the iOS target.
+
+### Changed
+
+- Updated the media-information overlay to the current M7 layout with combined
+  codec and bitrate details, transfer and buffer rates, audio-output details,
+  and BitTorrent peer and cache statistics.
+- Media information now remains visible until hidden through the playback menu,
+  matching M7 behavior. Other iOS overlays retain their existing dismissal
+  controls.
+- Sanitized compiled source locations so ECMAScript errors retain useful source
+  filenames and line numbers without exposing the builder's local filesystem
+  path.
+
+### Compatibility
+
+- iOS/iPadOS 15 or newer, arm64; unsigned IPA for sideloading or TrollStore.
+- Plugin-facing HTTP user agent remains `Movian Apple 7.0.272`.
+
 ## 7.0.272.1 - 2026-08-05
 
 ### Fixed
