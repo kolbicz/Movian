@@ -2,18 +2,19 @@
 
 #define InfoBarIn(TITLE, VAL, TEXT, HIDDEN) {
 	widget(container_x, {
-	spacing: 0.25em;
+	spacing: 0.15em;
 	tableMode: true;
 	hidden: HIDDEN;
 	widget(label, {
 	InfoLabel();
 	align: right;
 	caption: TITLE + ":";
+	ellipsize: true;
 	});
 
 widget(container_z, {
-	width: 10em;
-	margin: [0.5em, 0, 0, 0];
+	width: 6em;
+	margin: [0.15em, 0, 0, 0];
 	widget(quad, {
 	color: 0.25;
 	});
@@ -25,13 +26,14 @@ widget(container_z, {
 	});
 
 	widget(label, {
-	width: 10em;
+	//width: 10em;
 	shadow: true;
 	outline: true;
 	color: 0.95;
 	margin: [5, 3, 0, 1];	
 	size: 0.83em;
 	caption: TEXT;
+	ellipsize: true;
 	align: left;
 	});
 	});
@@ -47,7 +49,7 @@ widget(container_x, {
 	color: 0;
 	});
 	widget(container_y, {
-	padding: 1em;
+	padding: 0.15em;
 	widget(label, {
 	hidden: !isVoid($core.media.current.url);
 	caption: _("No media loaded");

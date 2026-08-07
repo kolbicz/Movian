@@ -38,7 +38,7 @@ video_settings_init(void)
 		       _p("Video acceleration and display behaviour"),
 		       "settings:video", "01");
 
-settings_create_separator(s, _p("Accelerated Decoding"));
+  settings_create_separator(s, _p("Accelerated Decoding"));
 
 #if ENABLE_WSL2
 
@@ -61,8 +61,6 @@ settings_create_separator(s, _p("Accelerated Decoding"));
 				 SETTING_OPTION_CSTR("4", "INTEL"),
 				 SETTING_OPTION     ("0", _p("Off")),
                  NULL);
-#endif
-
   setting_create(SETTING_MULTIOPT, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("UI Refresh")),
                  SETTING_STORE("videoplayback", "mesa_fps"),
@@ -79,8 +77,9 @@ settings_create_separator(s, _p("Accelerated Decoding"));
 				 SETTING_OPTION_CSTR("90", "90 Hz"),
 				 SETTING_OPTION_CSTR("100", "100 Hz"),
 				 SETTING_OPTION_CSTR("120", "120 Hz"),
-				 SETTING_OPTION_CSTR("144", "144 Hz"),
+                 SETTING_OPTION_CSTR("144", "144 Hz"),
                  NULL);
+#endif
 
 #if ENABLE_VDPAU
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
@@ -113,7 +112,8 @@ settings_create_separator(s, _p("Accelerated Decoding"));
 #endif
 
 #if defined(__APPLE__)
-  settings_create_separator(s, _p("Accelerated Decoding"));
+  // The shared separator above already labels this section.
+  // settings_create_separator(s, _p("Accelerated Decoding"));
 
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("H264/AVC & H265/HEVC")),

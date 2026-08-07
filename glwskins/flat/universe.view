@@ -336,9 +336,7 @@ widget(loader, {
 time: 0.1;
 effect: blend;
 autohide: true;
-source: select($ui.mediainfo,
-               select($core.app.platform == "ios",
-                      "mediainfo_ios.view", "mediainfo.view"), "");
+source: select($ui.mediainfo, "mediainfo.view", "");
 });
 
 widget(loader, {

@@ -5,7 +5,7 @@
   shadow: true;
   outline: true;
   color: 0.6;
-  size: 0.8em;
+  size: 0.75em;
 }
 
 
@@ -13,7 +13,7 @@
   widget(container_x, {
     tableMode: true;
     hidden: HIDDEN;
-    spacing: 0.8em;
+    spacing: 0.15em;
     widget(label, {
       InfoLabel();
       align: right;
@@ -21,20 +21,20 @@
     });
     widget(label, {
       caption: VAL;
-	  size: 0.8em;
+	  size: 0.75em;
     });
   });
 }
 
 #define InfoBar(TITLE, VAL) {
   widget(container_x, {
-    spacing: 0.8em;
+    spacing: 0.15em;
     tableMode: true;
     widget(label, {
       InfoLabel();
       align: right;
       caption: TITLE + ":";
-	  size: 0.8em;
+	  size: 0.75em;
     });
 
     widget(container_z, {
@@ -50,4 +50,3 @@
     });
   });
 }
-
