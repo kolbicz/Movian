@@ -221,8 +221,8 @@ picture_out(void *decompressionOutputRefCon,
        * A successfully created session is still hardware-backed: software
        * decoding cannot satisfy the required decoder specification. */
       TRACE(TRACE_INFO, "VTB",
-            "Hardware decoder active (required by session; status property unavailable, status=%d)",
-            (int)hw_status);
+            "Hardware decoder active (required by session; status property did not confirm, status=%d, value=%s)",
+            (int)hw_status, hw_value == NULL ? "missing" : "false");
     }
     if(hw_value != NULL)
       CFRelease(hw_value);
