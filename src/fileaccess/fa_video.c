@@ -982,6 +982,13 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
       }
       mcp.profile = ctx->profile;
       mcp.level = ctx->level;
+      mcp.pixel_format = ctx->pix_fmt;
+      mcp.bits_per_component = ctx->bits_per_raw_sample;
+      mcp.color_primaries = ctx->color_primaries;
+      mcp.color_transfer = ctx->color_trc;
+      mcp.color_matrix = ctx->colorspace;
+      mcp.color_range = ctx->color_range;
+      mcp.codec_tag = ctx->codec_tag;
       mcp.sar_num = st->sample_aspect_ratio.num;
       mcp.sar_den = st->sample_aspect_ratio.den;
 

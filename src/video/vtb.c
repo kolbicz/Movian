@@ -61,8 +61,32 @@ typedef struct vtb_decoder {
   int vtbd_estimated_duration;
   int vtbd_pixel_format;
   int vtbd_codec_id;
+  int vtbd_profile;
   int vtbd_hw_status_reported;
 } vtb_decoder_t;
+
+
+/**
+ * Main10 can be decoded into the existing 8-bit NV12 renderer for SDR video.
+ * PQ and HLG require a P010/HDR-aware renderer, while unspecified transfer
+ * metadata is deliberately kept on the conservative fallback path.
+ */
+static int
+hevc_main10_is_sdr(const media_codec_params_t *mcp)
+{
+  switch(mcp->color_transfer) {
+  case AVCOL_TRC_BT709:
+  case AVCOL_TRC_GAMMA22:
+  case AVCOL_TRC_GAMMA28:
+  case AVCOL_TRC_SMPTE170M:
+  case AVCOL_TRC_SMPTE240M:
+  case AVCOL_TRC_BT2020_10:
+  case AVCOL_TRC_BT2020_12:
+    return 1;
+  default:
+    return 0;
+  }
+}
 
 
 /**
@@ -160,7 +184,9 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
 
   char fmt[64];
   snprintf(fmt, sizeof(fmt), "%s (VTB) %d x %d",
-           vtbd->vtbd_codec_id == AV_CODEC_ID_HEVC ? "HEVC" : "H264",
+           vtbd->vtbd_codec_id == AV_CODEC_ID_HEVC ?
+             (vtbd->vtbd_profile == 2 ? "HEVC Main10->8-bit" : "HEVC") :
+             "H264",
            fi.fi_width, fi.fi_height);
   prop_set_string(mq->mq_prop_codec, fmt);
 }
@@ -415,12 +441,23 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     return h264_annexb_to_avc(mc, mp, &video_vtb_codec_create);
   }
 
-  /* Start conservatively with HEVC Main (8-bit) in an hvcC record. Main10
-   * needs a 10-bit-capable renderer before it can preserve the source. */
+  int stream_profile = mcp->profile;
+
   if(mc->codec_id == AV_CODEC_ID_HEVC) {
     const uint8_t *hvcC = mcp->extradata;
-    if(mcp->extradata_size < 23 || (hvcC[1] & 0x1f) != 1)
+    if(mcp->extradata_size < 23)
       return 1;
+
+    stream_profile = hvcC[1] & 0x1f;
+    if(stream_profile != 1 && stream_profile != 2)
+      return 1;
+
+    if(stream_profile == 2 && !hevc_main10_is_sdr(mcp)) {
+      TRACE(TRACE_INFO, "VTB",
+            "HEVC Main10 uses fallback: transfer=%d is HDR or unspecified",
+            mcp->color_transfer);
+      return 1;
+    }
   }
 
   CFMutableDictionaryRef config_dict =
@@ -508,6 +545,11 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   vtb_decoder_t *vtbd = calloc(1, sizeof(vtb_decoder_t));
   vtbd->vtbd_codec_id = mc->codec_id;
+  vtbd->vtbd_profile = stream_profile;
+
+  const int source_depth = mcp->bits_per_component > 0 ?
+    mcp->bits_per_component :
+    (mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2 ? 10 : 8);
 
   dict_set_int32(surface_dict, kCVPixelBufferWidthKey, mcp->width);
   dict_set_int32(surface_dict, kCVPixelBufferHeightKey, mcp->height);
@@ -565,9 +607,13 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   mc->flush = vtb_flush;
 
   TRACE(TRACE_INFO, "VTB",
-        "Opened %s decoder %dx%d, hardware=required, pixel-format=%s, renderer=%s",
-        mc->codec_id == AV_CODEC_ID_HEVC ? "HEVC" : "H264",
+        "Opened %s decoder %dx%d, source-depth=%d, transfer=%d, primaries=%d, matrix=%d, range=%d, hardware=required, pixel-format=%s, renderer=%s",
+        mc->codec_id == AV_CODEC_ID_HEVC ?
+          (stream_profile == 2 ? "HEVC Main10 SDR" : "HEVC Main") :
+          "H264",
         mcp->width, mcp->height,
+        source_depth, mcp->color_transfer,
+        mcp->color_primaries, mcp->color_matrix, mcp->color_range,
         vtbd->vtbd_pixel_format ==
           kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ? "NV12 full-range" :
         vtbd->vtbd_pixel_format ==

@@ -3397,6 +3397,13 @@ else
 						//hexdump("MCPEXT", mcp.extradata, MIN(mcp.extradata_size, 64));
 						mcp.profile = te->h_ctx->profile;
 						mcp.level = te->h_ctx->level;
+						mcp.pixel_format = te->h_ctx->pix_fmt;
+						mcp.bits_per_component = te->h_ctx->bits_per_raw_sample;
+						mcp.color_primaries = te->h_ctx->color_primaries;
+						mcp.color_transfer = te->h_ctx->color_trc;
+						mcp.color_matrix = te->h_ctx->colorspace;
+						mcp.color_range = te->h_ctx->color_range;
+						mcp.codec_tag = te->h_ctx->codec_tag;
 						mcp.sar_num = te->h_ctx->sample_aspect_ratio.num;
 						mcp.sar_den = te->h_ctx->sample_aspect_ratio.den;
 

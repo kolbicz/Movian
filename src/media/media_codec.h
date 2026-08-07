@@ -80,6 +80,13 @@ typedef struct media_codec_params {
   unsigned int height;
   int profile;
   int level;
+  int pixel_format;
+  int bits_per_component;
+  int color_primaries;
+  int color_transfer;
+  int color_matrix;
+  int color_range;
+  unsigned int codec_tag;
   int cheat_for_speed : 1;
   int broken_aud_placement : 1;
   unsigned int sar_num;
