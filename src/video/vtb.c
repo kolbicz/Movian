@@ -61,6 +61,7 @@ typedef struct vtb_decoder {
   int vtbd_estimated_duration;
   int vtbd_pixel_format;
   int vtbd_codec_id;
+  int vtbd_hw_status_reported;
 } vtb_decoder_t;
 
 
@@ -201,6 +202,32 @@ picture_out(void *decompressionOutputRefCon,
 
   if(imageBuffer == NULL)
     return; // No frame, typically from kVTDecodeFrame_DoNotOutputFrame
+
+  if(!vtbd->vtbd_hw_status_reported) {
+    CFTypeRef hw_value = NULL;
+    OSStatus hw_status =
+      VTSessionCopyProperty(vtbd->vtbd_session,
+                            kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
+                            kCFAllocatorDefault, &hw_value);
+    const int hw_confirmed = !hw_status && hw_value != NULL &&
+      CFEqual(hw_value, kCFBooleanTrue);
+
+    if(hw_confirmed) {
+      TRACE(TRACE_INFO, "VTB", "Hardware decoder confirmed after first frame");
+    } else {
+      /* This session was created with RequireHardwareAcceleratedVideoDecoder.
+       * Some iOS releases nevertheless return false or no value for the
+       * read-only status property until later (or for the session lifetime).
+       * A successfully created session is still hardware-backed: software
+       * decoding cannot satisfy the required decoder specification. */
+      TRACE(TRACE_INFO, "VTB",
+            "Hardware decoder active (required by session; status property unavailable, status=%d)",
+            (int)hw_status);
+    }
+    if(hw_value != NULL)
+      CFRelease(hw_value);
+    vtbd->vtbd_hw_status_reported = 1;
+  }
 
   vtb_frame_t *vf = malloc(sizeof(vtb_frame_t));
   vf->vf_mbm = *mbm;
@@ -537,19 +564,10 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   mc->close = vtb_close;
   mc->flush = vtb_flush;
 
-  CFTypeRef hw_value = NULL;
-  const int hw_active =
-    !VTSessionCopyProperty(vtbd->vtbd_session,
-                          kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
-                          kCFAllocatorDefault, &hw_value) &&
-    hw_value != NULL && CFEqual(hw_value, kCFBooleanTrue);
-  if(hw_value != NULL)
-    CFRelease(hw_value);
-
   TRACE(TRACE_INFO, "VTB",
-        "Opened %s decoder %dx%d, hardware=%s, pixel-format=%s, renderer=%s",
+        "Opened %s decoder %dx%d, hardware=required, pixel-format=%s, renderer=%s",
         mc->codec_id == AV_CODEC_ID_HEVC ? "HEVC" : "H264",
-        mcp->width, mcp->height, hw_active ? "yes" : "no",
+        mcp->width, mcp->height,
         vtbd->vtbd_pixel_format ==
           kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ? "NV12 full-range" :
         vtbd->vtbd_pixel_format ==
