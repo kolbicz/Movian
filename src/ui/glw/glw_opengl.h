@@ -117,6 +117,9 @@ typedef struct glw_backend_root {
   struct glw_program *gbr_rgb2rgb_2f;
   struct glw_program *gbr_yc2rgb_1f;
   struct glw_program *gbr_yc2rgb_2f;
+  struct glw_program *gbr_p010_1f;
+  struct glw_program *gbr_p010_pq_1f;
+  struct glw_program *gbr_p010_hlg_1f;
 
   /**
    *

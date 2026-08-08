@@ -464,6 +464,7 @@ SRCS-$(CONFIG_GLW_BACKEND_OPENGL) += src/ui/glw/glw_opengl_shaders.c \
                                      src/ui/glw/glw_opengl_ogl.c \
                                      src/ui/glw/glw_texture_opengl.c \
                                      src/ui/glw/glw_video_opengl.c \
+                                     src/ui/glw/glw_video_osx_p010.c \
                                      src/ui/glw/glw_video_vdpau.c \
 
 SRCS-$(CONFIG_GLW_BACKEND_OPENGL_ES) += src/ui/glw/glw_opengl_shaders.c \

@@ -50,6 +50,8 @@ typedef struct vtb_frame {
 typedef struct vtb_decoder {
   VTDecompressionSessionRef vtbd_session;
   CMVideoFormatDescriptionRef vtbd_fmt;
+  VTPixelTransferSessionRef vtbd_pixel_transfer;
+  CVPixelBufferPoolRef vtbd_sdr_pool;
 
   hts_mutex_t vtbd_mutex;
   video_decoder_t *vtbd_vd;
@@ -60,16 +62,49 @@ typedef struct vtb_decoder {
   int64_t vtbd_last_pts;
   int vtbd_estimated_duration;
   int vtbd_pixel_format;
+  int vtbd_decode_pixel_format;
   int vtbd_codec_id;
   int vtbd_profile;
+  int vtbd_color_transfer;
+  int vtbd_hdr_to_sdr;
+  int vtbd_assumed_sdr;
+  int vtbd_p010_playback;
+  int vtbd_p010_direct;
+  int vtbd_dolby_vision_tag;
   int vtbd_hw_status_reported;
+  int vtbd_output_reported;
+  int vtbd_sdr_output_reported;
 } vtb_decoder_t;
+
+static void dict_set_int32(CFMutableDictionaryRef dict, CFStringRef key,
+                           int value);
+
+static void
+add_source_color_extensions(CFMutableDictionaryRef dict,
+                            const media_codec_params_t *mcp)
+{
+  if(mcp->color_primaries == AVCOL_PRI_BT2020)
+    CFDictionarySetValue(dict, kCVImageBufferColorPrimariesKey,
+                         kCVImageBufferColorPrimaries_ITU_R_2020);
+
+  if(mcp->color_transfer == AVCOL_TRC_SMPTE2084)
+    CFDictionarySetValue(dict, kCVImageBufferTransferFunctionKey,
+                         kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ);
+  else if(mcp->color_transfer == AVCOL_TRC_ARIB_STD_B67)
+    CFDictionarySetValue(dict, kCVImageBufferTransferFunctionKey,
+                         kCVImageBufferTransferFunction_ITU_R_2100_HLG);
+
+  if(mcp->color_matrix == AVCOL_SPC_BT2020_NCL ||
+     mcp->color_matrix == AVCOL_SPC_BT2020_CL)
+    CFDictionarySetValue(dict, kCVImageBufferYCbCrMatrixKey,
+                         kCVImageBufferYCbCrMatrix_ITU_R_2020);
+}
 
 
 /**
- * Main10 can be decoded into the existing 8-bit NV12 renderer for SDR video.
- * PQ and HLG require a P010/HDR-aware renderer, while unspecified transfer
- * metadata is deliberately kept on the conservative fallback path.
+ * Main10 SDR can be decoded directly into the existing 8-bit NV12 renderer.
+ * Explicit PQ and HLG use VideoToolbox's HDR-to-SDR pixel-transfer stage;
+ * unspecified transfer metadata stays on the conservative fallback path.
  */
 static int
 hevc_main10_is_sdr(const media_codec_params_t *mcp)
@@ -87,6 +122,166 @@ hevc_main10_is_sdr(const media_codec_params_t *mcp)
     return 0;
   }
 }
+
+
+/**
+ * HDR formats that VideoToolbox can safely convert to the existing BT.709,
+ * 8-bit renderer through its pixel-transfer stage.  Unknown transfer metadata
+ * remains on the software path because treating it as either SDR or HDR can
+ * produce incorrect luminance.
+ */
+static int
+hevc_main10_is_hdr(const media_codec_params_t *mcp)
+{
+  return mcp->color_transfer == AVCOL_TRC_SMPTE2084 ||
+         mcp->color_transfer == AVCOL_TRC_ARIB_STD_B67;
+}
+
+
+/**
+ * Return a printable representation of a CoreVideo color attachment.
+ */
+static const char *
+copy_attachment_string(CVBufferRef buf, CFStringRef key,
+                       char *dst, size_t dstlen)
+{
+  CFTypeRef value = CVBufferCopyAttachment(buf, key, NULL);
+  if(value == NULL) {
+    snprintf(dst, dstlen, "missing");
+  } else if(CFGetTypeID(value) != CFStringGetTypeID() ||
+            !CFStringGetCString(value, dst, dstlen, kCFStringEncodingUTF8)) {
+    snprintf(dst, dstlen, "non-string");
+  }
+  if(value != NULL)
+    CFRelease(value);
+  return dst;
+}
+
+
+/**
+ * Log the real output selected by VideoToolbox.  Session creation only states
+ * what Movian requested; these first-frame values tell us what each iOS/macOS
+ * version and device actually returned after HDR pixel transfer.
+ */
+static void
+report_output_format(vtb_decoder_t *vtbd, CVPixelBufferRef imageBuffer,
+                     const char *stage)
+{
+  const OSType pf = CVPixelBufferGetPixelFormatType(imageBuffer);
+  char primaries[96], transfer[96], matrix[96];
+
+  TRACE(TRACE_INFO, "VTB",
+        "%s output buffer format=%c%c%c%c (0x%08x), planes=%zu, IOSurface=%s, primaries=%s, transfer=%s, matrix=%s%s",
+        stage,
+        (int)((pf >> 24) & 0xff), (int)((pf >> 16) & 0xff),
+        (int)((pf >> 8) & 0xff), (int)(pf & 0xff), (unsigned int)pf,
+        CVPixelBufferGetPlaneCount(imageBuffer),
+        CVPixelBufferGetIOSurface(imageBuffer) != NULL ? "yes" : "no",
+        copy_attachment_string(imageBuffer, kCVImageBufferColorPrimariesKey,
+                               primaries, sizeof(primaries)),
+        copy_attachment_string(imageBuffer, kCVImageBufferTransferFunctionKey,
+                               transfer, sizeof(transfer)),
+        copy_attachment_string(imageBuffer, kCVImageBufferYCbCrMatrixKey,
+                               matrix, sizeof(matrix)),
+        vtbd->vtbd_dolby_vision_tag ? ", Dolby-Vision-tag=yes" : "");
+}
+
+
+/**
+ * Test whether VideoToolbox accepts a hardware HEVC session requesting P010.
+ * The probe session never decodes or renders frames, so the working NV12 path
+ * remains unchanged.  This is capability evidence for a future renderer.
+ */
+static void
+probe_p010_output(CMVideoFormatDescriptionRef fmt,
+                  CFDictionaryRef decoder_specification,
+                  int width, int height)
+{
+  CFMutableDictionaryRef attrs =
+    CFDictionaryCreateMutable(kCFAllocatorDefault, 4,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+  dict_set_int32(attrs, kCVPixelBufferWidthKey, width);
+  dict_set_int32(attrs, kCVPixelBufferHeightKey, height);
+  dict_set_int32(attrs, kCVPixelBufferPixelFormatTypeKey,
+                 kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange);
+
+  CFMutableDictionaryRef iosurface_dict =
+    CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+  CFDictionarySetValue(attrs, kCVPixelBufferIOSurfacePropertiesKey,
+                       iosurface_dict);
+  CFRelease(iosurface_dict);
+
+  VTDecompressionSessionRef probe_session = NULL;
+  OSStatus status = VTDecompressionSessionCreate(kCFAllocatorDefault, fmt,
+                                                  decoder_specification,
+                                                  attrs, NULL,
+                                                  &probe_session);
+  CFRelease(attrs);
+
+  if(status == noErr && probe_session != NULL) {
+    TRACE(TRACE_INFO, "VTB",
+          "P010 probe: hardware decoder session accepted 10-bit bi-planar IOSurface output");
+    VTDecompressionSessionInvalidate(probe_session);
+    CFRelease(probe_session);
+  } else {
+    TRACE(TRACE_INFO, "VTB",
+          "P010 probe: decoder session rejected 10-bit output (status=%d)",
+          (int)status);
+  }
+}
+
+
+#if TARGET_OS_OSX
+/**
+ * Build the temporary Test 2 bridge.  VideoToolbox emits real P010 frames;
+ * VTPixelTransfer converts them to the planar BT.709 buffers accepted by the
+ * existing macOS OpenGL renderer.  Keeping this separate from decompression
+ * lets us verify the actual 10-bit output before conversion.
+ */
+static int
+create_p010_sdr_bridge(vtb_decoder_t *vtbd, int width, int height)
+{
+  OSStatus status = VTPixelTransferSessionCreate(kCFAllocatorDefault,
+                                                  &vtbd->vtbd_pixel_transfer);
+  if(status != noErr)
+    return status;
+
+  CFMutableDictionaryRef transfer_dict =
+    CFDictionaryCreateMutable(kCFAllocatorDefault, 3,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+  CFDictionarySetValue(transfer_dict,
+                       kVTPixelTransferPropertyKey_DestinationColorPrimaries,
+                       kCVImageBufferColorPrimaries_ITU_R_709_2);
+  CFDictionarySetValue(transfer_dict,
+                       kVTPixelTransferPropertyKey_DestinationTransferFunction,
+                       kCVImageBufferTransferFunction_ITU_R_709_2);
+  CFDictionarySetValue(transfer_dict,
+                       kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
+                       kCVImageBufferYCbCrMatrix_ITU_R_709_2);
+  status = VTSessionSetProperties(vtbd->vtbd_pixel_transfer, transfer_dict);
+  CFRelease(transfer_dict);
+  if(status != noErr)
+    return status;
+
+  CFMutableDictionaryRef pool_attrs =
+    CFDictionaryCreateMutable(kCFAllocatorDefault, 3,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+  dict_set_int32(pool_attrs, kCVPixelBufferWidthKey, width);
+  dict_set_int32(pool_attrs, kCVPixelBufferHeightKey, height);
+  dict_set_int32(pool_attrs, kCVPixelBufferPixelFormatTypeKey,
+                 kCVPixelFormatType_420YpCbCr8Planar);
+  CVReturn cvstatus = CVPixelBufferPoolCreate(kCFAllocatorDefault, NULL,
+                                               pool_attrs,
+                                               &vtbd->vtbd_sdr_pool);
+  CFRelease(pool_attrs);
+  return cvstatus;
+}
+#endif
 
 
 /**
@@ -136,7 +331,8 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   fi.fi_dar_den = siz.height;
 
   fi.fi_pts = vf->vf_mbm.mbm_pts;
-  fi.fi_color_space = -1;
+  fi.fi_color_space = vtbd->vtbd_hdr_to_sdr ? COLOR_SPACE_BT_709 : -1;
+  fi.fi_color_transfer = vtbd->vtbd_color_transfer;
   fi.fi_epoch = vf->vf_mbm.mbm_epoch;
   fi.fi_drive_clock = vf->vf_mbm.mbm_drive_clock;
   fi.fi_user_time = vf->vf_mbm.mbm_user_time;
@@ -176,6 +372,13 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
       if(fi.fi_duration > 0)
         video_deliver_frame(vd, &fi);
       break;
+
+    case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
+      fi.fi_type = 'P010';
+      fi.fi_data[0] = (void *)vf->vf_buf;
+      if(fi.fi_duration > 0)
+        video_deliver_frame(vd, &fi);
+      break;
   }
 
 
@@ -185,7 +388,11 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   char fmt[64];
   snprintf(fmt, sizeof(fmt), "%s (VTB) %d x %d",
            vtbd->vtbd_codec_id == AV_CODEC_ID_HEVC ?
-             (vtbd->vtbd_profile == 2 ? "HEVC Main10->8-bit" : "HEVC") :
+             (vtbd->vtbd_p010_direct ? "HEVC P010 direct" :
+              vtbd->vtbd_p010_playback ? "HEVC P010->SDR" :
+              vtbd->vtbd_hdr_to_sdr ? "HEVC HDR->SDR" :
+              vtbd->vtbd_assumed_sdr ? "HEVC Main10 SDR assumed" :
+              vtbd->vtbd_profile == 2 ? "HEVC Main10->8-bit" : "HEVC") :
              "H264",
            fi.fi_width, fi.fi_height);
   prop_set_string(mq->mq_prop_codec, fmt);
@@ -229,6 +436,43 @@ picture_out(void *decompressionOutputRefCon,
   if(imageBuffer == NULL)
     return; // No frame, typically from kVTDecodeFrame_DoNotOutputFrame
 
+  if(!vtbd->vtbd_output_reported) {
+    report_output_format(vtbd, imageBuffer, "Decoder");
+    vtbd->vtbd_output_reported = 1;
+  }
+
+  CVPixelBufferRef outputBuffer = imageBuffer;
+
+#if TARGET_OS_OSX
+  CVPixelBufferRef convertedBuffer = NULL;
+  if(vtbd->vtbd_p010_playback && !vtbd->vtbd_p010_direct) {
+    hts_mutex_lock(&vtbd->vtbd_mutex);
+    CVReturn cvstatus = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault,
+                                                           vtbd->vtbd_sdr_pool,
+                                                           &convertedBuffer);
+    OSStatus transfer_status = cvstatus == kCVReturnSuccess ?
+      VTPixelTransferSessionTransferImage(vtbd->vtbd_pixel_transfer,
+                                           imageBuffer, convertedBuffer) :
+      cvstatus;
+    hts_mutex_unlock(&vtbd->vtbd_mutex);
+
+    if(transfer_status != noErr || convertedBuffer == NULL) {
+      TRACE(TRACE_ERROR, "VTB",
+            "P010-to-SDR transfer failed (status=%d)",
+            (int)transfer_status);
+      if(convertedBuffer != NULL)
+        CFRelease(convertedBuffer);
+      return;
+    }
+    outputBuffer = convertedBuffer;
+
+    if(!vtbd->vtbd_sdr_output_reported) {
+      report_output_format(vtbd, outputBuffer, "SDR bridge");
+      vtbd->vtbd_sdr_output_reported = 1;
+    }
+  }
+#endif
+
   if(!vtbd->vtbd_hw_status_reported) {
     CFTypeRef hw_value = NULL;
     OSStatus hw_status =
@@ -257,8 +501,13 @@ picture_out(void *decompressionOutputRefCon,
 
   vtb_frame_t *vf = malloc(sizeof(vtb_frame_t));
   vf->vf_mbm = *mbm;
-  vf->vf_buf = imageBuffer;
-  CFRetain(imageBuffer);
+  vf->vf_buf = outputBuffer;
+  CFRetain(outputBuffer);
+
+#if TARGET_OS_OSX
+  if(convertedBuffer != NULL)
+    CFRelease(convertedBuffer);
+#endif
 
   hts_mutex_lock(&vtbd->vtbd_mutex);
 
@@ -384,6 +633,13 @@ vtb_close(struct media_codec *mc)
   VTDecompressionSessionInvalidate(vtbd->vtbd_session);
   CFRelease(vtbd->vtbd_session);
 
+  if(vtbd->vtbd_pixel_transfer != NULL) {
+    VTPixelTransferSessionInvalidate(vtbd->vtbd_pixel_transfer);
+    CFRelease(vtbd->vtbd_pixel_transfer);
+  }
+  if(vtbd->vtbd_sdr_pool != NULL)
+    CFRelease(vtbd->vtbd_sdr_pool);
+
   CFRelease(vtbd->vtbd_fmt);
   free(vtbd);
 }
@@ -442,6 +698,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   }
 
   int stream_profile = mcp->profile;
+  int assumed_sdr = 0;
 
   if(mc->codec_id == AV_CODEC_ID_HEVC) {
     const uint8_t *hvcC = mcp->extradata;
@@ -452,11 +709,21 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     if(stream_profile != 1 && stream_profile != 2)
       return 1;
 
-    if(stream_profile == 2 && !hevc_main10_is_sdr(mcp)) {
-      TRACE(TRACE_INFO, "VTB",
-            "HEVC Main10 uses fallback: transfer=%d is HDR or unspecified",
-            mcp->color_transfer);
-      return 1;
+    if(stream_profile == 2 && !hevc_main10_is_sdr(mcp) &&
+       !hevc_main10_is_hdr(mcp)) {
+      if(mcp->color_transfer == AVCOL_TRC_UNSPECIFIED &&
+         video_settings.video_accel_untagged_main10) {
+        assumed_sdr = 1;
+        TRACE(TRACE_INFO, "VTB",
+              "HEVC Main10 SDR assumed: transfer metadata is unspecified and opt-in is enabled");
+      } else {
+        TRACE(TRACE_INFO, "VTB",
+              "HEVC Main10 uses fallback: transfer=%d is unsupported or unspecified%s",
+              mcp->color_transfer,
+              mcp->color_transfer == AVCOL_TRC_UNSPECIFIED ?
+                " (enable 'Assume untagged HEVC Main10 is SDR' to override)" : "");
+        return 1;
+      }
     }
   }
 
@@ -473,6 +740,16 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   CFDictionarySetValue(config_dict,
                        kCVImageBufferChromaLocationTopFieldKey,
                        kCVImageBufferChromaLocation_Left);
+
+#if TARGET_OS_OSX
+  if(mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2 &&
+     video_settings.video_accel_p010_direct) {
+    add_source_color_extensions(config_dict, mcp);
+    TRACE(TRACE_INFO, "VTB",
+          "P010 format description preserves source color metadata: transfer=%d, primaries=%d, matrix=%d",
+          mcp->color_transfer, mcp->color_primaries, mcp->color_matrix);
+  }
+#endif
 
   // Setup extradata
   CFMutableDictionaryRef extradata_dict =
@@ -513,6 +790,10 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     return 1;
   }
 
+  if(stream_profile == 2 && hevc_main10_is_hdr(mcp) &&
+     video_settings.video_accel_probe_p010)
+    probe_p010_output(fmt, config_dict, mcp->width, mcp->height);
+
 
   CFMutableDictionaryRef surface_dict =
     CFDictionaryCreateMutable(kCFAllocatorDefault,
@@ -546,6 +827,21 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   vtb_decoder_t *vtbd = calloc(1, sizeof(vtb_decoder_t));
   vtbd->vtbd_codec_id = mc->codec_id;
   vtbd->vtbd_profile = stream_profile;
+  vtbd->vtbd_color_transfer = mcp->color_transfer;
+  vtbd->vtbd_assumed_sdr = assumed_sdr;
+  vtbd->vtbd_dolby_vision_tag =
+    mcp->codec_tag == MKTAG('d', 'v', 'h', 'e') ||
+    mcp->codec_tag == MKTAG('d', 'v', 'h', '1');
+  vtbd->vtbd_hdr_to_sdr = mc->codec_id == AV_CODEC_ID_HEVC &&
+                          stream_profile == 2 &&
+                          hevc_main10_is_hdr(mcp);
+#if TARGET_OS_OSX
+  vtbd->vtbd_p010_playback = mc->codec_id == AV_CODEC_ID_HEVC &&
+                             stream_profile == 2 &&
+                             video_settings.video_accel_p010_playback;
+  vtbd->vtbd_p010_direct = vtbd->vtbd_p010_playback &&
+                           video_settings.video_accel_p010_direct;
+#endif
 
   const int source_depth = mcp->bits_per_component > 0 ?
     mcp->bits_per_component :
@@ -555,17 +851,37 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   dict_set_int32(surface_dict, kCVPixelBufferHeightKey, mcp->height);
 
 #if TARGET_OS_IPHONE
-    vtbd->vtbd_pixel_format = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
+  vtbd->vtbd_decode_pixel_format = vtbd->vtbd_hdr_to_sdr ?
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange :
+    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
+  vtbd->vtbd_pixel_format = vtbd->vtbd_decode_pixel_format;
 #else
-    vtbd->vtbd_pixel_format = kCVPixelFormatType_420YpCbCr8Planar;
+  vtbd->vtbd_decode_pixel_format = vtbd->vtbd_p010_playback ?
+    kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
+    kCVPixelFormatType_420YpCbCr8Planar;
+  vtbd->vtbd_pixel_format = vtbd->vtbd_p010_direct ?
+    kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
+    kCVPixelFormatType_420YpCbCr8Planar;
 #endif
 
   dict_set_int32(surface_dict, kCVPixelBufferPixelFormatTypeKey,
-                 vtbd->vtbd_pixel_format);
+                 vtbd->vtbd_decode_pixel_format);
+
+#if TARGET_OS_OSX
+  if(vtbd->vtbd_p010_playback && !vtbd->vtbd_p010_direct) {
+    CFMutableDictionaryRef iosurface_dict =
+      CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+                                &kCFTypeDictionaryKeyCallBacks,
+                                &kCFTypeDictionaryValueCallBacks);
+    CFDictionarySetValue(surface_dict, kCVPixelBufferIOSurfacePropertiesKey,
+                         iosurface_dict);
+    CFRelease(iosurface_dict);
+  }
+#endif
 
   int linewidth = mcp->width;
 
-  switch(vtbd->vtbd_pixel_format) {
+  switch(vtbd->vtbd_decode_pixel_format) {
     case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
     case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
       linewidth *= 2;
@@ -596,6 +912,65 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     return 1;
 
   }
+
+  if(vtbd->vtbd_hdr_to_sdr && !vtbd->vtbd_p010_playback) {
+    /* Apple recommends performing HDR-to-SDR color conversion before, or at
+     * the same time as, 10-to-8-bit conversion.  The decompression session's
+     * pixel-transfer stage does both and returns BT.709 NV12/YUV420 frames for
+     * Movian's existing SDR OpenGL/OpenGLES renderer. */
+    CFMutableDictionaryRef transfer_dict =
+      CFDictionaryCreateMutable(kCFAllocatorDefault,
+                                3,
+                                &kCFTypeDictionaryKeyCallBacks,
+                                &kCFTypeDictionaryValueCallBacks);
+    CFDictionarySetValue(transfer_dict,
+                         kVTPixelTransferPropertyKey_DestinationColorPrimaries,
+                         kCVImageBufferColorPrimaries_ITU_R_709_2);
+    CFDictionarySetValue(transfer_dict,
+                         kVTPixelTransferPropertyKey_DestinationTransferFunction,
+                         kCVImageBufferTransferFunction_ITU_R_709_2);
+    CFDictionarySetValue(transfer_dict,
+                         kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
+                         kCVImageBufferYCbCrMatrix_ITU_R_709_2);
+
+    status = VTSessionSetProperty(vtbd->vtbd_session,
+                                  kVTDecompressionPropertyKey_PixelTransferProperties,
+                                  transfer_dict);
+    CFRelease(transfer_dict);
+
+    if(status) {
+      TRACE(TRACE_INFO, "VTB",
+            "HDR-to-SDR pixel transfer unavailable (status=%d); using software fallback",
+            (int)status);
+      VTDecompressionSessionInvalidate(vtbd->vtbd_session);
+      CFRelease(vtbd->vtbd_session);
+      CFRelease(fmt);
+      free(vtbd);
+      return 1;
+    }
+  }
+
+#if TARGET_OS_OSX
+  if(vtbd->vtbd_p010_playback) {
+    status = create_p010_sdr_bridge(vtbd, mcp->width, mcp->height);
+    if(status) {
+      TRACE(TRACE_INFO, "VTB",
+            "P010 SDR bridge unavailable (status=%d); using software fallback",
+            (int)status);
+      VTDecompressionSessionInvalidate(vtbd->vtbd_session);
+      CFRelease(vtbd->vtbd_session);
+      if(vtbd->vtbd_pixel_transfer != NULL) {
+        VTPixelTransferSessionInvalidate(vtbd->vtbd_pixel_transfer);
+        CFRelease(vtbd->vtbd_pixel_transfer);
+      }
+      if(vtbd->vtbd_sdr_pool != NULL)
+        CFRelease(vtbd->vtbd_sdr_pool);
+      CFRelease(fmt);
+      free(vtbd);
+      return 1;
+    }
+  }
+#endif
   vtbd->vtbd_fmt = fmt;
   vtbd->vtbd_max_ts   = PTS_UNSET;
   vtbd->vtbd_flush_to = PTS_UNSET;
@@ -609,20 +984,26 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   TRACE(TRACE_INFO, "VTB",
         "Opened %s decoder %dx%d, source-depth=%d, transfer=%d, primaries=%d, matrix=%d, range=%d, hardware=required, pixel-format=%s, renderer=%s",
         mc->codec_id == AV_CODEC_ID_HEVC ?
-          (stream_profile == 2 ? "HEVC Main10 SDR" : "HEVC Main") :
+          (vtbd->vtbd_p010_direct ? "HEVC Main10 direct-P010" :
+           vtbd->vtbd_p010_playback ? "HEVC Main10 P010-to-SDR" :
+           vtbd->vtbd_hdr_to_sdr ? "HEVC Main10 HDR-to-SDR" :
+           vtbd->vtbd_assumed_sdr ? "HEVC Main10 SDR assumed" :
+           stream_profile == 2 ? "HEVC Main10 SDR" : "HEVC Main") :
           "H264",
         mcp->width, mcp->height,
         source_depth, mcp->color_transfer,
         mcp->color_primaries, mcp->color_matrix, mcp->color_range,
-        vtbd->vtbd_pixel_format ==
+        vtbd->vtbd_decode_pixel_format ==
           kCVPixelFormatType_420YpCbCr8BiPlanarFullRange ? "NV12 full-range" :
-        vtbd->vtbd_pixel_format ==
+        vtbd->vtbd_decode_pixel_format ==
           kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ? "NV12 video-range" :
+        vtbd->vtbd_decode_pixel_format ==
+          kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ? "P010 video-range" :
                                                            "planar 4:2:0",
 #if TARGET_OS_IPHONE
         "IOSurface zero-copy"
 #else
-        "OpenGL"
+        vtbd->vtbd_p010_direct ? "OpenGL IOSurface zero-copy" : "OpenGL"
 #endif
         );
   return 0;

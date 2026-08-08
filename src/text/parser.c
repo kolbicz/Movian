@@ -23,6 +23,7 @@
 #include "misc/str.h"
 #include "misc/unicode_composition.h"
 #include "misc/minmax.h"
+#include "main.h"
 
 #include "text.h"
 #include "subtitles/subtitles_settings.h"
@@ -660,13 +661,42 @@ text_parse_subtitles(const char *str, int *lenp, int flags,
       default_color = prefix[i] & 0xffffff;
   }
 
-  *lenp = parse_str(NULL, str, flags, context, default_color, 1);
-  if(*lenp == 0)
+  const int estimated = parse_str(NULL, str, flags, context,
+                                  default_color, 1);
+  if(estimated == 0)
     return NULL;
-  *lenp += prefixlen;
-  buf = malloc(*lenp * sizeof(int));
+
+  /* parse_str() predates concurrent external subtitle loading and performs a
+   * count pass followed by a write pass.  Do not trust an exact-sized first
+   * pass allocation: subtitle settings and permissive legacy-tag parsing can
+   * make the two passes disagree, which would corrupt the following malloc
+   * block before the discrepancy could be observed.  Four output codes per
+   * input byte is a conservative ceiling for the supported tag expansions. */
+  const size_t input_len = strlen(str);
+  if(input_len > (SIZE_MAX / 4) - 64 - prefixlen)
+    return NULL;
+  size_t capacity = input_len * 4 + 64 + prefixlen;
+  if(capacity < (size_t)estimated + prefixlen)
+    capacity = (size_t)estimated + prefixlen;
+  if(capacity > SIZE_MAX / sizeof(*buf))
+    return NULL;
+
+  buf = malloc(capacity * sizeof(*buf));
+  if(buf == NULL)
+    return NULL;
   memcpy(buf, prefix, prefixlen * sizeof(int));
-  parse_str(buf+prefixlen, str, flags, context, default_color, 1);
+  const int written = parse_str(buf + prefixlen, str, flags, context,
+                                default_color, 1);
+  if(written < 0 || (size_t)written + prefixlen > capacity) {
+    TRACE(TRACE_ERROR, "Text", "Subtitle parser exceeded guarded capacity");
+    free(buf);
+    return NULL;
+  }
+  if(written != estimated)
+    TRACE(TRACE_ERROR, "Text",
+          "Subtitle parser pass mismatch: estimated=%d written=%d",
+          estimated, written);
+  *lenp = written + prefixlen;
   return buf;
 
 }

@@ -49,6 +49,10 @@ struct video_settings {
   int vdpau_deinterlace_resolution_limit;
   int continuous_playback;
   int video_accel;
+  int video_accel_untagged_main10;
+  int video_accel_probe_p010;
+  int video_accel_p010_playback;
+  int video_accel_p010_direct;
   int video_accel_mpeg4;
 
 #if ENABLE_WSL2
@@ -68,4 +72,3 @@ struct video_settings {
 };
 
 extern struct video_settings video_settings;
-

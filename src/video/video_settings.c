@@ -121,6 +121,36 @@ video_settings_init(void)
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel),
                  NULL);
+
+  setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Assume untagged HEVC Main10 is SDR")),
+                 SETTING_STORE("hw_videoplayback", "untagged_main10_sdr"),
+                 SETTING_VALUE(1),
+                 SETTING_WRITE_BOOL(&video_settings.video_accel_untagged_main10),
+                 NULL);
+
+  setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Probe 10-bit P010 HDR output")),
+                 SETTING_STORE("hw_videoplayback", "probe_p010_hdr"),
+                 SETTING_VALUE(1),
+                 SETTING_WRITE_BOOL(&video_settings.video_accel_probe_p010),
+                 NULL);
+
+#if TARGET_OS_OSX
+  setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Use P010 10-bit decode with SDR output")),
+                 SETTING_STORE("hw_videoplayback", "p010_sdr_playback"),
+                 SETTING_VALUE(1),
+                 SETTING_WRITE_BOOL(&video_settings.video_accel_p010_playback),
+                 NULL);
+
+  setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Direct P010 IOSurface rendering (Test 3)")),
+                 SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
+                 SETTING_VALUE(1),
+                 SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),
+                 NULL);
+#endif
 #endif
 
   settings_create_separator(s, _p("Info Banner"));

@@ -143,6 +143,8 @@ typedef struct frame_info {
     COLOR_SPACE_SMPTE_240M,
   } fi_color_space;
 
+  int fi_color_transfer;
+
   void (*fi_ref_release)(void *aux);
   void *fi_ref_aux;
 
@@ -566,4 +568,3 @@ void media_discontinuity_debug(media_discontinuity_aux_t *aux,
                                int epoch,
                                int skip,
                                const char *prefix);
-

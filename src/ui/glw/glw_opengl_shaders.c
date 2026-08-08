@@ -664,6 +664,28 @@ glw_opengl_shaders_init(glw_root_t *gr)
   glDeleteShader(fs);
   glDeleteShader(vs);
 
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+  // Direct macOS P010 IOSurface renderer (rectangle textures)
+  SHADERPATH("p010_v.glsl");
+  vs = glw_compile_shader(path, GL_VERTEX_SHADER, gr);
+
+  SHADERPATH("p010_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_1f = glw_link_program(gbr, "p010_1f_norm", vs, fs);
+  glDeleteShader(fs);
+
+  SHADERPATH("p010_pq_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_pq_1f = glw_link_program(gbr, "p010_pq_1f_norm", vs, fs);
+  glDeleteShader(fs);
+
+  SHADERPATH("p010_hlg_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_hlg_1f = glw_link_program(gbr, "p010_hlg_1f_norm", vs, fs);
+  glDeleteShader(fs);
+  glDeleteShader(vs);
+#endif
+
   
   // --------
   
@@ -752,4 +774,3 @@ glw_stencil_quad(glw_root_t *gr, const glw_rctx_t *rc)
   glUseProgram(0);
   gbr->gbr_current = NULL;
 }
-

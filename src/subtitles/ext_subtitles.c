@@ -297,7 +297,7 @@ srt_skip_preamble(const char **bufp, size_t *lenp)
 static int
 is_srt(const char *buf, size_t len)
 {
-  if(!memcmp(buf, "WEBVTT", 6)) return 1;
+  if(len >= 6 && !memcmp(buf, "WEBVTT", 6)) return 1;
 
   linereader_t lr;
 
@@ -716,7 +716,7 @@ load_txt_line(ext_subtitles_t *es, const char *src, int len,
     if(src[0] < 32)
       break;
 
-    if(src[0] == '/' && src[1] == '/') {
+    if(len >= 2 && src[0] == '/' && src[1] == '/') {
       *dst++ = '\n';
       src += 2;
       len -= 2;
@@ -948,17 +948,23 @@ subtitles_create(const char *path, buf_t *buf, AVRational *fr)
     char *b0 = buf_str(buf) + off;
     int len  = buf_len(buf) - off;
 
-    if(is_srt(b0, len))
+    if(is_srt(b0, len)) {
+      TRACE(TRACE_DEBUG, "Subtitles", "Parsing SRT/WebVTT (%d bytes)", len);
       s = load_srt(path, b0, len);
-    else if(is_ass(b0, len))
+    } else if(is_ass(b0, len)) {
+      TRACE(TRACE_DEBUG, "Subtitles", "Parsing SSA/ASS (%d bytes)", len);
       s = load_ssa(path, b0, len);
-    else if(is_sub(b0, len))
+    } else if(is_sub(b0, len)) {
+      TRACE(TRACE_DEBUG, "Subtitles", "Parsing MicroDVD SUB (%d bytes)", len);
       s = load_sub_variant(path, b0, len, fr, 0);
-    else if(is_mpl(b0, len))
+    } else if(is_mpl(b0, len)) {
+      TRACE(TRACE_DEBUG, "Subtitles", "Parsing MPL2 (%d bytes)", len);
       s = load_sub_variant(path, b0, len, NULL, 1);
-    else if(is_txt(b0, len))
+    } else if(is_txt(b0, len)) {
+      TRACE(TRACE_DEBUG, "Subtitles", "Parsing TXT (%d bytes)", len);
       s = load_txt(path, b0, len);
-    else if(is_tmp(b0, len)) {
+    } else if(is_tmp(b0, len)) {
+      TRACE(TRACE_DEBUG, "Subtitles", "Parsing TMP (%d bytes)", len);
       s = load_tmp(path, b0, len);
       trim_stop = 1;
     }
