@@ -30,6 +30,11 @@
 #include "video_settings.h"
 #include "h264_annexb.h"
 
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+#include "../../ext/libav/libavcodec/cbs.h"
+#include "../../ext/libav/libavcodec/cbs_av1.h"
+#endif
+
 
 LIST_HEAD(vtb_frame_list, vtb_frame);
 
@@ -78,6 +83,82 @@ typedef struct vtb_decoder {
 
 static void dict_set_int32(CFMutableDictionaryRef dict, CFStringRef key,
                            int value);
+
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+typedef struct av1_config_info {
+  int profile;
+  int level;
+  int tier;
+  int depth;
+  int monochrome;
+  int subsampling_x;
+  int subsampling_y;
+  int chroma_sample_position;
+} av1_config_info_t;
+
+static int
+av1_parse_config(const media_codec_params_t *mcp, av1_config_info_t *info)
+{
+  CodedBitstreamContext *ctx = NULL;
+  CodedBitstreamFragment frag = {0};
+  AVCodecParameters par = {0};
+  int err = ff_cbs_init(&ctx, AV_CODEC_ID_AV1, NULL);
+  if(err < 0)
+    return err;
+
+  par.codec_type = AVMEDIA_TYPE_VIDEO;
+  par.codec_id = AV_CODEC_ID_AV1;
+  par.extradata = (uint8_t *)mcp->extradata;
+  par.extradata_size = mcp->extradata_size;
+  err = ff_cbs_read_extradata(ctx, &frag, &par);
+  if(err < 0)
+    goto done;
+
+  err = AVERROR_INVALIDDATA;
+  for(int i = 0; i < frag.nb_units; i++) {
+    CodedBitstreamUnit *unit = &frag.units[i];
+    if(unit->type != AV1_OBU_SEQUENCE_HEADER || unit->content == NULL)
+      continue;
+
+    const AV1RawOBU *obu = unit->content;
+    const AV1RawSequenceHeader *seq = &obu->obu.sequence_header;
+    const AV1RawColorConfig *color = &seq->color_config;
+    info->profile = seq->seq_profile;
+    info->level = seq->seq_level_idx[0];
+    info->tier = seq->seq_tier[0];
+    info->depth = color->high_bitdepth ?
+      (color->twelve_bit ? 12 : 10) : 8;
+    info->monochrome = color->mono_chrome;
+    info->subsampling_x = color->subsampling_x;
+    info->subsampling_y = color->subsampling_y;
+    info->chroma_sample_position = color->chroma_sample_position;
+    err = 0;
+    break;
+  }
+
+done:
+  ff_cbs_fragment_reset(&frag);
+  ff_cbs_close(&ctx);
+  return err;
+}
+#endif
+
+static const char *
+vtb_codec_name(enum AVCodecID codec_id)
+{
+  switch(codec_id) {
+  case AV_CODEC_ID_H264:
+    return "H264";
+  case AV_CODEC_ID_HEVC:
+    return "HEVC";
+  case AV_CODEC_ID_AV1:
+    return "AV1";
+  case AV_CODEC_ID_VP9:
+    return "VP9";
+  default:
+    return "unknown";
+  }
+}
 
 static void
 add_source_color_extensions(CFMutableDictionaryRef dict,
@@ -234,12 +315,12 @@ probe_p010_output(CMVideoFormatDescriptionRef fmt,
 }
 
 
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
 /**
- * Build the temporary Test 2 bridge.  VideoToolbox emits real P010 frames;
- * VTPixelTransfer converts them to the planar BT.709 buffers accepted by the
- * existing macOS OpenGL renderer.  Keeping this separate from decompression
- * lets us verify the actual 10-bit output before conversion.
+ * VideoToolbox emits real P010 frames; VTPixelTransfer converts them to the
+ * BT.709 buffers accepted by the existing platform renderer. Keeping this
+ * separate from decompression lets us verify the actual 10-bit output before
+ * conversion and avoids adding a P010 OpenGL ES renderer prematurely.
  */
 static int
 create_p010_sdr_bridge(vtb_decoder_t *vtbd, int width, int height)
@@ -274,7 +355,20 @@ create_p010_sdr_bridge(vtb_decoder_t *vtbd, int width, int height)
   dict_set_int32(pool_attrs, kCVPixelBufferWidthKey, width);
   dict_set_int32(pool_attrs, kCVPixelBufferHeightKey, height);
   dict_set_int32(pool_attrs, kCVPixelBufferPixelFormatTypeKey,
+#if TARGET_OS_IPHONE
+                 kCVPixelFormatType_420YpCbCr8BiPlanarFullRange);
+  CFDictionarySetValue(pool_attrs, kCVPixelBufferOpenGLESCompatibilityKey,
+                       kCFBooleanTrue);
+  CFMutableDictionaryRef iosurface_dict =
+    CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+  CFDictionarySetValue(pool_attrs, kCVPixelBufferIOSurfacePropertiesKey,
+                       iosurface_dict);
+  CFRelease(iosurface_dict);
+#else
                  kCVPixelFormatType_420YpCbCr8Planar);
+#endif
   CVReturn cvstatus = CVPixelBufferPoolCreate(kCFAllocatorDefault, NULL,
                                                pool_attrs,
                                                &vtbd->vtbd_sdr_pool);
@@ -393,7 +487,7 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
               vtbd->vtbd_hdr_to_sdr ? "HEVC HDR->SDR" :
               vtbd->vtbd_assumed_sdr ? "HEVC Main10 SDR assumed" :
               vtbd->vtbd_profile == 2 ? "HEVC Main10->8-bit" : "HEVC") :
-             "H264",
+           vtb_codec_name(vtbd->vtbd_codec_id),
            fi.fi_width, fi.fi_height);
   prop_set_string(mq->mq_prop_codec, fmt);
 }
@@ -443,7 +537,7 @@ picture_out(void *decompressionOutputRefCon,
 
   CVPixelBufferRef outputBuffer = imageBuffer;
 
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
   CVPixelBufferRef convertedBuffer = NULL;
   if(vtbd->vtbd_p010_playback && !vtbd->vtbd_p010_direct) {
     hts_mutex_lock(&vtbd->vtbd_mutex);
@@ -474,28 +568,14 @@ picture_out(void *decompressionOutputRefCon,
 #endif
 
   if(!vtbd->vtbd_hw_status_reported) {
-    CFTypeRef hw_value = NULL;
-    OSStatus hw_status =
-      VTSessionCopyProperty(vtbd->vtbd_session,
-                            kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
-                            kCFAllocatorDefault, &hw_value);
-    const int hw_confirmed = !hw_status && hw_value != NULL &&
-      CFEqual(hw_value, kCFBooleanTrue);
-
-    if(hw_confirmed) {
-      TRACE(TRACE_INFO, "VTB", "Hardware decoder confirmed after first frame");
-    } else {
-      /* This session was created with RequireHardwareAcceleratedVideoDecoder.
-       * Some iOS releases nevertheless return false or no value for the
-       * read-only status property until later (or for the session lifetime).
-       * A successfully created session is still hardware-backed: software
-       * decoding cannot satisfy the required decoder specification. */
-      TRACE(TRACE_INFO, "VTB",
-            "Hardware decoder active (required by session; status property did not confirm, status=%d, value=%s)",
-            (int)hw_status, hw_value == NULL ? "missing" : "false");
-    }
-    if(hw_value != NULL)
-      CFRelease(hw_value);
+    /* Never synchronously query VTSession properties from this callback.
+     * On recent macOS VideoToolbox runs the callback on its decoder XPC reply
+     * queue; a synchronous VTSessionCopyProperty() here waits on that same
+     * service and deadlocks before the first frame can be queued. Session
+     * creation used RequireHardwareAcceleratedVideoDecoder, so a successful
+     * session already proves that the hardware decoder is active. */
+    TRACE(TRACE_INFO, "VTB",
+          "Hardware decoder active (required by session; first frame received)");
     vtbd->vtbd_hw_status_reported = 1;
   }
 
@@ -504,7 +584,7 @@ picture_out(void *decompressionOutputRefCon,
   vf->vf_buf = outputBuffer;
   CFRetain(outputBuffer);
 
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
   if(convertedBuffer != NULL)
     CFRelease(convertedBuffer);
 #endif
@@ -666,7 +746,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 {
   OSStatus status;
   CMVideoCodecType codec_type;
-  CFStringRef config_atom;
+  CFStringRef config_atom = NULL;
 
   if(!video_settings.video_accel)
     return 1;
@@ -680,22 +760,108 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     codec_type = kCMVideoCodecType_HEVC;
     config_atom = CFSTR("hvcC");
     break;
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+  case AV_CODEC_ID_AV1:
+    codec_type = kCMVideoCodecType_AV1;
+    config_atom = CFSTR("av1C");
+    break;
+#endif
+  case AV_CODEC_ID_VP9:
+    codec_type = kCMVideoCodecType_VP9;
+    config_atom = CFSTR("vpcC");
+    break;
   default:
     return 1;
   }
 
   if(!VTIsHardwareDecodeSupported(codec_type)) {
     TRACE(TRACE_DEBUG, "VTB", "No hardware decoder for %s",
-          mc->codec_id == AV_CODEC_ID_HEVC ? "HEVC" : "H264");
+          vtb_codec_name(mc->codec_id));
     return 1;
   }
 
-  if(mcp == NULL || mcp->extradata == NULL || mcp->extradata_size == 0 ||
-     ((const uint8_t *)mcp->extradata)[0] != 1) {
+  if(mcp == NULL)
+    return 1;
+
+  if(mc->codec_id == AV_CODEC_ID_VP9) {
+    /* Start with VP9 Profile 0 / 8-bit 4:2:0. Profile may be unknown when a
+     * WebM demuxer has not parsed the first frame yet; VideoToolbox remains
+     * the authority and a rejected session falls through to libavcodec. */
+    if((mcp->profile != FF_PROFILE_UNKNOWN && mcp->profile != 0) ||
+       mcp->bits_per_component > 8) {
+      TRACE(TRACE_DEBUG, "VTB",
+            "VP9 hardware preview rejected profile/depth: profile=%d depth=%d",
+            mcp->profile, mcp->bits_per_component);
+      return 1;
+    }
+  }
+
+  if(mcp->extradata == NULL || mcp->extradata_size == 0) {
+    if(mc->codec_id == AV_CODEC_ID_HEVC)
+      return 1;
+    if(mc->codec_id == AV_CODEC_ID_AV1)
+      return 1;
+    if(mc->codec_id == AV_CODEC_ID_VP9) {
+      config_atom = NULL;
+    } else
+    return h264_annexb_to_avc(mc, mp, &video_vtb_codec_create);
+  }
+
+  const uint8_t *codec_config = mcp->extradata;
+  size_t codec_config_size = mcp->extradata_size;
+  uint8_t *owned_codec_config = NULL;
+  if(mc->codec_id != AV_CODEC_ID_AV1 && mc->codec_id != AV_CODEC_ID_VP9 &&
+     codec_config[0] != 1) {
     if(mc->codec_id == AV_CODEC_ID_HEVC)
       return 1;
     return h264_annexb_to_avc(mc, mp, &video_vtb_codec_create);
   }
+
+  int av1_depth = 0;
+
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+  /* FFmpeg 4.4 exposes MP4 AV1 extradata as sequence-header OBUs rather than
+   * the complete av1C record required by CMVideoFormatDescription. Parse the
+   * sequence header and construct an accurate configuration record, including
+   * streams for which AVCodecParameters leaves format/depth unspecified. */
+  if(mc->codec_id == AV_CODEC_ID_AV1) {
+    av1_config_info_t av1;
+    if(av1_parse_config(mcp, &av1)) {
+      TRACE(TRACE_DEBUG, "VTB", "Unable to parse AV1 sequence header");
+      return 1;
+    }
+    if(av1.profile != FF_PROFILE_AV1_MAIN ||
+       (av1.depth != 8 && av1.depth != 10) ||
+       av1.monochrome || !av1.subsampling_x || !av1.subsampling_y) {
+      TRACE(TRACE_DEBUG, "VTB",
+            "AV1 hardware preview rejected format: profile=%d depth=%d monochrome=%d subsampling=%d:%d",
+            av1.profile, av1.depth, av1.monochrome,
+            av1.subsampling_x, av1.subsampling_y);
+      return 1;
+    }
+
+    av1_depth = av1.depth;
+    owned_codec_config = malloc(codec_config_size + 4);
+    if(owned_codec_config == NULL)
+      return 1;
+    owned_codec_config[0] = 0x81 | ((av1.profile & 7) << 4);
+    owned_codec_config[1] = av1.level & 0x1f;
+    owned_codec_config[2] = ((av1.tier & 1) << 7) |
+                            ((av1.depth > 8) << 6) |
+                            ((av1.depth == 12) << 5) |
+                            ((av1.monochrome & 1) << 4) |
+                            ((av1.subsampling_x & 1) << 3) |
+                            ((av1.subsampling_y & 1) << 2) |
+                            (av1.chroma_sample_position & 3);
+    owned_codec_config[3] = 0;
+    memcpy(owned_codec_config + 4, codec_config, codec_config_size);
+    codec_config = owned_codec_config;
+    codec_config_size += 4;
+    TRACE(TRACE_INFO, "VTB",
+          "Built AV1 configuration record from sequence header: profile=%d level=%d depth=%d",
+          av1.profile, av1.level, av1.depth);
+  }
+#endif
 
   int stream_profile = mcp->profile;
   int assumed_sdr = 0;
@@ -741,32 +907,36 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
                        kCVImageBufferChromaLocationTopFieldKey,
                        kCVImageBufferChromaLocation_Left);
 
-#if TARGET_OS_OSX
-  if(mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2 &&
-     video_settings.video_accel_p010_direct) {
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+  if(((mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2) ||
+      (mc->codec_id == AV_CODEC_ID_AV1 && av1_depth == 10)) &&
+     video_settings.video_accel_p010_playback) {
     add_source_color_extensions(config_dict, mcp);
     TRACE(TRACE_INFO, "VTB",
-          "P010 format description preserves source color metadata: transfer=%d, primaries=%d, matrix=%d",
+          "%s P010 format description preserves source color metadata: transfer=%d, primaries=%d, matrix=%d",
+          vtb_codec_name(mc->codec_id),
           mcp->color_transfer, mcp->color_primaries, mcp->color_matrix);
   }
 #endif
 
-  // Setup extradata
-  CFMutableDictionaryRef extradata_dict =
-    CFDictionaryCreateMutable(kCFAllocatorDefault,
-                              1,
-                              &kCFTypeDictionaryKeyCallBacks,
-                              &kCFTypeDictionaryValueCallBacks);
+  // Setup extradata when the container provides a codec configuration atom.
+  if(config_atom != NULL && codec_config != NULL && codec_config_size != 0) {
+    CFMutableDictionaryRef extradata_dict =
+      CFDictionaryCreateMutable(kCFAllocatorDefault,
+                                1,
+                                &kCFTypeDictionaryKeyCallBacks,
+                                &kCFTypeDictionaryValueCallBacks);
 
-
-  CFDataRef extradata = CFDataCreate(kCFAllocatorDefault, mcp->extradata,
-                                     mcp->extradata_size);
-  CFDictionarySetValue(extradata_dict, config_atom, extradata);
-  CFRelease(extradata);
-  CFDictionarySetValue(config_dict,
-                       kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms,
-                       extradata_dict);
-  CFRelease(extradata_dict);
+    CFDataRef extradata = CFDataCreate(kCFAllocatorDefault, codec_config,
+                                       codec_config_size);
+    CFDictionarySetValue(extradata_dict, config_atom, extradata);
+    CFRelease(extradata);
+    CFDictionarySetValue(config_dict,
+                         kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms,
+                         extradata_dict);
+    CFRelease(extradata_dict);
+  }
+  free(owned_codec_config);
 
   // Enable and force HW accelration
   CFDictionarySetValue(config_dict,
@@ -790,7 +960,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     return 1;
   }
 
-  if(stream_profile == 2 && hevc_main10_is_hdr(mcp) &&
+  if(((mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2) ||
+      (mc->codec_id == AV_CODEC_ID_AV1 && av1_depth == 10)) &&
      video_settings.video_accel_probe_p010)
     probe_p010_output(fmt, config_dict, mcp->width, mcp->height);
 
@@ -832,12 +1003,17 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   vtbd->vtbd_dolby_vision_tag =
     mcp->codec_tag == MKTAG('d', 'v', 'h', 'e') ||
     mcp->codec_tag == MKTAG('d', 'v', 'h', '1');
-  vtbd->vtbd_hdr_to_sdr = mc->codec_id == AV_CODEC_ID_HEVC &&
-                          stream_profile == 2 &&
+  vtbd->vtbd_hdr_to_sdr =
+                         ((mc->codec_id == AV_CODEC_ID_HEVC &&
+                           stream_profile == 2) ||
+                          (mc->codec_id == AV_CODEC_ID_AV1 &&
+                           av1_depth == 10)) &&
                           hevc_main10_is_hdr(mcp);
-#if TARGET_OS_OSX
-  vtbd->vtbd_p010_playback = mc->codec_id == AV_CODEC_ID_HEVC &&
-                             stream_profile == 2 &&
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+  vtbd->vtbd_p010_playback = ((mc->codec_id == AV_CODEC_ID_HEVC &&
+                              stream_profile == 2) ||
+                             (mc->codec_id == AV_CODEC_ID_AV1 &&
+                              av1_depth == 10)) &&
                              video_settings.video_accel_p010_playback;
   vtbd->vtbd_p010_direct = vtbd->vtbd_p010_playback &&
                            video_settings.video_accel_p010_direct;
@@ -845,16 +1021,23 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   const int source_depth = mcp->bits_per_component > 0 ?
     mcp->bits_per_component :
-    (mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2 ? 10 : 8);
+    (mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2 ? 10 :
+     mc->codec_id == AV_CODEC_ID_AV1 && av1_depth ? av1_depth : 8);
 
   dict_set_int32(surface_dict, kCVPixelBufferWidthKey, mcp->width);
   dict_set_int32(surface_dict, kCVPixelBufferHeightKey, mcp->height);
 
 #if TARGET_OS_IPHONE
-  vtbd->vtbd_decode_pixel_format = vtbd->vtbd_hdr_to_sdr ?
-    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange :
-    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
-  vtbd->vtbd_pixel_format = vtbd->vtbd_decode_pixel_format;
+  vtbd->vtbd_decode_pixel_format = vtbd->vtbd_p010_playback ?
+    kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
+    (vtbd->vtbd_hdr_to_sdr ?
+      kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange :
+      kCVPixelFormatType_420YpCbCr8BiPlanarFullRange);
+  vtbd->vtbd_pixel_format = vtbd->vtbd_p010_direct ?
+    kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
+    (vtbd->vtbd_p010_playback ?
+      kCVPixelFormatType_420YpCbCr8BiPlanarFullRange :
+      vtbd->vtbd_decode_pixel_format);
 #else
   vtbd->vtbd_decode_pixel_format = vtbd->vtbd_p010_playback ?
     kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
@@ -867,7 +1050,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   dict_set_int32(surface_dict, kCVPixelBufferPixelFormatTypeKey,
                  vtbd->vtbd_decode_pixel_format);
 
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
   if(vtbd->vtbd_p010_playback && !vtbd->vtbd_p010_direct) {
     CFMutableDictionaryRef iosurface_dict =
       CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
@@ -950,7 +1133,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     }
   }
 
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
   if(vtbd->vtbd_p010_playback) {
     status = create_p010_sdr_bridge(vtbd, mcp->width, mcp->height);
     if(status) {
@@ -989,7 +1172,11 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
            vtbd->vtbd_hdr_to_sdr ? "HEVC Main10 HDR-to-SDR" :
            vtbd->vtbd_assumed_sdr ? "HEVC Main10 SDR assumed" :
            stream_profile == 2 ? "HEVC Main10 SDR" : "HEVC Main") :
-          "H264",
+        mc->codec_id == AV_CODEC_ID_AV1 && av1_depth == 10 ?
+          (vtbd->vtbd_p010_direct ? "AV1 Main10 direct-P010" :
+           vtbd->vtbd_p010_playback ? "AV1 Main10 P010-to-SDR" :
+                                      "AV1 Main10") :
+        vtb_codec_name(mc->codec_id),
         mcp->width, mcp->height,
         source_depth, mcp->color_transfer,
         mcp->color_primaries, mcp->color_matrix, mcp->color_range,
@@ -1001,7 +1188,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
           kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ? "P010 video-range" :
                                                            "planar 4:2:0",
 #if TARGET_OS_IPHONE
-        "IOSurface zero-copy"
+        vtbd->vtbd_p010_direct ? "OpenGL ES byte-packed P010" :
+                                 "IOSurface zero-copy"
 #else
         vtbd->vtbd_p010_direct ? "OpenGL IOSurface zero-copy" : "OpenGL"
 #endif

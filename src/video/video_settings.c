@@ -116,7 +116,7 @@ video_settings_init(void)
   // settings_create_separator(s, _p("Accelerated Decoding"));
 
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("H264/AVC & H265/HEVC")),
+                 SETTING_TITLE(_p("H264/AVC, H265/HEVC & AV1")),
                  SETTING_STORE("hw_videoplayback", "avc_hevc"),
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel),
@@ -136,7 +136,6 @@ video_settings_init(void)
                  SETTING_WRITE_BOOL(&video_settings.video_accel_probe_p010),
                  NULL);
 
-#if TARGET_OS_OSX
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Use P010 10-bit decode with SDR output")),
                  SETTING_STORE("hw_videoplayback", "p010_sdr_playback"),
@@ -144,8 +143,16 @@ video_settings_init(void)
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_playback),
                  NULL);
 
+#if TARGET_OS_OSX
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Direct P010 IOSurface rendering (Test 3)")),
+                 SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
+                 SETTING_VALUE(1),
+                 SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),
+                 NULL);
+#elif TARGET_OS_IPHONE
+  setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Direct P010 rendering (experimental)")),
                  SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),

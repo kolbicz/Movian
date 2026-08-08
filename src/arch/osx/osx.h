@@ -75,12 +75,14 @@ void webpopup_init(void);
 
   bool fullwindow;
   prop_sub_t *fwsub;  // Full window
+  prop_sub_t *sharelogsub;
   NSString *title;
 }
 
 - (void)openWin;
 - (void)toggleFullscreen;
 - (void)setFullWindow:(BOOL)on;
+- (void)shareLog;
 - (void)windowWillEnterFullScreen:(NSNotification *)notification;
 - (void)windowWillExitFullScreen:(NSNotification *)notification;
 

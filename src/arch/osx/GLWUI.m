@@ -203,6 +203,42 @@ set_fullwindow(void *opaque, int v)
 
 
 /**
+ * Present the standard macOS share picker for the current log file.
+ */
+- (void)shareLog
+{
+  prop_set_int(prop_create(gr->gr_prop_ui, "shareLog"), 0);
+
+  if(gconf.cache_path == NULL)
+    return;
+
+  NSString *path = [NSString stringWithFormat:@"%s/log/%s-0.log",
+                                            gconf.cache_path, APPNAME];
+  if(![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+    NSBeep();
+    TRACE(TRACE_ERROR, "GLW", "Unable to share missing log file: %s",
+          [path fileSystemRepresentation]);
+    return;
+  }
+
+  NSURL *url = [NSURL fileURLWithPath:path];
+  NSSharingServicePicker *picker =
+    [[[NSSharingServicePicker alloc] initWithItems:@[url]] autorelease];
+  [picker showRelativeToRect:[view bounds]
+                      ofView:view
+               preferredEdge:NSMaxYEdge];
+}
+
+
+static void
+share_log(void *opaque, int v)
+{
+  if(v)
+    [(GLWUI *)opaque shareLog];
+}
+
+
+/**
  *
  */
 static void
@@ -262,6 +298,13 @@ static prop_t *stored_nav;
 			 PROP_TAG_COURIER, mainloop_courier,
                          NULL);
 
+  sharelogsub = prop_subscribe(0,
+			 PROP_TAG_CALLBACK_INT, share_log, self,
+			 PROP_TAG_NAME("ui", "shareLog"),
+			 PROP_TAG_ROOT, gr->gr_prop_ui,
+			 PROP_TAG_COURIER, mainloop_courier,
+                         NULL);
+
   [self openWin];
 
   glw_lock(gr);
@@ -287,6 +330,7 @@ static prop_t *stored_nav;
 
   prop_unsubscribe(evsub);
   prop_unsubscribe(fwsub);
+  prop_unsubscribe(sharelogsub);
 
   glw_fini(gr);
   prop_destroy(gr->gr_prop_ui);

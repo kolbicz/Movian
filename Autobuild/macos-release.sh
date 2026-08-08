@@ -58,19 +58,31 @@ codesign --force --options runtime --timestamp \
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 STAGING=$(mktemp -d "${TMPDIR:-/tmp}/movian-dmg.XXXXXX")
+RW_DMG="${STAGING}/Movian-rw.dmg"
+MOUNTPOINT="${STAGING}/mount"
+MOUNTED=0
 cleanup() {
+  if [ "$MOUNTED" -eq 1 ]; then
+    hdiutil detach "$MOUNTPOINT" >/dev/null 2>&1 || true
+  fi
   rm -rf "$STAGING"
 }
 trap cleanup EXIT
 
-ditto "$APP" "$STAGING/Movian.app"
-ln -s /Applications "$STAGING/Applications"
-xattr -dr com.apple.quarantine "$STAGING" 2>/dev/null || true
-xattr -dr com.apple.provenance "$STAGING" 2>/dev/null || true
-
+# On recent macOS releases, files created by a sandboxed build host receive an
+# immutable provenance attribute. hdiutil refuses to create an image directly
+# from such a source tree. Populate a writable image instead, then convert it
+# to the compressed distribution image.
 rm -f "$DMG"
-hdiutil create -volname "Movian" -srcfolder "$STAGING" \
-  -format UDZO -ov "$DMG"
+mkdir "$MOUNTPOINT"
+hdiutil create -size 128m -fs APFS -volname "Movian" "$RW_DMG"
+hdiutil attach -nobrowse -mountpoint "$MOUNTPOINT" "$RW_DMG"
+MOUNTED=1
+ditto --noextattr --noacl "$APP" "$MOUNTPOINT/Movian.app"
+ln -s /Applications "$MOUNTPOINT/Applications"
+hdiutil detach "$MOUNTPOINT"
+MOUNTED=0
+hdiutil convert "$RW_DMG" -format UDZO -o "$DMG"
 codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
 codesign --verify --verbose=2 "$DMG"
 
