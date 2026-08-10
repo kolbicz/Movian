@@ -86,6 +86,8 @@ struct glw_program {
   GLint  gp_uniform_blur;
   GLint  gp_uniform_time;
   GLint  gp_uniform_resolution;
+  GLint  gp_uniform_edr_headroom;
+  GLint  gp_uniform_hdr_peak_luminance;
 
   GLint  gp_uniform_t[6];
 
@@ -120,6 +122,8 @@ typedef struct glw_backend_root {
   struct glw_program *gbr_p010_1f;
   struct glw_program *gbr_p010_pq_1f;
   struct glw_program *gbr_p010_hlg_1f;
+  struct glw_program *gbr_p010_pq_edr_1f;
+  struct glw_program *gbr_p010_hlg_edr_1f;
 
   /**
    *

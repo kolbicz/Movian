@@ -55,6 +55,8 @@ typedef struct vtb_frame {
 typedef struct vtb_decoder {
   VTDecompressionSessionRef vtbd_session;
   CMVideoFormatDescriptionRef vtbd_fmt;
+  CFDictionaryRef vtbd_decoder_spec;
+  CFDictionaryRef vtbd_surface_attrs;
   VTPixelTransferSessionRef vtbd_pixel_transfer;
   CVPixelBufferPoolRef vtbd_sdr_pool;
 
@@ -69,8 +71,12 @@ typedef struct vtb_decoder {
   int vtbd_pixel_format;
   int vtbd_decode_pixel_format;
   int vtbd_codec_id;
+  int vtbd_nal_length_size;
   int vtbd_profile;
   int vtbd_color_transfer;
+  float vtbd_hdr_peak_luminance;
+  float vtbd_sei_mastering_peak_luminance;
+  unsigned vtbd_sei_max_cll;
   int vtbd_hdr_to_sdr;
   int vtbd_assumed_sdr;
   int vtbd_p010_playback;
@@ -79,10 +85,214 @@ typedef struct vtb_decoder {
   int vtbd_hw_status_reported;
   int vtbd_output_reported;
   int vtbd_sdr_output_reported;
+  float vtbd_reported_hdr_peak_luminance;
 } vtb_decoder_t;
+
+static uint16_t
+read_be16(const uint8_t *p)
+{
+  return ((uint16_t)p[0] << 8) | p[1];
+}
+
+static uint32_t
+read_be32(const uint8_t *p)
+{
+  return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+         ((uint32_t)p[2] << 8) | p[3];
+}
+
+static void
+vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
+{
+  const int nls = vtbd->vtbd_nal_length_size;
+  if(nls < 1 || nls > 4)
+    return;
+
+  while(size >= (size_t)nls) {
+    uint32_t nal_size = 0;
+    for(int i = 0; i < nls; i++)
+      nal_size = (nal_size << 8) | data[i];
+    data += nls;
+    size -= nls;
+    if(nal_size > size || nal_size < 3)
+      return;
+
+    const int nal_type = (data[0] >> 1) & 0x3f;
+    if(nal_type == 39 || nal_type == 40) {
+      uint8_t *rbsp = malloc(nal_size - 2);
+      size_t rbsp_size = 0;
+      int zeros = 0;
+      for(uint32_t i = 2; i < nal_size; i++) {
+        if(zeros >= 2 && data[i] == 3) {
+          zeros = 0;
+          continue;
+        }
+        rbsp[rbsp_size++] = data[i];
+        zeros = data[i] == 0 ? zeros + 1 : 0;
+      }
+
+      size_t off = 0;
+      while(off + 2 <= rbsp_size && rbsp[off] != 0x80) {
+        unsigned payload_type = 0;
+        while(off < rbsp_size && rbsp[off] == 0xff) {
+          payload_type += 255;
+          off++;
+        }
+        if(off >= rbsp_size)
+          break;
+        payload_type += rbsp[off++];
+
+        size_t payload_size = 0;
+        while(off < rbsp_size && rbsp[off] == 0xff) {
+          payload_size += 255;
+          off++;
+        }
+        if(off >= rbsp_size)
+          break;
+        payload_size += rbsp[off++];
+        if(payload_size > rbsp_size - off)
+          break;
+
+        int metadata_changed = 0;
+        if(payload_type == 137 && payload_size >= 24) {
+          const float mastering_peak =
+            read_be32(rbsp + off + 16) / 10000.0f;
+          if(mastering_peak >= 100 && mastering_peak <= 10000 &&
+             fabsf(vtbd->vtbd_sei_mastering_peak_luminance -
+                   mastering_peak) >= 1.0f) {
+            vtbd->vtbd_sei_mastering_peak_luminance = mastering_peak;
+            metadata_changed = 1;
+          }
+        } else if(payload_type == 144 && payload_size >= 4) {
+          const unsigned max_cll = read_be16(rbsp + off);
+          if(max_cll >= 100 && max_cll <= 10000 &&
+             vtbd->vtbd_sei_max_cll != max_cll) {
+            vtbd->vtbd_sei_max_cll = max_cll;
+            metadata_changed = 1;
+          }
+        }
+
+        const float peak = vtbd->vtbd_sei_max_cll != 0 ?
+          vtbd->vtbd_sei_max_cll : vtbd->vtbd_sei_mastering_peak_luminance;
+        if(peak > 0) {
+          vtbd->vtbd_hdr_peak_luminance = peak;
+          if(metadata_changed) {
+            TRACE(TRACE_INFO, "VTB",
+                  "HEVC SEI HDR metadata: mastering peak=%.0f nits, MaxCLL=%u, effective peak=%.0f nits",
+                  vtbd->vtbd_sei_mastering_peak_luminance,
+                  vtbd->vtbd_sei_max_cll, peak);
+            vtbd->vtbd_reported_hdr_peak_luminance = peak;
+          }
+        }
+        off += payload_size;
+      }
+      free(rbsp);
+    }
+    data += nal_size;
+    size -= nal_size;
+  }
+}
+
+static void
+vtb_update_hdr_peak_from_pixel_buffer(vtb_decoder_t *vtbd,
+                                      CVPixelBufferRef pixel_buffer)
+{
+  unsigned max_cll = 0;
+  float mastering_peak = 0;
+  CFTypeRef light = CVBufferGetAttachment(
+    pixel_buffer, kCVImageBufferContentLightLevelInfoKey, NULL);
+  if(light != NULL && CFGetTypeID(light) == CFDataGetTypeID() &&
+     CFDataGetLength((CFDataRef)light) >= 4) {
+    const uint8_t *p = CFDataGetBytePtr((CFDataRef)light);
+    max_cll = read_be16(p);
+  }
+
+  CFTypeRef mastering = CVBufferGetAttachment(
+    pixel_buffer, kCVImageBufferMasteringDisplayColorVolumeKey, NULL);
+  if(mastering != NULL && CFGetTypeID(mastering) == CFDataGetTypeID() &&
+     CFDataGetLength((CFDataRef)mastering) >= 24) {
+    const uint8_t *p = CFDataGetBytePtr((CFDataRef)mastering);
+    mastering_peak = read_be32(p + 16) / 10000.0f;
+  }
+
+  float peak = max_cll >= 100 && max_cll <= 10000 ? max_cll :
+               mastering_peak >= 100 && mastering_peak <= 10000 ?
+                 mastering_peak : vtbd->vtbd_hdr_peak_luminance;
+  if(peak < 100)
+    peak = 1000;
+  vtbd->vtbd_hdr_peak_luminance = peak;
+  if(fabsf(vtbd->vtbd_reported_hdr_peak_luminance - peak) >= 1.0f) {
+    TRACE(TRACE_INFO, "VTB",
+          "Per-frame HDR metadata: mastering peak=%.0f nits, MaxCLL=%u, effective peak=%.0f nits",
+          mastering_peak, max_cll, peak);
+    vtbd->vtbd_reported_hdr_peak_luminance = peak;
+  }
+}
 
 static void dict_set_int32(CFMutableDictionaryRef dict, CFStringRef key,
                            int value);
+static void picture_out(void *decompressionOutputRefCon,
+                        void *sourceFrameRefCon,
+                        OSStatus status,
+                        VTDecodeInfoFlags infoFlags,
+                        CVPixelBufferRef imageBuffer,
+                        CMTime pts,
+                        CMTime duration);
+
+static OSStatus
+vtb_create_session(vtb_decoder_t *vtbd)
+{
+  VTDecompressionOutputCallbackRecord cb = {
+    .decompressionOutputCallback = picture_out,
+    .decompressionOutputRefCon = vtbd
+  };
+
+  OSStatus status =
+    VTDecompressionSessionCreate(kCFAllocatorDefault,
+                                 vtbd->vtbd_fmt,
+                                 vtbd->vtbd_decoder_spec,
+                                 vtbd->vtbd_surface_attrs,
+                                 &cb,
+                                 &vtbd->vtbd_session);
+  if(status == noErr && vtbd->vtbd_session != NULL &&
+     vtbd->vtbd_color_transfer == AVCOL_TRC_SMPTE2084) {
+    OSStatus metadata_status = VTSessionSetProperty(
+      vtbd->vtbd_session,
+      kVTDecompressionPropertyKey_PropagatePerFrameHDRDisplayMetadata,
+      kCFBooleanTrue);
+    TRACE(metadata_status == noErr ? TRACE_INFO : TRACE_ERROR, "VTB",
+          "Per-frame HDR metadata propagation %s (status=%d)",
+          metadata_status == noErr ? "enabled" : "failed",
+          (int)metadata_status);
+  }
+  if(status || !vtbd->vtbd_hdr_to_sdr || vtbd->vtbd_p010_playback)
+    return status;
+
+  CFMutableDictionaryRef transfer_dict =
+    CFDictionaryCreateMutable(kCFAllocatorDefault,
+                              3,
+                              &kCFTypeDictionaryKeyCallBacks,
+                              &kCFTypeDictionaryValueCallBacks);
+  CFDictionarySetValue(transfer_dict,
+                       kVTPixelTransferPropertyKey_DestinationColorPrimaries,
+                       kCVImageBufferColorPrimaries_ITU_R_709_2);
+  CFDictionarySetValue(transfer_dict,
+                       kVTPixelTransferPropertyKey_DestinationTransferFunction,
+                       kCVImageBufferTransferFunction_ITU_R_709_2);
+  CFDictionarySetValue(transfer_dict,
+                       kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
+                       kCVImageBufferYCbCrMatrix_ITU_R_709_2);
+  status = VTSessionSetProperty(vtbd->vtbd_session,
+                                kVTDecompressionPropertyKey_PixelTransferProperties,
+                                transfer_dict);
+  CFRelease(transfer_dict);
+  if(status) {
+    VTDecompressionSessionInvalidate(vtbd->vtbd_session);
+    CFRelease(vtbd->vtbd_session);
+    vtbd->vtbd_session = NULL;
+  }
+  return status;
+}
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
 typedef struct av1_config_info {
@@ -155,6 +365,8 @@ vtb_codec_name(enum AVCodecID codec_id)
     return "AV1";
   case AV_CODEC_ID_VP9:
     return "VP9";
+  case AV_CODEC_ID_PRORES:
+    return "ProRes";
   default:
     return "unknown";
   }
@@ -413,6 +625,9 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   frame_info_t fi;
   memset(&fi, 0, sizeof(fi));
 
+  if(vtbd->vtbd_color_transfer == AVCOL_TRC_SMPTE2084)
+    vtb_update_hdr_peak_from_pixel_buffer(vtbd, vf->vf_buf);
+
   if(vtbd->vtbd_last_pts != PTS_UNSET && vf->vf_mbm.mbm_pts != PTS_UNSET) {
     int64_t d = vf->vf_mbm.mbm_pts - vtbd->vtbd_last_pts;
 
@@ -427,6 +642,7 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   fi.fi_pts = vf->vf_mbm.mbm_pts;
   fi.fi_color_space = vtbd->vtbd_hdr_to_sdr ? COLOR_SPACE_BT_709 : -1;
   fi.fi_color_transfer = vtbd->vtbd_color_transfer;
+  fi.fi_hdr_peak_luminance = vtbd->vtbd_hdr_peak_luminance;
   fi.fi_epoch = vf->vf_mbm.mbm_epoch;
   fi.fi_drive_clock = vf->vf_mbm.mbm_drive_clock;
   fi.fi_user_time = vf->vf_mbm.mbm_user_time;
@@ -524,11 +740,24 @@ picture_out(void *decompressionOutputRefCon,
             CMTime pts,
             CMTime duration)
 {
-  media_buf_meta_t *mbm = sourceFrameRefCon;
+  /* VideoToolbox callbacks are asynchronous.  sourceFrameRefCon therefore
+   * owns a per-submission metadata copy; release it as soon as the callback
+   * has taken a stack copy.  The old code pointed into vd_reorder[], whose
+   * slots could wrap and be overwritten during rapid seek pre-roll. */
+  media_buf_meta_t mbm_storage = *(media_buf_meta_t *)sourceFrameRefCon;
+  free(sourceFrameRefCon);
+  media_buf_meta_t *mbm = &mbm_storage;
   vtb_decoder_t *vtbd = decompressionOutputRefCon;
 
   if(imageBuffer == NULL)
     return; // No frame, typically from kVTDecodeFrame_DoNotOutputFrame
+
+  /* Pre-roll frames must still be decoded so the hardware session builds the
+   * reference-picture state needed after a random-access point.  Suppress
+   * them here instead of passing kVTDecodeFrame_DoNotOutputFrame, which can
+   * leave VideoToolbox waiting for another sync sample after a forward seek. */
+  if(mbm->mbm_skip)
+    return;
 
   if(!vtbd->vtbd_output_reported) {
     report_output_format(vtbd, imageBuffer, "Decoder");
@@ -622,6 +851,14 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
 
   vtbd->vtbd_vd = vd;
 
+  if(vtbd->vtbd_codec_id == AV_CODEC_ID_HEVC)
+    vtb_parse_hevc_hdr_sei(vtbd, mb->mb_data, mb->mb_size);
+
+  if(vtbd->vtbd_session == NULL) {
+    TRACE(TRACE_ERROR, "VTB", "Decoder session is unavailable");
+    return;
+  }
+
   status =
     CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault,
                                        mb->mb_data, mb->mb_size,
@@ -649,18 +886,43 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
     return;
   }
 
-  void *frame_opaque = &vd->vd_reorder[vd->vd_reorder_ptr];
-  copy_mbm_from_mb(frame_opaque, mb);
-  vd->vd_reorder_ptr = (vd->vd_reorder_ptr + 1) & VIDEO_DECODER_REORDER_MASK;
+  /* CMSampleBufferCreate() does not infer random-access information from the
+   * compressed payload.  Tell VideoToolbox explicitly whether this packet is
+   * a sync sample.  Playback from the head of a stream can work without these
+   * attachments, while decoding after an av_seek_frame() may wait forever for
+   * a keyframe that the session does not recognize. */
+  CFArrayRef attachments =
+    CMSampleBufferGetSampleAttachmentsArray(sample_buf, TRUE);
+  if(attachments != NULL && CFArrayGetCount(attachments) != 0) {
+    CFMutableDictionaryRef attachment =
+      (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
+    if(mb->mb_keyframe) {
+      CFDictionaryRemoveValue(attachment, kCMSampleAttachmentKey_NotSync);
+      CFDictionaryRemoveValue(attachment,
+                              kCMSampleAttachmentKey_DependsOnOthers);
+    } else {
+      CFDictionarySetValue(attachment, kCMSampleAttachmentKey_NotSync,
+                           kCFBooleanTrue);
+      CFDictionarySetValue(attachment,
+                           kCMSampleAttachmentKey_DependsOnOthers,
+                           kCFBooleanTrue);
+    }
+  }
 
-  if(mb->mb_skip)
-    flags |= kVTDecodeFrame_DoNotOutputFrame;
+  media_buf_meta_t *frame_opaque = malloc(sizeof(*frame_opaque));
+  if(frame_opaque == NULL) {
+    CFRelease(sample_buf);
+    TRACE(TRACE_ERROR, "VTB", "Frame metadata allocation failed");
+    return;
+  }
+  copy_mbm_from_mb(frame_opaque, mb);
 
   status =
     VTDecompressionSessionDecodeFrame(vtbd->vtbd_session, sample_buf, flags,
                                       frame_opaque, &infoflags);
   CFRelease(sample_buf);
   if(status) {
+    free(frame_opaque);
     TRACE(TRACE_ERROR, "VTB", "Decoding error %d", status);
   }
 
@@ -691,12 +953,24 @@ vtb_flush(struct media_codec *mc, struct video_decoder *vd)
 {
   vtb_decoder_t *vtbd = mc->opaque;
   VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
+  VTDecompressionSessionInvalidate(vtbd->vtbd_session);
+  CFRelease(vtbd->vtbd_session);
+  vtbd->vtbd_session = NULL;
   hts_mutex_lock(&vtbd->vtbd_mutex);
   destroy_frames(vtbd);
   vtbd->vtbd_max_ts   = PTS_UNSET;
   vtbd->vtbd_flush_to = PTS_UNSET;
   vtbd->vtbd_last_pts = PTS_UNSET;
+  vtbd->vtbd_output_reported = 0;
+  vtbd->vtbd_hw_status_reported = 0;
+  vtbd->vtbd_sdr_output_reported = 0;
   hts_mutex_unlock(&vtbd->vtbd_mutex);
+
+  OSStatus status = vtb_create_session(vtbd);
+  if(status) {
+    TRACE(TRACE_ERROR, "VTB",
+          "Unable to recreate decoder after seek (status=%d)", (int)status);
+  }
 }
 
 
@@ -712,6 +986,9 @@ vtb_close(struct media_codec *mc)
 
   VTDecompressionSessionInvalidate(vtbd->vtbd_session);
   CFRelease(vtbd->vtbd_session);
+
+  CFRelease(vtbd->vtbd_decoder_spec);
+  CFRelease(vtbd->vtbd_surface_attrs);
 
   if(vtbd->vtbd_pixel_transfer != NULL) {
     VTPixelTransferSessionInvalidate(vtbd->vtbd_pixel_transfer);
@@ -751,6 +1028,9 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   if(!video_settings.video_accel)
     return 1;
 
+  if(mcp == NULL)
+    return 1;
+
   switch(mc->codec_id) {
   case AV_CODEC_ID_H264:
     codec_type = kCMVideoCodecType_H264;
@@ -770,6 +1050,58 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     codec_type = kCMVideoCodecType_VP9;
     config_atom = CFSTR("vpcC");
     break;
+#if TARGET_OS_OSX
+  case AV_CODEC_ID_PRORES:
+    /* FFmpeg exposes the QuickTime ProRes sample-entry tag in host byte
+     * order.  Map it to CoreMedia's codec constants rather than passing the
+     * numeric tag through directly.  If a demuxer omitted the tag, the
+     * profile remains a safe fallback. */
+    switch(mcp->codec_tag) {
+    case MKTAG('a', 'p', 'c', 'o'):
+      codec_type = kCMVideoCodecType_AppleProRes422Proxy;
+      break;
+    case MKTAG('a', 'p', 'c', 's'):
+      codec_type = kCMVideoCodecType_AppleProRes422LT;
+      break;
+    case MKTAG('a', 'p', 'c', 'n'):
+      codec_type = kCMVideoCodecType_AppleProRes422;
+      break;
+    case MKTAG('a', 'p', 'c', 'h'):
+      codec_type = kCMVideoCodecType_AppleProRes422HQ;
+      break;
+    case MKTAG('a', 'p', '4', 'h'):
+      codec_type = kCMVideoCodecType_AppleProRes4444;
+      break;
+    case MKTAG('a', 'p', '4', 'x'):
+      codec_type = kCMVideoCodecType_AppleProRes4444XQ;
+      break;
+    default:
+      switch(mcp->profile) {
+      case FF_PROFILE_PRORES_PROXY:
+        codec_type = kCMVideoCodecType_AppleProRes422Proxy;
+        break;
+      case FF_PROFILE_PRORES_LT:
+        codec_type = kCMVideoCodecType_AppleProRes422LT;
+        break;
+      case FF_PROFILE_PRORES_STANDARD:
+        codec_type = kCMVideoCodecType_AppleProRes422;
+        break;
+      case FF_PROFILE_PRORES_HQ:
+        codec_type = kCMVideoCodecType_AppleProRes422HQ;
+        break;
+      case FF_PROFILE_PRORES_4444:
+        codec_type = kCMVideoCodecType_AppleProRes4444;
+        break;
+      case FF_PROFILE_PRORES_XQ:
+        codec_type = kCMVideoCodecType_AppleProRes4444XQ;
+        break;
+      default:
+        return 1;
+      }
+    }
+    config_atom = NULL;
+    break;
+#endif
   default:
     return 1;
   }
@@ -779,9 +1111,6 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
           vtb_codec_name(mc->codec_id));
     return 1;
   }
-
-  if(mcp == NULL)
-    return 1;
 
   if(mc->codec_id == AV_CODEC_ID_VP9) {
     /* Start with VP9 Profile 0 / 8-bit 4:2:0. Profile may be unknown when a
@@ -803,6 +1132,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
       return 1;
     if(mc->codec_id == AV_CODEC_ID_VP9) {
       config_atom = NULL;
+    } else if(mc->codec_id == AV_CODEC_ID_PRORES) {
+      config_atom = NULL;
     } else
     return h264_annexb_to_avc(mc, mp, &video_vtb_codec_create);
   }
@@ -811,6 +1142,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   size_t codec_config_size = mcp->extradata_size;
   uint8_t *owned_codec_config = NULL;
   if(mc->codec_id != AV_CODEC_ID_AV1 && mc->codec_id != AV_CODEC_ID_VP9 &&
+     mc->codec_id != AV_CODEC_ID_PRORES &&
      codec_config[0] != 1) {
     if(mc->codec_id == AV_CODEC_ID_HEVC)
       return 1;
@@ -865,6 +1197,9 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   int stream_profile = mcp->profile;
   int assumed_sdr = 0;
+  const int dolby_vision = mcp->dovi_valid ||
+    mcp->codec_tag == MKTAG('d', 'v', 'h', 'e') ||
+    mcp->codec_tag == MKTAG('d', 'v', 'h', '1');
 
   if(mc->codec_id == AV_CODEC_ID_HEVC) {
     const uint8_t *hvcC = mcp->extradata;
@@ -875,7 +1210,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     if(stream_profile != 1 && stream_profile != 2)
       return 1;
 
-    if(stream_profile == 2 && !hevc_main10_is_sdr(mcp) &&
+    if(stream_profile == 2 && !dolby_vision && !hevc_main10_is_sdr(mcp) &&
        !hevc_main10_is_hdr(mcp)) {
       if(mcp->color_transfer == AVCOL_TRC_UNSPECIFIED &&
          video_settings.video_accel_untagged_main10) {
@@ -890,6 +1225,13 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
                 " (enable 'Assume untagged HEVC Main10 is SDR' to override)" : "");
         return 1;
       }
+    }
+    if(dolby_vision) {
+      TRACE(TRACE_INFO, "VTB",
+            "Dolby Vision stream detected: profile=%d level=%d RPU=%d EL=%d BL=%d compatibility=%d",
+            mcp->dovi_profile, mcp->dovi_level,
+            mcp->dovi_rpu_present, mcp->dovi_el_present,
+            mcp->dovi_bl_present, mcp->dovi_bl_compatibility_id);
     }
   }
 
@@ -931,6 +1273,30 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
                                        codec_config_size);
     CFDictionarySetValue(extradata_dict, config_atom, extradata);
     CFRelease(extradata);
+
+    /* FFmpeg exposes the dvcC/dvvC configuration as stream side data rather
+     * than folding it into hvcC.  Pass it to VideoToolbox as a sibling sample
+     * description atom so Apple silicon can apply the Dolby Vision RPU/profile
+     * information instead of treating dvh1/dvhe as untagged HEVC Main10. */
+    if(mc->codec_id == AV_CODEC_ID_HEVC && mcp->dovi_valid) {
+      uint8_t dvcc[24] = {0};
+      dvcc[0] = mcp->dovi_version_major;
+      dvcc[1] = mcp->dovi_version_minor;
+      uint16_t flags = (mcp->dovi_profile << 9) |
+                       (mcp->dovi_level << 3) |
+                       (mcp->dovi_rpu_present << 2) |
+                       (mcp->dovi_el_present << 1) |
+                       mcp->dovi_bl_present;
+      dvcc[2] = flags >> 8;
+      dvcc[3] = flags;
+      dvcc[4] = mcp->dovi_bl_compatibility_id << 4;
+      CFDataRef dovi_data = CFDataCreate(kCFAllocatorDefault, dvcc,
+                                         sizeof(dvcc));
+      CFDictionarySetValue(extradata_dict,
+                           mcp->dovi_profile > 7 ? CFSTR("dvvC") : CFSTR("dvcC"),
+                           dovi_data);
+      CFRelease(dovi_data);
+    }
     CFDictionarySetValue(config_dict,
                          kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms,
                          extradata_dict);
@@ -997,12 +1363,16 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   vtb_decoder_t *vtbd = calloc(1, sizeof(vtb_decoder_t));
   vtbd->vtbd_codec_id = mc->codec_id;
+  if(mc->codec_id == AV_CODEC_ID_HEVC && codec_config_size > 21)
+    vtbd->vtbd_nal_length_size = (codec_config[21] & 3) + 1;
   vtbd->vtbd_profile = stream_profile;
   vtbd->vtbd_color_transfer = mcp->color_transfer;
+  vtbd->vtbd_hdr_peak_luminance = mcp->hdr_max_cll != 0 ?
+    mcp->hdr_max_cll : mcp->hdr_mastering_max_luminance;
+  if(vtbd->vtbd_hdr_peak_luminance < 100.0f)
+    vtbd->vtbd_hdr_peak_luminance = 1000.0f;
   vtbd->vtbd_assumed_sdr = assumed_sdr;
-  vtbd->vtbd_dolby_vision_tag =
-    mcp->codec_tag == MKTAG('d', 'v', 'h', 'e') ||
-    mcp->codec_tag == MKTAG('d', 'v', 'h', '1');
+  vtbd->vtbd_dolby_vision_tag = dolby_vision;
   vtbd->vtbd_hdr_to_sdr =
                          ((mc->codec_id == AV_CODEC_ID_HEVC &&
                            stream_profile == 2) ||
@@ -1073,64 +1443,24 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   dict_set_int32(surface_dict, kCVPixelBufferBytesPerRowAlignmentKey, linewidth);
 
-  VTDecompressionOutputCallbackRecord cb = {
-    .decompressionOutputCallback = picture_out,
-    .decompressionOutputRefCon = vtbd
-  };
+  vtbd->vtbd_fmt = fmt;
+  vtbd->vtbd_decoder_spec = CFRetain(config_dict);
+  vtbd->vtbd_surface_attrs = CFRetain(surface_dict);
 
   /* create decompression session */
-  status = VTDecompressionSessionCreate(kCFAllocatorDefault,
-                                        fmt,
-                                        config_dict,
-                                        surface_dict,
-                                        &cb,
-                                        &vtbd->vtbd_session);
+  status = vtb_create_session(vtbd);
 
   CFRelease(config_dict);
   CFRelease(surface_dict);
 
   if(status) {
     TRACE(TRACE_DEBUG, "VTB", "Failed to open -- %d", status);
+    CFRelease(vtbd->vtbd_decoder_spec);
+    CFRelease(vtbd->vtbd_surface_attrs);
     CFRelease(fmt);
+    free(vtbd);
     return 1;
 
-  }
-
-  if(vtbd->vtbd_hdr_to_sdr && !vtbd->vtbd_p010_playback) {
-    /* Apple recommends performing HDR-to-SDR color conversion before, or at
-     * the same time as, 10-to-8-bit conversion.  The decompression session's
-     * pixel-transfer stage does both and returns BT.709 NV12/YUV420 frames for
-     * Movian's existing SDR OpenGL/OpenGLES renderer. */
-    CFMutableDictionaryRef transfer_dict =
-      CFDictionaryCreateMutable(kCFAllocatorDefault,
-                                3,
-                                &kCFTypeDictionaryKeyCallBacks,
-                                &kCFTypeDictionaryValueCallBacks);
-    CFDictionarySetValue(transfer_dict,
-                         kVTPixelTransferPropertyKey_DestinationColorPrimaries,
-                         kCVImageBufferColorPrimaries_ITU_R_709_2);
-    CFDictionarySetValue(transfer_dict,
-                         kVTPixelTransferPropertyKey_DestinationTransferFunction,
-                         kCVImageBufferTransferFunction_ITU_R_709_2);
-    CFDictionarySetValue(transfer_dict,
-                         kVTPixelTransferPropertyKey_DestinationYCbCrMatrix,
-                         kCVImageBufferYCbCrMatrix_ITU_R_709_2);
-
-    status = VTSessionSetProperty(vtbd->vtbd_session,
-                                  kVTDecompressionPropertyKey_PixelTransferProperties,
-                                  transfer_dict);
-    CFRelease(transfer_dict);
-
-    if(status) {
-      TRACE(TRACE_INFO, "VTB",
-            "HDR-to-SDR pixel transfer unavailable (status=%d); using software fallback",
-            (int)status);
-      VTDecompressionSessionInvalidate(vtbd->vtbd_session);
-      CFRelease(vtbd->vtbd_session);
-      CFRelease(fmt);
-      free(vtbd);
-      return 1;
-    }
   }
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
@@ -1148,13 +1478,14 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
       }
       if(vtbd->vtbd_sdr_pool != NULL)
         CFRelease(vtbd->vtbd_sdr_pool);
+      CFRelease(vtbd->vtbd_decoder_spec);
+      CFRelease(vtbd->vtbd_surface_attrs);
       CFRelease(fmt);
       free(vtbd);
       return 1;
     }
   }
 #endif
-  vtbd->vtbd_fmt = fmt;
   vtbd->vtbd_max_ts   = PTS_UNSET;
   vtbd->vtbd_flush_to = PTS_UNSET;
   vtbd->vtbd_last_pts = PTS_UNSET;
@@ -1188,7 +1519,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
           kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange ? "P010 video-range" :
                                                            "planar 4:2:0",
 #if TARGET_OS_IPHONE
-        vtbd->vtbd_p010_direct ? "OpenGL ES byte-packed P010" :
+        vtbd->vtbd_p010_direct ? "Metal P010 bridge / OpenGL ES fallback" :
                                  "IOSurface zero-copy"
 #else
         vtbd->vtbd_p010_direct ? "OpenGL IOSurface zero-copy" : "OpenGL"

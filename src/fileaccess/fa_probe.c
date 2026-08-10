@@ -546,6 +546,13 @@ fa_lavf_load_meta(metadata_t *md, AVFormatContext *fctx,
 			if(!vtrack) tn = ++vtrack;
 		}
 
+		if((avctx->codec_id == AV_CODEC_ID_PRORES) && avctx->width && avctx->height)
+		{
+			snprintf(tmp1, sizeof(tmp1), "ProRes, %dx%d", avctx->width, avctx->height);
+			has_video = 1;
+			if(!vtrack) tn = ++vtrack;
+		}
+
 	} else
 	{
 		metadata_from_libav(tmp1, sizeof(tmp1), codec, avctx);

@@ -51,10 +51,12 @@ void webpopup_init(void);
   NSTextField *native_text_field;
   id display_sleep_activity;
   bool native_edit_ending;
+  float edr_headroom;
 }
 - (id)initWithFrame:(NSRect)frameRect :(struct glw_root *)gr;
 - (void)stop;
 - (void)finishNativeEditing;
+- (float)edrHeadroom;
 
 @end
 

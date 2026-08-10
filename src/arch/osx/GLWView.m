@@ -550,6 +550,33 @@ doCommandBySelector:(SEL)commandSelector
 
 - (void)viewDidMoveToWindow {
   [[self window] setAcceptsMouseMovedEvents:YES];
+  NSScreen *screen = [[self window] screen];
+  if(screen == nil)
+    screen = [NSScreen mainScreen];
+  const CGFloat potential = screen != nil ?
+    [screen maximumPotentialExtendedDynamicRangeColorComponentValue] : 1.0;
+  [self setWantsExtendedDynamicRangeOpenGLSurface:potential > 1.0];
+  const CGFloat current = screen != nil ?
+    [screen maximumExtendedDynamicRangeColorComponentValue] : 1.0;
+  edr_headroom = current > 1.0 ? current : potential;
+  TRACE(TRACE_INFO, "GLW",
+        "macOS EDR surface %s, display headroom=%.2f potential=%.2f",
+        potential > 1.0 ? "enabled" : "disabled", current, potential);
+}
+
+- (BOOL)performKeyEquivalent:(NSEvent *)event
+{
+  if(native_text_field != nil &&
+     ([event modifierFlags] & NSDeviceIndependentModifierFlagsMask) ==
+       NSCommandKeyMask &&
+     [[[event charactersIgnoringModifiers] lowercaseString] isEqualToString:@"a"]) {
+    NSTextView *editor = (NSTextView *)[native_text_field currentEditor];
+    if(editor != nil) {
+      [editor selectAll:self];
+      return YES;
+    }
+  }
+  return [super performKeyEquivalent:event];
 }
 
 /**
@@ -807,6 +834,7 @@ doCommandBySelector:(SEL)commandSelector
   }
 
   [self setWantsBestResolutionOpenGLSurface:YES];
+  edr_headroom = 1.0;
   [wpf release];
 
   gr = root;
@@ -933,6 +961,21 @@ doCommandBySelector:(SEL)commandSelector
   return m_cgl_pixel_format;
 }
 
+- (float)edrHeadroom {
+  NSScreen *screen = [[self window] screen];
+  if(screen == nil)
+    screen = [NSScreen mainScreen];
+  if(screen != nil) {
+    const CGFloat potential =
+      [screen maximumPotentialExtendedDynamicRangeColorComponentValue];
+    [self setWantsExtendedDynamicRangeOpenGLSurface:potential > 1.0];
+    const CGFloat current =
+      [screen maximumExtendedDynamicRangeColorComponentValue];
+    edr_headroom = current > 1.0 ? current : potential;
+  }
+  return edr_headroom;
+}
+
 
 
 @end
@@ -950,4 +993,11 @@ osx_get_cgl_pixel_format(glw_root_t *gr)
 {
   GLWView *v = gr->gr_private;
   return [v getCglPixelFormat];
+}
+
+float
+osx_get_edr_headroom(glw_root_t *gr)
+{
+  GLWView *v = gr->gr_private;
+  return v != nil ? [v edrHeadroom] : 1.0f;
 }

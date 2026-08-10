@@ -99,6 +99,8 @@ typedef struct glw_renderer {
 struct glw_program_args {
   glw_program_t *gpa_prog;
   void *gpa_aux;
+  float gpa_edr_headroom;
+  float gpa_hdr_peak_luminance;
   void (*gpa_load_uniforms)(glw_root_t *gr, glw_program_t *prog, void *aux,
                             const struct glw_render_job *rj);
   void (*gpa_load_texture)(glw_root_t *gr, glw_program_t *prog, void *aux,

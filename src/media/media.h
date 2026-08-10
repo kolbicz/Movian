@@ -144,6 +144,7 @@ typedef struct frame_info {
   } fi_color_space;
 
   int fi_color_transfer;
+  float fi_hdr_peak_luminance;
 
   void (*fi_ref_release)(void *aux);
   void *fi_ref_aux;
@@ -546,13 +547,25 @@ void mp_underrun(media_pipe_t *mp);
 static inline void
 mp_check_underrun(media_pipe_t *mp)
 {
+  /* During a demux seek the queues are intentionally empty until the indexed
+   * random-access packet arrives.  Treating that transition as an underrun
+   * installs a PAUSE command in front of the post-seek packets and can leave
+   * the decoder permanently waiting behind its own pre-roll. */
+  if(mp->mp_video.mq_seektarget != PTS_UNSET ||
+     mp->mp_audio.mq_seektarget != PTS_UNSET)
+    return;
+
   if( /*mp->mp_flags & MP_PRE_BUFFERING && */
      unlikely(TAILQ_FIRST(&mp->mp_video.mq_q_data) == NULL) &&
      unlikely(TAILQ_FIRST(&mp->mp_audio.mq_q_data) == NULL))
 	 {
 		 if(likely(mp->mp_buffer_limit > 16 * 1024 * 1024))
 		 {
-			 //if(likely(!(mp->mp_flags & MP_PRE_BUFFERING)))
+			 /* Preserve the source-specific target selected by the demuxer.
+			  * Replacing a bounded short-file/near-EOF target with ten
+			  * seconds can create a permanent hold when fewer than ten
+			  * seconds remain after a seek. */
+			 if(mp->mp_pre_buffer_delay <= 0)
 				 mp->mp_pre_buffer_delay = 10 * 1000000;
 
 			 //mp->mp_flags |= MP_PRE_BUFFERING;

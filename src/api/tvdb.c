@@ -22,9 +22,11 @@
 
 #include "main.h"
 #include "metadata/metadata.h"
+#include "htsmsg/htsmsg_json.h"
 #include "htsmsg/htsmsg_xml.h"
 #include "htsmsg/htsmsg_store.h"
 #include "fileaccess/fileaccess.h"
+#include "fileaccess/http_client.h"
 #include "misc/dbl.h"
 #include "settings.h"
 #include "metadata/metadata_sources.h"
@@ -349,6 +351,122 @@ tvdb_find_series(void *db, const char *id, int qtype,
 
 
 /**
+ * Search TVDB v4's public web index for a series.  The legacy
+ * GetSeries.php endpoint used below was retired, while the remaining
+ * episode and artwork endpoints still provide the XML consumed by this
+ * metadata source.
+ */
+static int
+tvdb_search_series(const char *title, char *series_id, size_t series_id_size)
+{
+  char errbuf[256];
+  buf_t *result = NULL;
+
+  htsmsg_t *root = htsmsg_create_map();
+  htsmsg_t *requests = htsmsg_create_list();
+  htsmsg_t *request = htsmsg_create_map();
+  htsmsg_t *params = htsmsg_create_map();
+  htsmsg_t *facets = htsmsg_create_list();
+
+  htsmsg_add_str(request, "indexName", "TVDB");
+  htsmsg_add_str(params, "query", title);
+  htsmsg_add_u32(params, "maxValuesPerFacet", 10);
+  htsmsg_add_u32(params, "page", 0);
+  htsmsg_add_str(params, "filters", "NOT is_official=0");
+  htsmsg_add_str(facets, NULL, "type");
+  htsmsg_add_str(facets, NULL, "year");
+  htsmsg_add_msg(params, "facets", facets);
+  htsmsg_add_str(params, "tagFilters", "");
+  htsmsg_add_msg(request, "params", params);
+  htsmsg_add_msg(requests, NULL, request);
+  htsmsg_add_msg(root, "requests", requests);
+
+  htsbuf_queue_t post;
+  htsbuf_queue_init(&post, 0);
+  htsmsg_json_serialize(root, &post, 0);
+  htsmsg_release(root);
+
+  struct http_header_list req_headers;
+  LIST_INIT(&req_headers);
+  http_header_add(&req_headers, "User-Agent",
+                  "Mozilla/5.0 (Macintosh; Intel Mac OS X) "
+                  "AppleWebKit/537.36 Safari/537.36", 0);
+
+  int r = http_req("https://api4.thetvdb.com/web/search/queries",
+                   HTTP_RESULT_PTR(&result),
+                   HTTP_ERRBUF(errbuf, sizeof(errbuf)),
+                   HTTP_POSTDATA(&post, "application/json; charset=utf-8"),
+                   HTTP_REQUEST_HEADERS(&req_headers),
+                   HTTP_FLAGS(FA_COMPRESSION | FA_NO_DEBUG),
+                   HTTP_CONNECT_TIMEOUT(5000),
+                   HTTP_READ_TIMEOUT(5000),
+                   NULL);
+
+  htsbuf_queue_flush(&post);
+  http_headers_free(&req_headers);
+
+  if(r < 0 || result == NULL) {
+    TRACE(TRACE_INFO, "TVDBv4", "Unable to search for %s -- (%d) %s",
+          title, r, errbuf);
+    if(result != NULL)
+      buf_release(result);
+    return -1;
+  }
+
+  htsmsg_t *doc = htsmsg_json_deserialize2(buf_cstr(result),
+                                           errbuf, sizeof(errbuf));
+  buf_release(result);
+  if(doc == NULL) {
+    TRACE(TRACE_ERROR, "TVDBv4", "Unable to parse search response -- %s",
+          errbuf);
+    return -1;
+  }
+
+  int found = 0;
+  htsmsg_t *results = htsmsg_get_list(doc, "results");
+  htsmsg_field_t *rf;
+  if(results != NULL) HTSMSG_FOREACH(rf, results) {
+    htsmsg_t *response = htsmsg_get_map_by_field(rf);
+    htsmsg_t *hits = response != NULL ? htsmsg_get_list(response, "hits") : NULL;
+    htsmsg_field_t *hf;
+    if(hits == NULL)
+      continue;
+
+    HTSMSG_FOREACH(hf, hits) {
+      htsmsg_t *hit = htsmsg_get_map_by_field(hf);
+      if(hit == NULL)
+        continue;
+
+      const char *type = htsmsg_get_str(hit, "type");
+      if(type != NULL && strcasecmp(type, "series"))
+        continue;
+
+      const char *id = htsmsg_get_str(hit, "id");
+      if(id != NULL && id[0] != '\0') {
+        snprintf(series_id, series_id_size, "%s", id);
+        found = 1;
+        break;
+      }
+
+      int64_t numeric_id;
+      if(!htsmsg_get_s64(hit, "id", &numeric_id) && numeric_id > 0) {
+        snprintf(series_id, series_id_size, "%lld", (long long)numeric_id);
+        found = 1;
+        break;
+      }
+    }
+    if(found)
+      break;
+  }
+  htsmsg_release(doc);
+
+  if(!found)
+    TRACE(TRACE_INFO, "TVDBv4", "No series id in response for %s", title);
+  return found ? 0 : -1;
+}
+
+
+/**
  *
  */
 static int64_t
@@ -356,44 +474,13 @@ tvdb_query_by_episode(void *db, const char *item_url,
 		      const char *title, int season, int episode,
 		      int qtype, const char *initiator)
 {
-  buf_t *result;
-  char errbuf[256];
-
   usage_event("TVDB query by episode", 1,
               USAGE_SEG("qtype", metadata_qtypestr(qtype),
                         "initiator", initiator));
 
-
-  result = fa_load("https://www.thetvdb.com/api/GetSeries.php",
-                   FA_LOAD_ERRBUF(errbuf, sizeof(errbuf)),
-                   FA_LOAD_QUERY_ARG("seriesname", title),
-                   FA_LOAD_QUERY_ARG("language", "all"),
-                   FA_LOAD_FLAGS(FA_COMPRESSION),
-                   NULL);
-
-  if(result == NULL) {
-    TRACE(TRACE_INFO, "TVDB", "Unable to search for %s -- %s", title, errbuf);
+  char series_id[32];
+  if(tvdb_search_series(title, series_id, sizeof(series_id)))
     return METADATA_TEMPORARY_ERROR;
-  }
-
-  htsmsg_t *gs = htsmsg_xml_deserialize_buf(result, errbuf, sizeof(errbuf));
-  if(gs == NULL) {
-    TRACE(TRACE_ERROR, "TVDB", "Unable to parse XML -- %s", errbuf);
-    return METADATA_TEMPORARY_ERROR;
-  }
-
-  const char *series_id =
-    htsmsg_get_str_multi(gs, "Data", "Series", "seriesid", NULL);
-
-
-  if(series_id == NULL) {
-    TRACE(TRACE_INFO, "TVDB", "No series id in response");
-    htsmsg_release(gs);
-    return METADATA_TEMPORARY_ERROR;
-  }
-
-  series_id = mystrdupa(series_id); // Make a copy of the ID
-  htsmsg_release(gs);               // .. cause we destroyed the XML doc
 
   // --------------------------------------------------------------------
   // Get episode
@@ -546,5 +633,3 @@ tvdb_init(void)
 }
 
 INITME(INIT_GROUP_API, tvdb_init, NULL, 0);
-
-

@@ -10,6 +10,8 @@
 
 #import "MainViewController.h"
 #import <OpenGLES/ES2/glext.h>
+#import <Metal/Metal.h>
+#import <CoreVideo/CVMetalTextureCache.h>
 #include <fenv.h>
 
 #include "ui/glw/glw.h"
@@ -20,6 +22,135 @@
 #include "media/media.h"
 
 extern int ios_landscape_only;
+
+/*
+ * Convert a VideoToolbox P010 IOSurface on the GPU into an IOSurface-backed
+ * BGRA texture that the existing OpenGL ES compositor can import.  This keeps
+ * Movian's subtitles/OSD in the same GLW scene and removes the per-frame CPU
+ * byte upload.  Returning NULL deliberately selects the tested GL fallback.
+ */
+CVPixelBufferRef
+ios_metal_convert_p010(CVPixelBufferRef source, int transfer, float hdrPeak)
+{
+  static id<MTLDevice> device;
+  static id<MTLCommandQueue> queue;
+  static id<MTLComputePipelineState> pipeline;
+  static CVMetalTextureCacheRef cache;
+  static CVPixelBufferPoolRef pool;
+  static size_t poolWidth;
+  static size_t poolHeight;
+  static dispatch_once_t once;
+
+  dispatch_once(&once, ^{
+    device = MTLCreateSystemDefaultDevice();
+    queue = [device newCommandQueue];
+    if(device == nil || queue == nil)
+      return;
+
+    NSString *shader =
+      @"#include <metal_stdlib>\n"
+       "using namespace metal;\n"
+       "struct Params { int transfer; float hdrPeak; };\n"
+       "float3 yuv2020(float y, float2 uv) {\n"
+       " y=(y-64.0/1023.0)*(1023.0/876.0);\n"
+       " uv=(uv-float2(512.0/1023.0))*(1023.0/896.0);\n"
+       " return float3(y+1.4746*uv.y,y-0.164553*uv.x-0.571353*uv.y,y+1.8814*uv.x); }\n"
+       "float3 yuv709(float y, float2 uv) {\n"
+       " y=(y-64.0/1023.0)*(1023.0/876.0);\n"
+       " uv=(uv-float2(512.0/1023.0))*(1023.0/896.0);\n"
+       " return float3(y+1.7927*uv.y,y-0.2132*uv.x-0.5329*uv.y,y+2.1124*uv.x); }\n"
+       "float3 hlg(float3 e) { float a=.17883277,b=.28466892,c=.55991073;\n"
+       " return select(e*e/3.0,(exp((e-c)/a)+b)/12.0,e>=.5); }\n"
+       "float3 pq(float3 e) { float m1=.1593017578125,m2=78.84375,c1=.8359375,c2=18.8515625,c3=18.6875;\n"
+       " float3 p=pow(max(e,0.0),1.0/m2); return pow(max(p-c1,0.0)/max(c2-c3*p,.00001),1.0/m1); }\n"
+       "float3 gamut(float3 c) { return float3(1.6605*c.r-.5876*c.g-.0728*c.b,-.1246*c.r+1.1329*c.g-.0083*c.b,-.0182*c.r-.1006*c.g+1.1187*c.b); }\n"
+       "float3 tone(float3 x) { return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.0,1.0); }\n"
+       "float3 tonehdr(float3 x,float peak) { float sourcePeak=max(1.0,peak/100.0); return tone(x*(10.0/sourcePeak)); }\n"
+       "float3 srgb(float3 x) { return select(12.92*x,1.055*pow(max(x,0.0),1.0/2.4)-.055,x>.0031308); }\n"
+       "kernel void p010bgra(texture2d<float,access::sample> y [[texture(0)]], texture2d<float,access::sample> uv [[texture(1)]], texture2d<float,access::write> out [[texture(2)]], constant Params& p [[buffer(0)]], uint2 q [[thread_position_in_grid]]) {\n"
+       " if(q.x>=out.get_width()||q.y>=out.get_height()) return;\n"
+       " constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear); float2 t=(float2(q)+.5)/float2(out.get_width(),out.get_height());\n"
+       " float3 c=max((p.transfer==16||p.transfer==18)?yuv2020(y.sample(s,t).r,uv.sample(s,t).rg):yuv709(y.sample(s,t).r,uv.sample(s,t).rg),0.0);\n"
+       " if(p.transfer==18) c=srgb(tone(max(gamut(pow(hlg(c),1.2)*4.0),0.0))); else if(p.transfer==16) c=srgb(tonehdr(max(gamut(pq(c)*100.0),0.0),p.hdrPeak));\n"
+       " out.write(float4(c,1.0),q); }\n";
+    NSError *error = nil;
+    id<MTLLibrary> library = [device newLibraryWithSource:shader
+                                                  options:nil error:&error];
+    id<MTLFunction> function = [library newFunctionWithName:@"p010bgra"];
+    pipeline = function != nil ? [device newComputePipelineStateWithFunction:function
+                                                                  error:&error] : nil;
+    if(pipeline != nil)
+      CVMetalTextureCacheCreate(NULL, NULL, device, NULL, &cache);
+  });
+
+  if(pipeline == nil || cache == NULL || source == NULL)
+    return NULL;
+
+  size_t width = CVPixelBufferGetWidth(source);
+  size_t height = CVPixelBufferGetHeight(source);
+  if(pool == NULL || width != poolWidth || height != poolHeight) {
+    if(pool != NULL)
+      CVPixelBufferPoolRelease(pool);
+    NSDictionary *attrs = @{
+      (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
+      (id)kCVPixelBufferWidthKey: @(width),
+      (id)kCVPixelBufferHeightKey: @(height),
+      (id)kCVPixelBufferIOSurfacePropertiesKey: @{},
+      (id)kCVPixelBufferMetalCompatibilityKey: @YES,
+      (id)kCVPixelBufferOpenGLESCompatibilityKey: @YES
+    };
+    if(CVPixelBufferPoolCreate(NULL, NULL, (__bridge CFDictionaryRef)attrs,
+                               &pool) != kCVReturnSuccess)
+      pool = NULL;
+    poolWidth = width;
+    poolHeight = height;
+  }
+
+  CVPixelBufferRef output = NULL;
+  if(pool == NULL || CVPixelBufferPoolCreatePixelBuffer(NULL, pool, &output))
+    return NULL;
+
+  CVMetalTextureRef yref = NULL, uvref = NULL, outref = NULL;
+  CVReturn status = CVMetalTextureCacheCreateTextureFromImage(NULL, cache, source,
+    NULL, MTLPixelFormatR16Unorm, width, height, 0, &yref);
+  if(status == kCVReturnSuccess)
+    status = CVMetalTextureCacheCreateTextureFromImage(NULL, cache, source,
+      NULL, MTLPixelFormatRG16Unorm, width / 2, height / 2, 1, &uvref);
+  if(status == kCVReturnSuccess)
+    status = CVMetalTextureCacheCreateTextureFromImage(NULL, cache, output,
+      NULL, MTLPixelFormatBGRA8Unorm, width, height, 0, &outref);
+
+  if(status == kCVReturnSuccess) {
+    id<MTLCommandBuffer> command = [queue commandBuffer];
+    id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+    [encoder setComputePipelineState:pipeline];
+    [encoder setTexture:CVMetalTextureGetTexture(yref) atIndex:0];
+    [encoder setTexture:CVMetalTextureGetTexture(uvref) atIndex:1];
+    [encoder setTexture:CVMetalTextureGetTexture(outref) atIndex:2];
+    struct { int transfer; float hdrPeak; } params = {
+      transfer, hdrPeak >= 100.0f ? hdrPeak : 1000.0f
+    };
+    [encoder setBytes:&params length:sizeof(params) atIndex:0];
+    MTLSize group = MTLSizeMake(16, 16, 1);
+    MTLSize grid = MTLSizeMake((width + 15) / 16 * 16,
+                               (height + 15) / 16 * 16, 1);
+    [encoder dispatchThreads:grid threadsPerThreadgroup:group];
+    [encoder endEncoding];
+    [command commit];
+    [command waitUntilCompleted];
+    if(command.status != MTLCommandBufferStatusCompleted)
+      status = kCVReturnError;
+  }
+
+  if(yref != NULL) CFRelease(yref);
+  if(uvref != NULL) CFRelease(uvref);
+  if(outref != NULL) CFRelease(outref);
+  if(status != kCVReturnSuccess) {
+    CVPixelBufferRelease(output);
+    return NULL;
+  }
+  return output;
+}
 
 @interface MainViewController () {
   lphelper_t longpress;

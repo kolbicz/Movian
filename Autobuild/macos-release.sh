@@ -7,7 +7,7 @@ BUILDDIR="${ROOTDIR}/build.m7osx"
 APP="${BUILDDIR}/dist/Movian.app"
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "${APP}/Contents/Info.plist" 2>/dev/null || echo "7.0.272")
-DMG="${BUILDDIR}/Movian-macOS-${VERSION}-arm64.dmg"
+DMG=${DMG:-"${BUILDDIR}/Movian-macOS-${VERSION}-arm64.dmg"}
 SIGN_IDENTITY=${SIGN_IDENTITY:-"Developer ID Application: Christoph Kolbicz (LPYXN7JAC8)"}
 NOTARY_PROFILE=${NOTARY_PROFILE:-movian-notary}
 DO_BUILD=1

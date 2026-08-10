@@ -67,6 +67,7 @@ typedef struct glw_video_surface {
 
   void *gvs_opaque;
   int gvs_format;
+  float gvs_hdr_peak_luminance;
 
   glw_backend_texture_t gvs_texture;
   int gvs_uploaded;
@@ -334,4 +335,3 @@ void glw_video_opengl_load_uniforms(glw_root_t *gr, glw_program_t *gp,
                                     void *args, const glw_render_job_t *rj);
 
 #endif /* GLW_VIDEO_COMMON_H */
-

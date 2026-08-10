@@ -274,6 +274,20 @@ render_unlocked(glw_root_t *gr)
         uni_calls++;
       }
 
+      if(gp->gp_uniform_edr_headroom != -1) {
+        glUniform1f(gp->gp_uniform_edr_headroom,
+                    MAX(1.0f, rj->gpa != NULL ?
+                                      rj->gpa->gpa_edr_headroom : 1.0f));
+        uni_calls++;
+      }
+
+      if(gp->gp_uniform_hdr_peak_luminance != -1) {
+        glUniform1f(gp->gp_uniform_hdr_peak_luminance,
+                    rj->gpa != NULL ?
+                      MAX(100.0f, rj->gpa->gpa_hdr_peak_luminance) : 1000.0f);
+        uni_calls++;
+      }
+
       if(gp->gp_uniform_blur != -1 && t0 != NULL) {
         glUniform3f(gp->gp_uniform_blur, rj->blur,
                     1.5 / t0->width, 1.5 / t0->height);
@@ -454,6 +468,9 @@ glw_link_program(glw_backend_root_t *gbr, const char *title,
 
   gp->gp_uniform_time        = glGetUniformLocation(p, "iGlobalTime");
   gp->gp_uniform_resolution  = glGetUniformLocation(p, "iResolution");
+  gp->gp_uniform_edr_headroom = glGetUniformLocation(p, "u_edr_headroom");
+  gp->gp_uniform_hdr_peak_luminance =
+    glGetUniformLocation(p, "u_hdr_peak_luminance");
 
 #ifdef DEBUG_SHADERS
   printf("Loaded %s\n", title);
@@ -682,6 +699,36 @@ glw_opengl_shaders_init(glw_root_t *gr)
   SHADERPATH("p010_hlg_1f_norm.glsl");
   fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
   gbr->gbr_p010_hlg_1f = glw_link_program(gbr, "p010_hlg_1f_norm", vs, fs);
+  glDeleteShader(fs);
+
+  SHADERPATH("p010_pq_edr_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_pq_edr_1f = glw_link_program(gbr, "p010_pq_edr_1f_norm", vs, fs);
+  glDeleteShader(fs);
+
+  SHADERPATH("p010_hlg_edr_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_hlg_edr_1f = glw_link_program(gbr, "p010_hlg_edr_1f_norm", vs, fs);
+  glDeleteShader(fs);
+  glDeleteShader(vs);
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+  // iOS OpenGL ES 2 byte-packed P010 renderer
+  SHADERPATH("p010_ios_v.glsl");
+  vs = glw_compile_shader(path, GL_VERTEX_SHADER, gr);
+
+  SHADERPATH("p010_ios_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_1f = glw_link_program(gbr, "p010_ios_1f_norm", vs, fs);
+  glDeleteShader(fs);
+
+  SHADERPATH("p010_ios_pq_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_pq_1f = glw_link_program(gbr, "p010_ios_pq_1f_norm", vs, fs);
+  glDeleteShader(fs);
+
+  SHADERPATH("p010_ios_hlg_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_hlg_1f = glw_link_program(gbr, "p010_ios_hlg_1f_norm", vs, fs);
   glDeleteShader(fs);
   glDeleteShader(vs);
 #endif

@@ -11,12 +11,14 @@
 #include "libavcodec/avcodec.h"
 
 #include "glw_video_common.h"
+#include "arch/osx/osx_c.h"
 
 #define NUM_SURFACES 4
 
 typedef struct p010_aux {
   int import_reported;
   int shader_transfer_reported;
+  float reported_headroom;
 } p010_aux_t;
 
 typedef struct reap_task {
@@ -198,6 +200,10 @@ p010_render(glw_video_t *gv, glw_rctx_t *rc)
 
   gv->gv_width = sa->gvs_width[0];
   gv->gv_height = sa->gvs_height[0];
+  const float edr_headroom = osx_get_edr_headroom(gr);
+  const int use_edr = edr_headroom > 1.0f;
+  gv->gv_gpa.gpa_edr_headroom = edr_headroom;
+  gv->gv_gpa.gpa_hdr_peak_luminance = sa->gvs_hdr_peak_luminance;
 
   glw_renderer_vtx_st(&gv->gv_quad, 0, 0, sa->gvs_height[0]);
   glw_renderer_vtx_st(&gv->gv_quad, 1, sa->gvs_width[0], sa->gvs_height[0]);
@@ -205,20 +211,27 @@ p010_render(glw_video_t *gv, glw_rctx_t *rc)
   glw_renderer_vtx_st(&gv->gv_quad, 3, 0, 0);
 
   if(sa->gvs_format == AVCOL_TRC_SMPTE2084)
-    gv->gv_gpa.gpa_prog = gr->gr_be.gbr_p010_pq_1f;
+    gv->gv_gpa.gpa_prog = use_edr ? gr->gr_be.gbr_p010_pq_edr_1f :
+                                    gr->gr_be.gbr_p010_pq_1f;
   else if(sa->gvs_format == AVCOL_TRC_ARIB_STD_B67)
-    gv->gv_gpa.gpa_prog = gr->gr_be.gbr_p010_hlg_1f;
+    gv->gv_gpa.gpa_prog = use_edr ? gr->gr_be.gbr_p010_hlg_edr_1f :
+                                    gr->gr_be.gbr_p010_hlg_1f;
   else
     gv->gv_gpa.gpa_prog = gr->gr_be.gbr_p010_1f;
 
   p010_aux_t *aux = gv->gv_aux;
-  if(aux->shader_transfer_reported != sa->gvs_format) {
-    TRACE(TRACE_INFO, "GLW", "P010 shader selected: %s (transfer=%d)",
-          sa->gvs_format == AVCOL_TRC_SMPTE2084 ? "HDR10/PQ to SDR" :
-          sa->gvs_format == AVCOL_TRC_ARIB_STD_B67 ? "HLG to SDR" :
+  const int shader_id = sa->gvs_format | (use_edr ? 0x10000 : 0);
+  if(aux->shader_transfer_reported != shader_id ||
+     fabsf(aux->reported_headroom - edr_headroom) >= 0.25f) {
+    TRACE(TRACE_INFO, "GLW", "P010 shader selected: %s (transfer=%d, EDR headroom=%.2f, HDR peak=%.0f nits)",
+          sa->gvs_format == AVCOL_TRC_SMPTE2084 ?
+            (use_edr ? "HDR10/PQ native EDR" : "HDR10/PQ to SDR") :
+          sa->gvs_format == AVCOL_TRC_ARIB_STD_B67 ?
+            (use_edr ? "HLG native EDR" : "HLG to SDR") :
                                                      "BT.709 SDR",
-          sa->gvs_format);
-    aux->shader_transfer_reported = sa->gvs_format;
+          sa->gvs_format, edr_headroom, sa->gvs_hdr_peak_luminance);
+    aux->shader_transfer_reported = shader_id;
+    aux->reported_headroom = edr_headroom;
   }
   glw_renderer_draw(&gv->gv_quad, gr, rc, &sa->gvs_texture, NULL,
                     NULL, NULL, rc->rc_alpha * gv->w.glw_alpha,
@@ -243,6 +256,7 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
   s->gvs_width[1] = fi->fi_width >> 1;
   s->gvs_height[1] = fi->fi_height >> 1;
   s->gvs_format = fi->fi_color_transfer;
+  s->gvs_hdr_peak_luminance = fi->fi_hdr_peak_luminance;
   s->gvs_uploaded = 0;
   glw_video_put_surface(gv, s, fi->fi_pts, fi->fi_epoch,
                         fi->fi_duration, 0, 0);

@@ -52,6 +52,8 @@ typedef struct reap_task {
 } reap_task_t;
 
 extern CVEAGLContext ios_get_gles_context(glw_root_t *gr);
+extern CVPixelBufferRef ios_metal_convert_p010(CVPixelBufferRef source,
+                                               int transfer, float hdr_peak);
 
 /**
  *
@@ -272,7 +274,12 @@ gvv_init(glw_video_t *gv)
   
   CVOpenGLESTextureCacheCreate(NULL, NULL, gr->gr_private, NULL, &gvv->gvv_tex_cache_ref);
   
-  TRACE(TRACE_DEBUG, "GLW", "Using zero copy video renderer");
+  /* This initializer is shared by the CVPixelBuffer texture-cache renderer
+   * and the P010 byte-upload fallback.  Only the former is zero-copy, so do
+   * not make a transport claim here.  The selected engine logs its actual
+   * upload/import path separately. */
+  TRACE(TRACE_DEBUG, "GLW",
+        "Initialized OpenGL ES video texture renderer");
   
   make_surfaces_available(gv);
   return 0;
@@ -454,3 +461,188 @@ static glw_video_engine_t glw_video_cvpb = {
 };
 
 GLW_REGISTER_GVE(glw_video_cvpb);
+
+
+/*
+ * OpenGL ES 2 has no portable normalized 16-bit RG texture format.  Import
+ * P010 as byte-packed LA/RGBA textures and reconstruct each 10-bit component
+ * in the fragment shader.  This avoids the 10-to-8-bit pixel-transfer stage;
+ * a later Metal renderer can make this path zero-copy.
+ */
+static int
+p010_ios_init(glw_video_t *gv)
+{
+  int r = gvv_init(gv);
+  memcpy(gv->gv_cmatrix_cur, cmatrix_ITUR_BT_709,
+         sizeof(gv->gv_cmatrix_cur));
+  memcpy(gv->gv_cmatrix_tgt, cmatrix_ITUR_BT_709,
+         sizeof(gv->gv_cmatrix_tgt));
+  TRACE(TRACE_INFO, "GLW",
+        "P010 renderer initialized (Metal GPU bridge with OpenGL ES byte-upload fallback)");
+  return r;
+}
+
+static int
+p010_ios_upload(glw_video_t *gv, glw_video_surface_t *gvs)
+{
+  if(gvs->gvs_opaque == NULL)
+    return 0;
+
+  CVPixelBufferRef pb = gvs->gvs_opaque;
+  gvv_aux_t *gvv = gv->gv_aux;
+
+  /* Metal can import the decoder's R16/RG16 P010 planes without touching the
+   * CPU.  Its IOSurface-backed BGRA result can then be imported into the
+   * existing OpenGL ES compositor, preserving subtitles, OSD and menus. */
+  CVPixelBufferRef converted = ios_metal_convert_p010(
+    pb, gvs->gvs_format, gvs->gvs_hdr_peak_luminance);
+  if(converted != NULL) {
+    CVOpenGLESTextureCacheFlush(gvv->gvv_tex_cache_ref, 0);
+    CVOpenGLESTextureRef texture = NULL;
+    CVReturn r = CVOpenGLESTextureCacheCreateTextureFromImage(
+      NULL, gvv->gvv_tex_cache_ref, converted, NULL,
+      GL_TEXTURE_2D, GL_RGBA, gvs->gvs_width[0], gvs->gvs_height[0],
+      GL_BGRA, GL_UNSIGNED_BYTE, 0, &texture);
+    CVPixelBufferRelease(converted);
+    if(r == kCVReturnSuccess && texture != NULL) {
+      gvs->gvs_data[0] = texture;
+      gvs->gvs_texture.gltype = GL_TEXTURE_2D;
+      gvs->gvs_texture.textures[0] = CVOpenGLESTextureGetName(texture);
+      gvs->gvs_texture.textures[1] = 0;
+      gvs->gvs_texture.width = gvs->gvs_width[0];
+      gvs->gvs_texture.height = gvs->gvs_height[0];
+      glBindTexture(GL_TEXTURE_2D, gvs->gvs_texture.textures[0]);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      gvs->gvs_uploaded = 2;
+      CFRelease(gvs->gvs_opaque);
+      gvs->gvs_opaque = NULL;
+      static int logged;
+      if(!logged) {
+        logged = 1;
+        TRACE(TRACE_INFO, "GLW",
+              "P010 IOSurface converted by Metal GPU and imported into OpenGL ES");
+      }
+      return 0;
+    }
+    if(texture != NULL)
+      CFRelease(texture);
+  }
+
+  gvs->gvs_uploaded = 1;
+  CVReturn status = CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+  if(status != kCVReturnSuccess)
+    return -1;
+
+  if(gvs->gvs_texture.textures[0] == 0)
+    glGenTextures(2, gvs->gvs_texture.textures);
+
+  GLint old_unpack_alignment;
+  GLint old_active_texture;
+  GLint old_texture_binding;
+  glGetIntegerv(GL_UNPACK_ALIGNMENT, &old_unpack_alignment);
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &old_active_texture);
+  glActiveTexture(GL_TEXTURE0);
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture_binding);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glBindTexture(GL_TEXTURE_2D, gvs->gvs_texture.textures[0]);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA,
+               gvs->gvs_width[0], gvs->gvs_height[0], 0,
+               GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE,
+               CVPixelBufferGetBaseAddressOfPlane(pb, 0));
+
+  glBindTexture(GL_TEXTURE_2D, gvs->gvs_texture.textures[1]);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+               gvs->gvs_width[1], gvs->gvs_height[1], 0,
+               GL_RGBA, GL_UNSIGNED_BYTE,
+               CVPixelBufferGetBaseAddressOfPlane(pb, 1));
+
+  GLenum err = glGetError();
+  glPixelStorei(GL_UNPACK_ALIGNMENT, old_unpack_alignment);
+  glBindTexture(GL_TEXTURE_2D, old_texture_binding);
+  glActiveTexture(old_active_texture);
+  CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly);
+  if(err != GL_NO_ERROR) {
+    TRACE(TRACE_ERROR, "GLW", "P010 byte-packed texture upload failed: 0x%x",
+          err);
+    return -1;
+  }
+
+  gvs->gvs_texture.gltype = GL_TEXTURE_2D;
+  gvs->gvs_texture.width = gvs->gvs_width[0];
+  gvs->gvs_texture.height = gvs->gvs_height[0];
+  CFRelease(gvs->gvs_opaque);
+  gvs->gvs_opaque = NULL;
+  return 0;
+}
+
+static void
+p010_ios_render(glw_video_t *gv, glw_rctx_t *rc)
+{
+  glw_video_surface_t *sa = gv->gv_sa;
+  if(sa == NULL || p010_ios_upload(gv, sa))
+    return;
+
+  gv->gv_width = sa->gvs_width[0];
+  gv->gv_height = sa->gvs_height[0];
+  glw_renderer_vtx_st(&gv->gv_quad, 0, 0, 1);
+  glw_renderer_vtx_st(&gv->gv_quad, 1, 1, 1);
+  glw_renderer_vtx_st(&gv->gv_quad, 2, 1, 0);
+  glw_renderer_vtx_st(&gv->gv_quad, 3, 0, 0);
+
+  glw_root_t *gr = gv->w.glw_root;
+  gv->gv_gpa.gpa_hdr_peak_luminance = sa->gvs_hdr_peak_luminance;
+  gv->gv_gpa.gpa_prog = sa->gvs_uploaded == 2 ? gr->gr_be.gbr_rgb2rgb_1f :
+    sa->gvs_format == AVCOL_TRC_SMPTE2084 ? gr->gr_be.gbr_p010_pq_1f :
+    sa->gvs_format == AVCOL_TRC_ARIB_STD_B67 ? gr->gr_be.gbr_p010_hlg_1f :
+                                               gr->gr_be.gbr_p010_1f;
+  glw_renderer_draw(&gv->gv_quad, gr, rc, &sa->gvs_texture, NULL,
+                    NULL, NULL, rc->rc_alpha * gv->w.glw_alpha,
+                    0, &gv->gv_gpa);
+}
+
+static int
+p010_ios_deliver(const frame_info_t *fi, glw_video_t *gv,
+                 glw_video_engine_t *gve)
+{
+  CVPixelBufferRef pb = (CVPixelBufferRef)fi->fi_data[0];
+  glw_video_surface_t *s;
+  glw_video_configure(gv, gve);
+  if((s = glw_video_get_surface(gv, NULL, NULL)) == NULL)
+    return -1;
+
+  gv_color_matrix_set(gv, fi);
+  CFRetain(pb);
+  s->gvs_opaque = pb;
+  s->gvs_width[0] = fi->fi_width;
+  s->gvs_height[0] = fi->fi_height;
+  s->gvs_width[1] = fi->fi_width >> 1;
+  s->gvs_height[1] = fi->fi_height >> 1;
+  s->gvs_format = fi->fi_color_transfer;
+  s->gvs_hdr_peak_luminance = fi->fi_hdr_peak_luminance;
+  glw_video_put_surface(gv, s, fi->fi_pts, fi->fi_epoch,
+                        fi->fi_duration, 0, 0);
+  return 0;
+}
+
+static glw_video_engine_t glw_video_p010_ios = {
+  .gve_type = 'P010',
+  .gve_init_on_ui_thread = 1,
+  .gve_newframe = gvv_newframe,
+  .gve_render = p010_ios_render,
+  .gve_reset = gvv_reset,
+  .gve_init = p010_ios_init,
+  .gve_deliver = p010_ios_deliver,
+};
+
+GLW_REGISTER_GVE(glw_video_p010_ios);

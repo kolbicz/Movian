@@ -19,6 +19,8 @@
  */
 #include <libavformat/avformat.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/dovi_meta.h>
+#include <libavutil/mastering_display_metadata.h>
 
 //usleep
 #include <unistd.h>
@@ -104,6 +106,42 @@ rescale(AVFormatContext *fctx, int64_t ts, int si)
 
 #define MB_SPECIAL_EOF ((void *)-1)
 
+static int64_t
+video_prebuffer_target(AVFormatContext *fctx, media_pipe_t *mp, int64_t pos)
+{
+  int64_t prebuffer = video_settings.video_prebuffer_size
+    ? ((video_settings.video_prebuffer_size > 1)
+       ? video_settings.video_prebuffer_size
+       : video_settings.video_prebuffer_size + 4) * 1000000LL
+    : 10 * 1000000LL;
+
+  if(fctx->duration != AV_NOPTS_VALUE) {
+    const int64_t media_pos = FFMAX(0, pos - fctx->start_time);
+    const int64_t remaining = FFMAX(0, fctx->duration - media_pos);
+    prebuffer = FFMIN(prebuffer, FFMAX(500000, remaining / 2));
+    if(fctx->duration <= 30 * 1000000LL) {
+      /* A half-second is sufficient for ordinary short samples, but at
+       * delivery bitrates above 20 Mbit/s it represents very little data and
+       * can be consumed before an SMB reader refills the queue. */
+      const int64_t short_target = fctx->bit_rate > 20000000
+        ? 2000000 : 500000;
+      prebuffer = FFMIN(short_target, FFMAX(250000, remaining / 2));
+    }
+  }
+
+  /* Time-only buffering cannot be reached when an exceptionally high bitrate
+   * stream fills the compressed-byte queue first (for example 4K ProRes HQ at
+   * ~770 Mbit/s).  Cap those streams to 75% of the queue's byte capacity.
+   * Keep ordinary camera and delivery formats on the proven time policy. */
+  if(fctx->bit_rate > 200000000 && mp->mp_buffer_limit != 0) {
+    const int64_t capacity_prebuffer =
+      (int64_t)mp->mp_buffer_limit * 3 * 8 * 1000000LL /
+      (4 * fctx->bit_rate);
+    prebuffer = FFMIN(prebuffer, FFMAX(250000, capacity_prebuffer));
+  }
+  return prebuffer;
+}
+
 /**
  *
  */
@@ -117,14 +155,39 @@ video_seek(AVFormatContext *fctx, media_pipe_t *mp, media_buf_t **mbp,
 	(pos - fctx->start_time) / 1000000.0,
 	pos, fctx->start_time);
 
-  if(av_seek_frame(fctx, -1, pos, AVSEEK_FLAG_BACKWARD)) { //AVSEEK_FLAG_ANY // AVSEEK_FLAG_BACKWARD
-    TRACE(TRACE_ERROR, "Video", "Seek failed");
+  const int seek_stream = mp->mp_video.mq_stream;
+  /* Keep timestamps in AV_TIME_BASE units and let the container choose the
+   * indexed random-access packet across all streams.  A stream-specific
+   * av_seek_frame() can report success for MOV/MP4 while positioning after
+   * the required video sync sample.  Bounding max_ts to pos guarantees the
+   * selected index entry is not later than the requested presentation time. */
+  int seek_status = avformat_seek_file(fctx, -1, INT64_MIN, pos, pos,
+                                       AVSEEK_FLAG_BACKWARD);
+  if(seek_status)
+    seek_status = av_seek_frame(fctx, -1, pos, AVSEEK_FLAG_BACKWARD);
+  if(seek_status) {
+    TRACE(TRACE_ERROR, "Video", "Seek failed at %.2f (status=%d)",
+          (pos - fctx->start_time) / 1000000.0, seek_status);
+  } else {
+    TRACE(TRACE_DEBUG, "Video",
+          "Bounded global demux seek accepted at %.2f (active video stream %d)",
+          (pos - fctx->start_time) / 1000000.0, seek_stream);
   }
 
   mp->mp_video.mq_seektarget = pos;
   mp->mp_audio.mq_seektarget = pos;
 
   mp_flush(mp);
+  /* Keep post-seek packets behind a bounded prebuffer gate.  A fixed 500 ms
+   * gate is enough for ordinary streams, but a 96-Mbit/s camera file can
+   * consume it immediately and fall back into underrun after its first frame.
+   * Use the normal configured file prebuffer, shortened only when the seek is
+   * close enough to EOF that the requested amount cannot be accumulated. */
+  int64_t prebuffer = video_prebuffer_target(fctx, mp, pos);
+  mp->mp_pre_buffer_delay = prebuffer;
+  TRACE(TRACE_DEBUG, "Video", "Post-seek prebuffer target %.2f seconds",
+        prebuffer / 1000000.0);
+  mp_hold(mp, MP_HOLD_PRE_BUFFERING, NULL);
 
   if(*mbp != NULL && *mbp != MB_SPECIAL_EOF)
     media_buf_free_unlocked(mp, *mbp);
@@ -209,6 +272,10 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
       //mp_underrun(mp);
     }
 
+    mp->mp_pre_buffer_delay = video_prebuffer_target(fctx, mp, start);
+    TRACE(TRACE_DEBUG, "Video", "Initial prebuffer target %.2f seconds",
+          mp->mp_pre_buffer_delay / 1000000.0);
+
     if(start) {
       TRACE(TRACE_DEBUG, "VIDEO", "Attempting to resume from %.2f seconds", start / 1000000.0f);
       mp->mp_seek_base = start;
@@ -262,24 +329,20 @@ video_player_loop(AVFormatContext *fctx, media_codec_t **cwvec,
 
 		if(arch_get_avtime() - seek_pending_req > 750000)
 		{
-			mp_flush(mp);
-			//TRACE(TRACE_DEBUG, "Seek", "Seek request SEEKING: %li", seek_pending_ts/1000);
-			media_buf_t *mbt = NULL;
 			mp->mp_seek_base = seek_pending_ts;
-			video_seek(fctx, mp, &mbt, seek_pending_ts, "direct", 0);//, (seek_pending_ts < last_timestamp_presented));
+			/* Seek with the actual packet held by the demux loop.  The M7
+			 * implementation passed a temporary NULL pointer here, leaving a
+			 * pre-seek packet alive so it could be enqueued after the decoder
+			 * flush.  video_seek() releases that packet and performs the one
+			 * synchronized post-seek queue/codec flush we need. */
+			video_seek(fctx, mp, &mb, seek_pending_ts, "direct", 0);
 			seek_pending_req = 0;
 			//event_dispatch(event_create_action(ACTION_PAUSE));
 			//event_dispatch(event_create_action(ACTION_PLAY));
 			//if(!mp->mp_tunnel_mode) mp->mp_stream_index++;
 			//seek_pending_ts = last_timestamp_presented;
 
-			if(video_settings.video_prebuffer_size)
-			{
-				mp->mp_pre_buffer_delay = ( (video_settings.video_prebuffer_size>1) ? video_settings.video_prebuffer_size : (video_settings.video_prebuffer_size + 4)) * 1000000;
-				mp->mp_hold_flags |= MP_HOLD_PRE_BUFFERING;
-				mp_hold(mp, mp->mp_hold_flags, NULL);
-				//TRACE(TRACE_INFO, "Seek", "mp->mp_pre_buffer_delay = %i", mp->mp_pre_buffer_delay);
-			}
+			/* video_seek() owns the synchronized flush and prebuffer setup. */
 			//if(seek_pending_ts < last_timestamp_presented) mp_underrun(mp);
 		}
 		//else TRACE(TRACE_INFO, "Seek", "Seeking too fast... (%li)", arch_get_avtime() - seek_pending_req);
@@ -520,19 +583,20 @@ check_events:
 			}
 			else
 			{
-				if(fctx->duration != AV_NOPTS_VALUE && (fctx->duration - ets->ts)<15000000)
-				{
+				if(fctx->duration != AV_NOPTS_VALUE &&
+				   (fctx->duration - ets->ts) < 15000000)
 					mp->mp_pre_buffer_delay = 500000;
-					//mp->mp_allow_prebuffer = 0;
-				}
-				else
-				{
-					seek_pending_ts = ets->ts;
-					seek_pending_req = arch_get_avtime();
-					mp_flush(mp);
-					//TRACE(TRACE_DEBUG, "Seek", "Seek request: %lli", ets->ts);
-					//video_seek(fctx, mp, &mb, ets->ts, "direct", 0, (ets->ts < last_timestamp_presented));
-				}
+
+				/* The old code only queued this in the else branch above.
+				 * Consequently every seek in the final 15 seconds was silently
+				 * ignored (and every seek in a <=15-second sample was ignored).
+				 * Near-EOF buffering is a policy adjustment, not a reason to skip
+				 * the actual demux seek. */
+				seek_pending_ts = ets->ts;
+				seek_pending_req = arch_get_avtime();
+				/* Debounce scrubbing without flushing twice.  video_seek() performs
+				 * the single synchronized demux/decoder flush once the target has
+				 * remained stable for 750 ms. */
 			}
 
 		//video_seek(fctx, mp, &mb, ets->ts, "direct", 1);
@@ -988,7 +1052,46 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
       mcp.color_transfer = ctx->color_trc;
       mcp.color_matrix = ctx->colorspace;
       mcp.color_range = ctx->color_range;
+      int hdr_size = 0;
+      const AVMasteringDisplayMetadata *mastering =
+        (const AVMasteringDisplayMetadata *)av_stream_get_side_data(
+          st, AV_PKT_DATA_MASTERING_DISPLAY_METADATA, &hdr_size);
+      if(mastering != NULL && hdr_size >= sizeof(*mastering) &&
+         mastering->has_luminance) {
+        const double peak = av_q2d(mastering->max_luminance);
+        if(peak >= 100.0 && peak <= 10000.0)
+          mcp.hdr_mastering_max_luminance = peak;
+      }
+      hdr_size = 0;
+      const AVContentLightMetadata *light =
+        (const AVContentLightMetadata *)av_stream_get_side_data(
+          st, AV_PKT_DATA_CONTENT_LIGHT_LEVEL, &hdr_size);
+      if(light != NULL && hdr_size >= sizeof(*light)) {
+        mcp.hdr_max_cll = light->MaxCLL;
+        mcp.hdr_max_fall = light->MaxFALL;
+      }
+      if(mcp.color_transfer == AVCOL_TRC_SMPTE2084)
+        TRACE(TRACE_INFO, "Video",
+              "HDR10 metadata: mastering peak=%.0f nits, MaxCLL=%u, MaxFALL=%u",
+              mcp.hdr_mastering_max_luminance, mcp.hdr_max_cll,
+              mcp.hdr_max_fall);
       mcp.codec_tag = ctx->codec_tag;
+      int dovi_size = 0;
+      const AVDOVIDecoderConfigurationRecord *dovi =
+        (const AVDOVIDecoderConfigurationRecord *)
+        av_stream_get_side_data(st, AV_PKT_DATA_DOVI_CONF, &dovi_size);
+      if(dovi != NULL && dovi_size >= sizeof(*dovi)) {
+        mcp.dovi_valid = 1;
+        mcp.dovi_version_major = dovi->dv_version_major;
+        mcp.dovi_version_minor = dovi->dv_version_minor;
+        mcp.dovi_profile = dovi->dv_profile;
+        mcp.dovi_level = dovi->dv_level;
+        mcp.dovi_rpu_present = dovi->rpu_present_flag;
+        mcp.dovi_el_present = dovi->el_present_flag;
+        mcp.dovi_bl_present = dovi->bl_present_flag;
+        mcp.dovi_bl_compatibility_id =
+          dovi->dv_bl_signal_compatibility_id;
+      }
       mcp.sar_num = st->sample_aspect_ratio.num;
       mcp.sar_den = st->sample_aspect_ratio.den;
 
