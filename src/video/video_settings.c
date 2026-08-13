@@ -154,7 +154,7 @@ video_settings_init(void)
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
                  SETTING_TITLE(_p("Direct P010 rendering (experimental)")),
                  SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
-                 SETTING_VALUE(1),
+                 SETTING_VALUE(0),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),
                  NULL);
 #endif

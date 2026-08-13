@@ -124,6 +124,7 @@ typedef struct glw_backend_root {
   struct glw_program *gbr_p010_hlg_1f;
   struct glw_program *gbr_p010_pq_edr_1f;
   struct glw_program *gbr_p010_hlg_edr_1f;
+  struct glw_program *gbr_p010_metal_1f;
 
   /**
    *

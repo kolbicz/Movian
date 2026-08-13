@@ -327,11 +327,16 @@ mac_audio_deliver(audio_decoder_t *ad, int samples,
   b->mAudioDataByteSize = bytes;
 
   AudioTimeStamp ats;
-  AudioQueueEnqueueBufferWithParameters(d->aq, b, 0, NULL,
-                                        0, 0, 0, NULL, NULL, &ats);
+  OSStatus status = AudioQueueEnqueueBufferWithParameters(d->aq, b, 0, NULL,
+                                                          0, 0, 0, NULL,
+                                                          NULL, &ats);
 
-  if(ats.mFlags & kAudioTimeStampHostTimeValid &&
-     pts != AV_NOPTS_VALUE) {
+  /* Some AudioQueue implementations do not set HostTimeValid in the output
+   * timestamp even though the buffer was accepted.  The clock below has
+   * always been based on the current Mach time rather than ats.mHostTime, so
+   * gating it on that optional flag can leave mp_audio_clock_epoch at zero
+   * forever and prevent video synchronization. */
+  if(status == noErr && pts != AV_NOPTS_VALUE) {
 
     const int64_t now = mach_absolute_time();
     int64_t t = now * timebase.numer / (timebase.denom * 1000);
@@ -380,4 +385,3 @@ audio_driver_init(struct prop *asettings)
 
   return &mac_audio_class;
 }
-

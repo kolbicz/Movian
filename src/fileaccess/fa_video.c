@@ -47,6 +47,10 @@
 #include "metadata/playinfo.h"
 #include "usage.h"
 
+#if TARGET_OS_IPHONE
+#include <VideoToolbox/VideoToolbox.h>
+#endif
+
 #if ENABLE_METADATA
 #include "fa_probe.h"
 #endif
@@ -948,6 +952,33 @@ be_file_playvideo_fh(const char *url, media_pipe_t *mp,
 
   TRACE(TRACE_DEBUG, "Video", "Starting playback of %s (%s)",
 	url, fctx->iformat->name);
+
+#if TARGET_OS_IPHONE
+  /*
+   * The bundled libav AV1 decoder is not a usable playback fallback on iOS:
+   * on devices without VideoToolbox AV1 support it accepts the stream but
+   * does not deliver video at playback speed.  Fail before configuring the
+   * media pipe so the UI shows an actionable error instead of a black player.
+   */
+  if(!VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1)) {
+    for(unsigned int stream = 0; stream < fctx->nb_streams; stream++) {
+      AVCodecContext *ctx = fctx->streams[stream]->codec;
+      if(ctx->codec_type != AVMEDIA_TYPE_VIDEO ||
+         ctx->codec_id != AV_CODEC_ID_AV1)
+        continue;
+
+      TRACE(TRACE_INFO, "Video",
+            "AV1 playback rejected: this iOS device has no hardware AV1 decoder");
+      notify_add(NULL, NOTIFY_ERROR, NULL, 6,
+                 _("AV1 video playback is not supported on this device"));
+      snprintf(errbuf, errlen,
+               "AV1 video playback is not supported on this device");
+      prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 0);
+      fa_libav_close_format(fctx, 0);
+      return NULL;
+    }
+  }
+#endif
 
 #if ENABLE_METADATA
   /**

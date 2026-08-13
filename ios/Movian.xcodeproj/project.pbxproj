@@ -46,6 +46,8 @@
 		F40000000000000000000011 /* es_faprovider.c in Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000001 /* es_faprovider.c */; };
 		F40000000000000000000012 /* es_websocket.c in Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000002 /* es_websocket.c */; };
 		F40000000000000000000013 /* es_scrobble.c in Sources */ = {isa = PBXBuildFile; fileRef = F40000000000000000000003 /* es_scrobble.c */; };
+		F50000000000000000000011 /* darwin.c in Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000001 /* darwin.c */; };
+		F50000000000000000000012 /* darwin.c in Sources */ = {isa = PBXBuildFile; fileRef = F50000000000000000000001 /* darwin.c */; };
 		6A04C0381C2156080043FA93 /* fa_filepicker.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C0361C2156080043FA93 /* fa_filepicker.c */; };
 		6A04C0391C2156110043FA93 /* fa_filepicker.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C0361C2156080043FA93 /* fa_filepicker.c */; };
 		6A04C0451C21A2C80043FA93 /* vtb.c in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C0441C21A2C80043FA93 /* vtb.c */; };
@@ -813,6 +815,7 @@
 		6ADCCCB51B3001240099FB5A /* config.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = config.h; sourceTree = SOURCE_ROOT; };
 		6ADCCCB61B3003350099FB5A /* compiler.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = compiler.h; path = ../src/compiler.h; sourceTree = "<group>"; };
 		6ADCCCB81B3003870099FB5A /* atomic.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = atomic.h; path = ../src/arch/atomic.h; sourceTree = "<group>"; };
+		F50000000000000000000001 /* darwin.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = darwin.c; path = ../src/arch/darwin.c; sourceTree = "<group>"; };
 		6ADCCCCA1B3011790099FB5A /* posix.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = posix.c; sourceTree = "<group>"; };
 		6ADCCCCB1B3011790099FB5A /* posix.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = posix.h; sourceTree = "<group>"; };
 		6ADCCCCC1B3011790099FB5A /* posix_threads.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = posix_threads.c; sourceTree = "<group>"; };
@@ -1462,6 +1465,7 @@
 		6ADCCCB71B30034B0099FB5A /* arch */ = {
 			isa = PBXGroup;
 			children = (
+				F50000000000000000000001 /* darwin.c */,
 				6ADCCCC91B3011790099FB5A /* posix */,
 				6ADCCCB81B3003870099FB5A /* atomic.h */,
 			);
@@ -2281,6 +2285,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F50000000000000000000011 /* darwin.c in Sources */,
 				6ADCCDC11B3016110099FB5A /* utf8.c in Sources */,
 				6AD9A4CC1D0030A1003BE227 /* lockmgr.c in Sources */,
 				6ADCCEB91B304DC80099FB5A /* torrent_stats.c in Sources */,
@@ -2575,6 +2580,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F50000000000000000000012 /* darwin.c in Sources */,
 				6A35C2481C10423600D8EA86 /* jpeg.c in Sources */,
 				6A35C1EA1C1041C000D8EA86 /* fa_aes.c in Sources */,
 				6A35C2301C1041FC00D8EA86 /* glw_video_overlay.c in Sources */,

@@ -240,7 +240,6 @@ glw_video_compute_avdiff(glw_root_t *gr, media_pipe_t *mp,
 
   hts_mutex_unlock(&mp->mp_clock_mutex);
 
-
   if(gconf.enable_detailed_avdiff) {
     static int64_t lastpts, lastaclock, lastclock;
 
@@ -1341,4 +1340,3 @@ static glw_video_engine_t glw_video_lavc = {
 GLW_REGISTER_GVE(glw_video_lavc);
 
 #endif
-

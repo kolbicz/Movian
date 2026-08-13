@@ -5,7 +5,8 @@
   shadow: true;
   outline: true;
   color: 0.6;
-  size: 0.75em;
+  size: select($core.app.platform == "ios" &&
+               $ui.orientation == "landscape", 0.66em, 0.75em);
 }
 
 
@@ -21,7 +22,8 @@
     });
     widget(label, {
       caption: VAL;
-	  size: 0.75em;
+	  size: select($core.app.platform == "ios" &&
+	               $ui.orientation == "landscape", 0.66em, 0.75em);
     });
   });
 }
@@ -34,7 +36,8 @@
       InfoLabel();
       align: right;
       caption: TITLE + ":";
-	  size: 0.75em;
+	  size: select($core.app.platform == "ios" &&
+	               $ui.orientation == "landscape", 0.66em, 0.75em);
     });
 
     widget(container_z, {

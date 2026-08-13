@@ -29,6 +29,7 @@
 #include "video_decoder.h"
 #include "video_settings.h"
 #include "h264_annexb.h"
+#include "notifications.h"
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
 #include "../../ext/libav/libavcodec/cbs.h"
@@ -452,6 +453,33 @@ copy_attachment_string(CVBufferRef buf, CFStringRef key,
 
 
 /**
+ * Dolby Vision profile 5 commonly has unspecified conventional HEVC colour
+ * fields because its source signal is described by Dolby metadata.  Apple's
+ * Dolby-aware decoder attaches the transfer function of its actual output.
+ * Use that value for renderer selection instead of retaining the unspecified
+ * container value and incorrectly drawing PQ output through the SDR shader.
+ */
+static int
+output_color_transfer(CVPixelBufferRef imageBuffer, int fallback)
+{
+  CFTypeRef value = CVBufferCopyAttachment(
+    imageBuffer, kCVImageBufferTransferFunctionKey, NULL);
+  int transfer = fallback;
+  if(value != NULL && CFGetTypeID(value) == CFStringGetTypeID()) {
+    if(CFEqual(value, kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ))
+      transfer = AVCOL_TRC_SMPTE2084;
+    else if(CFEqual(value, kCVImageBufferTransferFunction_ITU_R_2100_HLG))
+      transfer = AVCOL_TRC_ARIB_STD_B67;
+    else if(CFEqual(value, kCVImageBufferTransferFunction_ITU_R_709_2))
+      transfer = AVCOL_TRC_BT709;
+  }
+  if(value != NULL)
+    CFRelease(value);
+  return transfer;
+}
+
+
+/**
  * Log the real output selected by VideoToolbox.  Session creation only states
  * what Movian requested; these first-frame values tell us what each iOS/macOS
  * version and device actually returned after HDR pixel transfer.
@@ -648,7 +676,12 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   fi.fi_user_time = vf->vf_mbm.mbm_user_time;
   fi.fi_vshift = 1;
   fi.fi_hshift = 1;
-  fi.fi_duration = vf->vf_mbm.mbm_duration > 10000 ? vf->vf_mbm.mbm_duration : vtbd->vtbd_estimated_duration;
+  /* Never allow malformed container/parser timing to pin one decoded frame
+   * on screen for seconds or hours.  Durations outside the useful video-frame
+   * range are replaced by the PTS-derived estimate. */
+  fi.fi_duration = vf->vf_mbm.mbm_duration > 1000 &&
+                   vf->vf_mbm.mbm_duration < 1000000 ?
+                   vf->vf_mbm.mbm_duration : vtbd->vtbd_estimated_duration;
 
   siz = CVImageBufferGetEncodedSize(vf->vf_buf);
   fi.fi_width = siz.width;
@@ -764,6 +797,20 @@ picture_out(void *decompressionOutputRefCon,
     vtbd->vtbd_output_reported = 1;
   }
 
+  if(vtbd->vtbd_dolby_vision_tag) {
+    const int output_transfer =
+      output_color_transfer(imageBuffer, vtbd->vtbd_color_transfer);
+    if(output_transfer != vtbd->vtbd_color_transfer) {
+      TRACE(TRACE_INFO, "VTB",
+            "Dolby Vision renderer transfer updated from %d to %d using decoder output metadata",
+            vtbd->vtbd_color_transfer, output_transfer);
+      vtbd->vtbd_color_transfer = output_transfer;
+      if(output_transfer == AVCOL_TRC_SMPTE2084 ||
+         output_transfer == AVCOL_TRC_ARIB_STD_B67)
+        vtbd->vtbd_hdr_to_sdr = 1;
+    }
+  }
+
   CVPixelBufferRef outputBuffer = imageBuffer;
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
@@ -871,7 +918,8 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
 
   CMSampleTimingInfo ti;
 
-  ti.duration              = CMTimeMake(mb->mb_duration, 1000000);
+  ti.duration = mb->mb_duration > 0 && mb->mb_duration < 1000000 ?
+                CMTimeMake(mb->mb_duration, 1000000) : kCMTimeInvalid;
   ti.presentationTimeStamp = CMTimeMake(mb->mb_pts, 1000000);
   ti.decodeTimeStamp       = CMTimeMake(mb->mb_dts, 1000000);
 
@@ -1031,13 +1079,22 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   if(mcp == NULL)
     return 1;
 
+  const int dolby_vision = mcp->dovi_valid ||
+    mcp->codec_tag == MKTAG('d', 'v', 'h', 'e') ||
+    mcp->codec_tag == MKTAG('d', 'v', 'h', '1');
+
   switch(mc->codec_id) {
   case AV_CODEC_ID_H264:
     codec_type = kCMVideoCodecType_H264;
     config_atom = CFSTR("avcC");
     break;
   case AV_CODEC_ID_HEVC:
-    codec_type = kCMVideoCodecType_HEVC;
+    /* Profile 5 has no HDR10-compatible base-layer representation.  Let
+     * Apple's Dolby-aware decoder interpret its RPU/IPT-PQ signal rather than
+     * opening it as ordinary HEVC and feeding those planes to the generic PQ
+     * shader.  Keep compatible Dolby profiles on the proven HEVC path. */
+    codec_type = mcp->dovi_valid && mcp->dovi_profile == 5 ?
+      kCMVideoCodecType_DolbyVisionHEVC : kCMVideoCodecType_HEVC;
     config_atom = CFSTR("hvcC");
     break;
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
@@ -1107,10 +1164,21 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   }
 
   if(!VTIsHardwareDecodeSupported(codec_type)) {
-    TRACE(TRACE_DEBUG, "VTB", "No hardware decoder for %s",
-          vtb_codec_name(mc->codec_id));
+    TRACE(TRACE_DEBUG, "VTB", "No hardware decoder for %s%s",
+          vtb_codec_name(mc->codec_id),
+          codec_type == kCMVideoCodecType_DolbyVisionHEVC ?
+            " Dolby Vision profile 5" : "");
+    if(codec_type == kCMVideoCodecType_DolbyVisionHEVC) {
+      notify_add(NULL, NOTIFY_ERROR, NULL, 8,
+                 _("Dolby Vision Profile 5 playback is not supported on this Apple device"));
+      prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 0);
+    }
     return 1;
   }
+
+  if(codec_type == kCMVideoCodecType_DolbyVisionHEVC)
+    TRACE(TRACE_INFO, "VTB",
+          "Using Apple Dolby Vision HEVC decoder for profile 5");
 
   if(mc->codec_id == AV_CODEC_ID_VP9) {
     /* Start with VP9 Profile 0 / 8-bit 4:2:0. Profile may be unknown when a
@@ -1197,10 +1265,6 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   int stream_profile = mcp->profile;
   int assumed_sdr = 0;
-  const int dolby_vision = mcp->dovi_valid ||
-    mcp->codec_tag == MKTAG('d', 'v', 'h', 'e') ||
-    mcp->codec_tag == MKTAG('d', 'v', 'h', '1');
-
   if(mc->codec_id == AV_CODEC_ID_HEVC) {
     const uint8_t *hvcC = mcp->extradata;
     if(mcp->extradata_size < 23)
@@ -1455,6 +1519,14 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   if(status) {
     TRACE(TRACE_DEBUG, "VTB", "Failed to open -- %d", status);
+    if(codec_type == kCMVideoCodecType_DolbyVisionHEVC) {
+      TRACE(TRACE_INFO, "VTB",
+            "Dolby Vision Profile 5 playback rejected by VideoToolbox (status=%d)",
+            (int)status);
+      notify_add(NULL, NOTIFY_ERROR, NULL, 8,
+                 _("Dolby Vision Profile 5 playback is not supported on this Apple device"));
+      prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 0);
+    }
     CFRelease(vtbd->vtbd_decoder_spec);
     CFRelease(vtbd->vtbd_surface_attrs);
     CFRelease(fmt);

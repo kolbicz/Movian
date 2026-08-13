@@ -41,6 +41,13 @@
 
 typedef struct gvv_aux {
   CVOpenGLESTextureCacheRef gvv_tex_cache_ref;
+  unsigned int gvv_late_frames_dropped;
+  int gvv_native_enabled;
+  int gvv_native_failed_reported;
+  int gvv_native_epoch;
+  int gvv_native_epoch_valid;
+  int gvv_decoder_epoch;
+  int gvv_decoder_epoch_valid;
 } gvv_aux_t;
 
 
@@ -54,6 +61,9 @@ typedef struct reap_task {
 extern CVEAGLContext ios_get_gles_context(glw_root_t *gr);
 extern CVPixelBufferRef ios_metal_convert_p010(CVPixelBufferRef source,
                                                int transfer, float hdr_peak);
+extern int ios_native_p010_available(glw_root_t *gr);
+extern int ios_native_p010_present(CVPixelBufferRef image);
+extern void ios_native_p010_flush(void);
 
 /**
  *
@@ -473,13 +483,24 @@ static int
 p010_ios_init(glw_video_t *gv)
 {
   int r = gvv_init(gv);
+  gvv_aux_t *gvv = gv->gv_aux;
+  gvv->gvv_native_enabled = ios_native_p010_available(gv->w.glw_root);
   memcpy(gv->gv_cmatrix_cur, cmatrix_ITUR_BT_709,
          sizeof(gv->gv_cmatrix_cur));
   memcpy(gv->gv_cmatrix_tgt, cmatrix_ITUR_BT_709,
          sizeof(gv->gv_cmatrix_tgt));
-  TRACE(TRACE_INFO, "GLW",
-        "P010 renderer initialized (Metal GPU bridge with OpenGL ES byte-upload fallback)");
+  TRACE(TRACE_INFO, "GLW", "%s",
+        gvv->gvv_native_enabled ?
+        "P010 renderer initialized (native HDR display layer)" :
+        "P010 renderer initialized (Metal GPU bridge with OpenGL ES fallback)");
   return r;
+}
+
+static void
+p010_ios_reset(glw_video_t *gv)
+{
+  ios_native_p010_flush();
+  gvv_reset(gv);
 }
 
 static int
@@ -590,7 +611,59 @@ static void
 p010_ios_render(glw_video_t *gv, glw_rctx_t *rc)
 {
   glw_video_surface_t *sa = gv->gv_sa;
-  if(sa == NULL || p010_ios_upload(gv, sa))
+  if(sa == NULL)
+    return;
+
+  gvv_aux_t *gvv = gv->gv_aux;
+  /* Engine changes are initiated by the decoder thread, while engines that
+   * require UI-thread setup are initialized from glw_video_newframe().  A
+   * render pass can occur in between those two steps, particularly when HLS
+   * switches between variants with different dimensions/pixel formats. */
+  if(gvv == NULL)
+    return;
+
+  if(gvv->gvv_native_enabled) {
+    /* A temporarily detached/reconfiguring view (for example during
+     * rotation) is not a renderer failure.  Wait for the native layer to be
+     * attachable again rather than drawing the same session through GL. */
+    if(!ios_native_p010_available(gv->w.glw_root))
+      return;
+    if(!gvv->gvv_native_epoch_valid ||
+       gvv->gvv_native_epoch != sa->gvs_epoch) {
+      ios_native_p010_flush();
+      gvv->gvv_native_epoch = sa->gvs_epoch;
+      gvv->gvv_native_epoch_valid = 1;
+      TRACE(TRACE_DEBUG, "GLW",
+            "Native P010 display layer flushed for video epoch %d",
+            sa->gvs_epoch);
+    }
+    if(sa->gvs_uploaded == 3)
+      return;
+    int native_result = sa->gvs_opaque != NULL ?
+      ios_native_p010_present(sa->gvs_opaque) : -1;
+    if(native_result > 0) {
+      sa->gvs_uploaded = 3;
+      static int logged;
+      if(!logged) {
+        logged = 1;
+        TRACE(TRACE_INFO, "GLW",
+              "P010 IOSurface presented directly by AVSampleBufferDisplayLayer");
+      }
+      return;
+    }
+    if(native_result == 0)
+      return;
+
+    gvv->gvv_native_enabled = 0;
+    ios_native_p010_flush();
+    if(!gvv->gvv_native_failed_reported) {
+      gvv->gvv_native_failed_reported = 1;
+      TRACE(TRACE_ERROR, "GLW",
+            "Native P010 display layer failed; switching session to compatibility renderer");
+    }
+  }
+
+  if(p010_ios_upload(gv, sa))
     return;
 
   gv->gv_width = sa->gvs_width[0];
@@ -618,12 +691,67 @@ p010_ios_deliver(const frame_info_t *fi, glw_video_t *gv,
   CVPixelBufferRef pb = (CVPixelBufferRef)fi->fi_data[0];
   glw_video_surface_t *s;
   glw_video_configure(gv, gve);
+
+  /* The common renderer can discard stale queued surfaces, but on the P010
+   * path that only happens after a frame has occupied one of four surfaces.
+   * Following a seek, audio can therefore run ahead while the decoder blocks
+   * behind frames that can no longer be presented.  Drop clearly late frames
+   * here, before retaining the pixel buffer or waiting for a surface. */
+  media_pipe_t *mp = gv->gv_mp;
+  int64_t aclock = PTS_UNSET;
+  int audio_epoch = 0;
+  hts_mutex_lock(&mp->mp_clock_mutex);
+  if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
+    aclock = mp->mp_audio_clock + arch_get_avtime() -
+      mp->mp_audio_clock_avtime + mp->mp_avdelta;
+    audio_epoch = mp->mp_audio_clock_epoch;
+  }
+  hts_mutex_unlock(&mp->mp_clock_mutex);
+
+  gvv_aux_t *gvv = gv->gv_aux;
+
+  /* A seek changes the decoder epoch.  Retire decoded surfaces from the
+   * previous epoch before taking another one of the small renderer pool.
+   * Otherwise audio starts on the new epoch while stale video is presented
+   * until the old queue has drained. */
+  if(!gvv->gvv_decoder_epoch_valid ||
+     gvv->gvv_decoder_epoch != fi->fi_epoch) {
+    glw_video_surface_t *stale;
+    unsigned int flushed = 0;
+    while((stale = TAILQ_FIRST(&gv->gv_decoded_queue)) != NULL) {
+      surface_release(gv, stale, &gv->gv_decoded_queue);
+      flushed++;
+    }
+    gvv->gvv_decoder_epoch = fi->fi_epoch;
+    gvv->gvv_decoder_epoch_valid = 1;
+    gvv->gvv_late_frames_dropped = 0;
+    if(flushed != 0)
+      TRACE(TRACE_INFO, "GLW",
+            "iOS P010 seek flushed %u stale queued frame(s) for epoch %d",
+            flushed, fi->fi_epoch);
+  }
+
+  if(!gvv->gvv_native_enabled &&
+     aclock != PTS_UNSET && audio_epoch == fi->fi_epoch &&
+     fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 250000) {
+    gvv->gvv_late_frames_dropped++;
+    if(gvv->gvv_late_frames_dropped == 1 ||
+       !(gvv->gvv_late_frames_dropped % 60)) {
+      TRACE(TRACE_INFO, "GLW",
+            "P010 catch-up dropped %u late frame(s), video behind audio by %d ms",
+            gvv->gvv_late_frames_dropped,
+            (int)((aclock - fi->fi_pts) / 1000));
+    }
+    return 0;
+  }
+
   if((s = glw_video_get_surface(gv, NULL, NULL)) == NULL)
     return -1;
 
   gv_color_matrix_set(gv, fi);
   CFRetain(pb);
   s->gvs_opaque = pb;
+  s->gvs_uploaded = 0;
   s->gvs_width[0] = fi->fi_width;
   s->gvs_height[0] = fi->fi_height;
   s->gvs_width[1] = fi->fi_width >> 1;
@@ -640,7 +768,7 @@ static glw_video_engine_t glw_video_p010_ios = {
   .gve_init_on_ui_thread = 1,
   .gve_newframe = gvv_newframe,
   .gve_render = p010_ios_render,
-  .gve_reset = gvv_reset,
+  .gve_reset = p010_ios_reset,
   .gve_init = p010_ios_init,
   .gve_deliver = p010_ios_deliver,
 };

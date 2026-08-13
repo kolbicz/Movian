@@ -19,6 +19,11 @@ typedef struct p010_aux {
   int import_reported;
   int shader_transfer_reported;
   float reported_headroom;
+  unsigned int late_frames_dropped;
+  int decoder_epoch;
+  int decoder_epoch_valid;
+  int metal_reported;
+  int metal_failed_reported;
 } p010_aux_t;
 
 typedef struct reap_task {
@@ -137,6 +142,52 @@ bind_p010_surface(glw_video_t *gv, glw_video_surface_t *gvs)
     return 0;
 
   CVPixelBufferRef pb = gvs->gvs_opaque;
+  p010_aux_t *aux = gv->gv_aux;
+  const float headroom = osx_get_edr_headroom(gv->w.glw_root);
+
+  CVPixelBufferRef metal = osx_metal_convert_p010(pb, gvs->gvs_format,
+                                                   gvs->gvs_hdr_peak_luminance,
+                                                   headroom);
+  if(metal != NULL) {
+    IOSurfaceRef rgba_surface = CVPixelBufferGetIOSurface(metal);
+    CGLContextObj rgba_ctx = CGLGetCurrentContext();
+    if(rgba_surface != NULL && rgba_ctx != NULL) {
+      if(gvs->gvs_texture.textures[0] == 0)
+        glGenTextures(2, gvs->gvs_texture.textures);
+      glBindTexture(GL_TEXTURE_RECTANGLE_ARB, gvs->gvs_texture.textures[0]);
+      glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      CGLError rgba_err = CGLTexImageIOSurface2D(
+        rgba_ctx, GL_TEXTURE_RECTANGLE_ARB, GL_RGBA16F_ARB,
+        gvs->gvs_width[0], gvs->gvs_height[0], GL_RGBA, GL_HALF_FLOAT,
+        rgba_surface, 0);
+      if(rgba_err == kCGLNoError) {
+        CFRelease(pb);
+        gvs->gvs_opaque = metal;
+        gvs->gvs_texture.gltype = GL_TEXTURE_RECTANGLE_ARB;
+        gvs->gvs_texture.width = gvs->gvs_width[0];
+        gvs->gvs_texture.height = gvs->gvs_height[0];
+        gvs->gvs_uploaded = 2;
+        if(!aux->metal_reported) {
+          TRACE(TRACE_INFO, "GLW",
+                "P010 IOSurface converted by Metal into an RGBA16F EDR surface");
+          aux->metal_reported = 1;
+        }
+        return 0;
+      }
+      TRACE(TRACE_ERROR, "GLW", "Metal RGBA16F IOSurface import failed: %s",
+            CGLErrorString(rgba_err));
+    }
+    CFRelease(metal);
+  }
+
+  if(!aux->metal_failed_reported) {
+    TRACE(TRACE_INFO, "GLW",
+          "Metal P010 conversion unavailable; retaining direct OpenGL fallback");
+    aux->metal_failed_reported = 1;
+  }
   IOSurfaceRef surface = CVPixelBufferGetIOSurface(pb);
   CGLContextObj ctx = CGLGetCurrentContext();
   if(surface == NULL || ctx == NULL)
@@ -181,7 +232,6 @@ bind_p010_surface(glw_video_t *gv, glw_video_surface_t *gvs)
   gvs->gvs_texture.width = gvs->gvs_width[0];
   gvs->gvs_texture.height = gvs->gvs_height[0];
   gvs->gvs_uploaded = 1;
-  p010_aux_t *aux = gv->gv_aux;
   if(!aux->import_reported) {
     TRACE(TRACE_INFO, "GLW",
           "P010 IOSurface planes imported directly into OpenGL textures");
@@ -210,7 +260,9 @@ p010_render(glw_video_t *gv, glw_rctx_t *rc)
   glw_renderer_vtx_st(&gv->gv_quad, 2, sa->gvs_width[0], 0);
   glw_renderer_vtx_st(&gv->gv_quad, 3, 0, 0);
 
-  if(sa->gvs_format == AVCOL_TRC_SMPTE2084)
+  if(sa->gvs_uploaded == 2)
+    gv->gv_gpa.gpa_prog = gr->gr_be.gbr_p010_metal_1f;
+  else if(sa->gvs_format == AVCOL_TRC_SMPTE2084)
     gv->gv_gpa.gpa_prog = use_edr ? gr->gr_be.gbr_p010_pq_edr_1f :
                                     gr->gr_be.gbr_p010_pq_1f;
   else if(sa->gvs_format == AVCOL_TRC_ARIB_STD_B67)
@@ -220,10 +272,12 @@ p010_render(glw_video_t *gv, glw_rctx_t *rc)
     gv->gv_gpa.gpa_prog = gr->gr_be.gbr_p010_1f;
 
   p010_aux_t *aux = gv->gv_aux;
-  const int shader_id = sa->gvs_format | (use_edr ? 0x10000 : 0);
+  const int shader_id = sa->gvs_format | (use_edr ? 0x10000 : 0) |
+                        (sa->gvs_uploaded == 2 ? 0x20000 : 0);
   if(aux->shader_transfer_reported != shader_id ||
      fabsf(aux->reported_headroom - edr_headroom) >= 0.25f) {
     TRACE(TRACE_INFO, "GLW", "P010 shader selected: %s (transfer=%d, EDR headroom=%.2f, HDR peak=%.0f nits)",
+          sa->gvs_uploaded == 2 ? "Metal RGBA16F EDR" :
           sa->gvs_format == AVCOL_TRC_SMPTE2084 ?
             (use_edr ? "HDR10/PQ native EDR" : "HDR10/PQ to SDR") :
           sa->gvs_format == AVCOL_TRC_ARIB_STD_B67 ?
@@ -245,7 +299,58 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
   CVPixelBufferRef pb = (CVPixelBufferRef)fi->fi_data[0];
   glw_video_surface_t *s;
 
-  glw_video_configure(gv, gve);
+  if(glw_video_configure(gv, gve))
+    return -1;
+
+  p010_aux_t *aux = gv->gv_aux;
+
+  /* A seek changes the decoder epoch.  Do not let decoded frames from the
+   * previous epoch occupy the small zero-copy IOSurface pool while the new
+   * epoch waits for a free slot.  The currently displayed surface is owned by
+   * the UI thread and will be retired by p010_newframe(). */
+  if(!aux->decoder_epoch_valid || aux->decoder_epoch != fi->fi_epoch) {
+    glw_video_surface_t *stale;
+    unsigned int flushed = 0;
+    while((stale = TAILQ_FIRST(&gv->gv_decoded_queue)) != NULL) {
+      surface_release(gv, stale, &gv->gv_decoded_queue);
+      flushed++;
+    }
+    aux->decoder_epoch = fi->fi_epoch;
+    aux->decoder_epoch_valid = 1;
+    aux->late_frames_dropped = 0;
+    if(flushed != 0)
+      TRACE(TRACE_INFO, "GLW",
+            "Direct P010 seek flushed %u stale queued frame(s) for epoch %d",
+            flushed, fi->fi_epoch);
+  }
+
+  /* Catch up before retaining the decoder IOSurface or waiting for one of the
+   * four renderer slots.  Without this, HDR/HLG seeks can leave audio running
+   * while obsolete 4K frames are imported and displayed for several seconds. */
+  media_pipe_t *mp = gv->gv_mp;
+  int64_t aclock = PTS_UNSET;
+  int audio_epoch = 0;
+  hts_mutex_lock(&mp->mp_clock_mutex);
+  if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
+    aclock = mp->mp_audio_clock + arch_get_avtime() -
+      mp->mp_audio_clock_avtime + mp->mp_avdelta;
+    audio_epoch = mp->mp_audio_clock_epoch;
+  }
+  hts_mutex_unlock(&mp->mp_clock_mutex);
+
+  if(aclock != PTS_UNSET && audio_epoch == fi->fi_epoch &&
+     fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 250000) {
+    aux->late_frames_dropped++;
+    if(aux->late_frames_dropped == 1 ||
+       !(aux->late_frames_dropped % 60)) {
+      TRACE(TRACE_INFO, "GLW",
+            "Direct P010 catch-up dropped %u late frame(s), video behind audio by %d ms",
+            aux->late_frames_dropped,
+            (int)((aclock - fi->fi_pts) / 1000));
+    }
+    return 0;
+  }
+
   if((s = glw_video_get_surface(gv, NULL, NULL)) == NULL)
     return -1;
 

@@ -710,6 +710,11 @@ glw_opengl_shaders_init(glw_root_t *gr)
   fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
   gbr->gbr_p010_hlg_edr_1f = glw_link_program(gbr, "p010_hlg_edr_1f_norm", vs, fs);
   glDeleteShader(fs);
+
+  SHADERPATH("p010_metal_1f_norm.glsl");
+  fs = glw_compile_shader(path, GL_FRAGMENT_SHADER, gr);
+  gbr->gbr_p010_metal_1f = glw_link_program(gbr, "p010_metal_1f_norm", vs, fs);
+  glDeleteShader(fs);
   glDeleteShader(vs);
 #elif defined(__APPLE__) && TARGET_OS_IPHONE
   // iOS OpenGL ES 2 byte-packed P010 renderer

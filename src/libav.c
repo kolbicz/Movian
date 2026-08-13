@@ -495,6 +495,19 @@ static int
 media_codec_create_lavc(media_codec_t *cw, const media_codec_params_t *mcp,
                         media_pipe_t *mp)
 {
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+  /* Dolby Vision Profile 5 carries an IPT-PQ signal with no conventional
+   * HDR10-compatible base layer.  If the earlier VideoToolbox codec factory
+   * rejected Apple's Dolby-aware session, generic FFmpeg HEVC decoding is
+   * not a valid fallback and would only produce incorrect/black video. */
+  if(cw->codec_id == AV_CODEC_ID_HEVC && mcp != NULL &&
+     mcp->dovi_valid && mcp->dovi_profile == 5) {
+    TRACE(TRACE_INFO, "libav",
+          "Refusing invalid software fallback for Dolby Vision Profile 5");
+    return -1;
+  }
+#endif
+
   const AVCodec *codec = avcodec_find_decoder(cw->codec_id);
 
   if(codec == NULL)
@@ -717,5 +730,4 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   }
 
 }
-
 

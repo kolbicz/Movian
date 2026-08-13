@@ -1,5 +1,31 @@
 # Changelog
 
+## 7.0.273 - 2026-08-13
+
+- Added and validated Apple VideoToolbox hardware decoding for H.264, HEVC
+  Main/Main10, HDR10, HLG, supported AV1 and Dolby Vision streams.
+- Added native P010 HDR presentation on supported iOS devices with compatible
+  Metal/OpenGL fallback rendering for older hardware.
+- Added a macOS Metal P010 pipeline that converts VideoToolbox output into an
+  RGBA16F EDR IOSurface while preserving Movian's UI, subtitles and OSD.
+- Added Dolby Vision Profile 5 decoding through Apple's Dolby-aware HEVC
+  decoder and corrected renderer selection using decoder output metadata.
+- Added an actionable unsupported-device message when Apple rejects a Dolby
+  Vision Profile 5 session, instead of attempting an invalid software fallback.
+- Improved HDR10 and HLG color metadata, tone mapping, display-headroom use,
+  decoder diagnostics and resolution-switch handling.
+- Fixed stale decoded surfaces and audio/video epoch synchronization after
+  seeking and HLS variant changes on iOS and macOS.
+- Fixed malformed multi-hour HLS packet durations that could leave a single
+  video frame displayed while audio continued.
+- Fixed Apple memory monitoring so System Free and process-available memory
+  are meaningful to the UI, torrent backend and media pipeline.
+- Added clear unsupported playback handling for AV1 on iOS devices without a
+  suitable hardware decoder.
+- Updated the Apple plugin-facing HTTP user agent to `Movian Apple 7.0.273`.
+- Removed temporary hardware-decoder and HLS timing debug instrumentation used
+  during the preview test series.
+
 ## 7.0.272.2 - 2026-08-06
 
 ### Added

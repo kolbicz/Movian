@@ -20,6 +20,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/sysctl.h>
+#include <stdint.h>
+
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#include <os/proc.h>
+#endif
 
 #include <mach/mach.h>
 #include <mach/task.h>
@@ -47,39 +53,61 @@ static prop_t **p_load;
 static void
 mem_monitor_do(void)
 {
-  int mib[6];
-  mib[0] = CTL_HW;
-  mib[1] = HW_PAGESIZE;
-
-  int pagesize;
-  size_t length;
-  length = sizeof(pagesize);
-  if(sysctl (mib, 2, &pagesize, &length, NULL, 0) < 0)
+  uint64_t physical_memory;
+  size_t length = sizeof(physical_memory);
+  if(sysctlbyname("hw.memsize", &physical_memory, &length, NULL, 0) < 0)
     return;
 
-  mach_msg_type_number_t count = HOST_VM_INFO_COUNT;
-
-  vm_statistics_data_t vmstat;
-  if(host_statistics (mach_host_self (), HOST_VM_INFO,
-                      (host_info_t) &vmstat, &count) != KERN_SUCCESS)
+  vm_size_t pagesize;
+  if(host_page_size(mach_host_self(), &pagesize) != KERN_SUCCESS)
     return;
 
-  int total =
-    vmstat.wire_count +
-    vmstat.active_count +
-    vmstat.inactive_count +
-    vmstat.free_count;
+  mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+
+  vm_statistics64_data_t vmstat;
+  if(host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                       (host_info64_t)&vmstat, &count) != KERN_SUCCESS)
+    return;
+
+  const uint64_t system_available =
+    ((uint64_t)vmstat.free_count +
+     (uint64_t)vmstat.inactive_count +
+     (uint64_t)vmstat.speculative_count) * pagesize;
+
+#if TARGET_OS_IPHONE
+  // This is the useful allocation budget on iOS: the number of bytes the
+  // process may dirty before reaching its current Jetsam memory limit.
+  uint64_t process_available;
+  if(__builtin_available(iOS 13.0, tvOS 13.0, *))
+    process_available = os_proc_available_memory();
+  else
+    process_available = system_available;
+#else
+  // macOS has no per-process dirty-memory limit API. Reclaimable system RAM is
+  // the closest equivalent and is also the appropriate backend budget here.
+  const uint64_t process_available = system_available;
+#endif
 
   prop_t *mem = prop_create(p_sys, "mem");
 
-  prop_set(mem, "systotal", PROP_SET_INT, total / 1024 * pagesize);
-  prop_set(mem, "sysfree",  PROP_SET_INT, vmstat.free_count / 1024 * pagesize);
+  prop_set(mem, "systotal", PROP_SET_INT,
+           (int)(physical_memory / (1024 * 1024)));
+  prop_set(mem, "sysfree", PROP_SET_INT,
+           (int)(system_available / (1024 * 1024)));
+  prop_set(mem, "sysfreeA", PROP_SET_INT,
+           (int)(process_available / (1024 * 1024)));
 
-  task_basic_info_64_data_t info;
-  unsigned size = sizeof(info);
-  task_info(mach_task_self(), TASK_BASIC_INFO_64, (task_info_t) &info, &size);
+  // HLS and BitTorrent account this value in bytes. Their allocations adjust
+  // it between monitor ticks, after which this snapshot refreshes the budget.
+  gconf.android_free_mem = process_available;
 
-  prop_set(mem, "activeMem", PROP_SET_INT, (int)(info.resident_size / 1024));
+  task_vm_info_data_t info;
+  mach_msg_type_number_t size = TASK_VM_INFO_COUNT;
+  if(task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &size) ==
+     KERN_SUCCESS) {
+    prop_set(mem, "activeMem", PROP_SET_INT,
+             (int)(info.phys_footprint / (1024 * 1024)));
+  }
 }
 
 

@@ -717,6 +717,7 @@ vq_entries_callback(void *opaque, prop_event_t event, ...)
     break;
 
   case PROP_ADD_CHILD_VECTOR:
+  case PROP_ADD_CHILD_VECTOR_DIRECT:
     vq_add_nodes(vq, va_arg(ap, prop_vec_t *), NULL);
     break;
 

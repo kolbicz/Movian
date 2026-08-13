@@ -11,6 +11,7 @@
 #import "MainViewController.h"
 #import <OpenGLES/ES2/glext.h>
 #import <Metal/Metal.h>
+#import <AVFoundation/AVFoundation.h>
 #import <CoreVideo/CVMetalTextureCache.h>
 #include <fenv.h>
 
@@ -22,6 +23,110 @@
 #include "media/media.h"
 
 extern int ios_landscape_only;
+
+static AVSampleBufferDisplayLayer *iosNativeVideoLayer;
+static __weak UIView *iosNativeVideoOwner;
+
+static BOOL
+ios_native_video_prepare_layer(UIView *owner)
+{
+  id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+  if(device == nil || owner == nil || owner.layer.superlayer == nil)
+    return NO;
+
+  /* Apple5 begins with A12. Older GPUs keep using the compatibility path;
+   * they can decode HEVC but do not have enough headroom for reliable 4K
+   * P010 presentation plus the GLW compositor. */
+  if(![device supportsFamily:MTLGPUFamilyApple5])
+    return NO;
+
+  if(iosNativeVideoLayer == nil) {
+    iosNativeVideoLayer = [AVSampleBufferDisplayLayer layer];
+    iosNativeVideoLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+    iosNativeVideoLayer.backgroundColor = UIColor.blackColor.CGColor;
+    if(@available(iOS 17.0, *))
+      iosNativeVideoLayer.wantsExtendedDynamicRangeContent = YES;
+  }
+
+  CALayer *parent = owner.layer.superlayer;
+  if(iosNativeVideoLayer.superlayer != parent) {
+    [iosNativeVideoLayer removeFromSuperlayer];
+    [parent insertSublayer:iosNativeVideoLayer below:owner.layer];
+  }
+  iosNativeVideoLayer.frame = owner.layer.frame;
+  iosNativeVideoLayer.hidden = NO;
+  iosNativeVideoOwner = owner;
+  owner.opaque = NO;
+  owner.backgroundColor = UIColor.clearColor;
+  return YES;
+}
+
+int
+ios_native_p010_available(glw_root_t *gr)
+{
+  UIView *owner = (__bridge UIView *)gr->gr_window;
+  return ios_native_video_prepare_layer(owner);
+}
+
+int
+ios_native_p010_present(CVPixelBufferRef image)
+{
+  if(image == NULL || iosNativeVideoLayer == nil ||
+     iosNativeVideoLayer.superlayer == nil)
+    return -1;
+
+  UIView *owner = iosNativeVideoOwner;
+  if(owner != nil)
+    iosNativeVideoLayer.frame = owner.layer.frame;
+
+  if(iosNativeVideoLayer.status == AVQueuedSampleBufferRenderingStatusFailed)
+    [iosNativeVideoLayer flush];
+
+  /* Backpressure is temporary and must not make GLW mix this native layer
+   * with the Metal/OpenGL compatibility renderer.  Keep the current surface
+   * and retry it on the next UI frame instead. */
+  if(!iosNativeVideoLayer.readyForMoreMediaData)
+    return 0;
+
+  CMVideoFormatDescriptionRef format = NULL;
+  CMSampleBufferRef sample = NULL;
+  OSStatus status = CMVideoFormatDescriptionCreateForImageBuffer(
+    kCFAllocatorDefault, image, &format);
+  if(status == noErr) {
+    CMSampleTimingInfo timing = {
+      .duration = kCMTimeInvalid,
+      .presentationTimeStamp = kCMTimeInvalid,
+      .decodeTimeStamp = kCMTimeInvalid,
+    };
+    status = CMSampleBufferCreateReadyWithImageBuffer(
+      kCFAllocatorDefault, image, format, &timing, &sample);
+  }
+
+  if(status == noErr && sample != NULL) {
+    CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sample,
+                                                                     YES);
+    if(attachments != NULL && CFArrayGetCount(attachments) != 0) {
+      CFMutableDictionaryRef attachment =
+        (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
+      CFDictionarySetValue(attachment, kCMSampleAttachmentKey_DisplayImmediately,
+                           kCFBooleanTrue);
+    }
+    [iosNativeVideoLayer enqueueSampleBuffer:sample];
+  }
+
+  if(sample != NULL)
+    CFRelease(sample);
+  if(format != NULL)
+    CFRelease(format);
+  return status == noErr ? 1 : -1;
+}
+
+void
+ios_native_p010_flush(void)
+{
+  if(iosNativeVideoLayer != nil)
+    [iosNativeVideoLayer flushAndRemoveImage];
+}
 
 /*
  * Convert a VideoToolbox P010 IOSurface on the GPU into an IOSurface-backed
@@ -132,9 +237,14 @@ ios_metal_convert_p010(CVPixelBufferRef source, int transfer, float hdrPeak)
     };
     [encoder setBytes:&params length:sizeof(params) atIndex:0];
     MTLSize group = MTLSizeMake(16, 16, 1);
-    MTLSize grid = MTLSizeMake((width + 15) / 16 * 16,
-                               (height + 15) / 16 * 16, 1);
-    [encoder dispatchThreads:grid threadsPerThreadgroup:group];
+    MTLSize groups = MTLSizeMake((width + group.width - 1) / group.width,
+                                 (height + group.height - 1) / group.height,
+                                 1);
+    /* dispatchThreads: relies on non-uniform threadgroup support which is not
+     * available on older Apple GPUs such as A9.  The kernel already bounds
+     * checks its output coordinates, so explicit, rounded threadgroups work
+     * on every Metal-capable iOS device while producing identical output. */
+    [encoder dispatchThreadgroups:groups threadsPerThreadgroup:group];
     [encoder endEncoding];
     [command commit];
     [command waitUntilCompleted];

@@ -1289,7 +1289,23 @@ enqueue_packet(ts_demuxer_t *td, const void *data, int len,
   mb->mb_drive_clock = drive_clock;
   mb->mb_cw = media_codec_ref(te->te_codec);
 
-  mb->mb_duration = rescale(dts_in - te->te_codec->parser_ctx->last_dts);
+  /* AVCodecParserContext::last_dts is not a usable previous-frame timestamp
+   * for the first parsed access unit (and can be reset to zero after a seek
+   * or discontinuity).  Subtracting it from an absolute MPEG-TS timestamp
+   * produced frame durations of many hours.  GLW then correctly displayed
+   * that one frame for the advertised duration while audio kept advancing.
+   * Only accept deltas in a plausible packet-duration range; subsequent
+   * decoder PTS values provide a more accurate duration estimate. */
+  const int64_t parser_delta =
+    dts_in - te->te_codec->parser_ctx->last_dts;
+  const int64_t packet_duration = rescale(parser_delta);
+  mb->mb_duration = packet_duration > 0 && packet_duration < 1000000 ?
+                    packet_duration : 0;
+  if(packet_duration >= 1000000) {
+    TRACE(TRACE_INFO, "HLS",
+          "Ignoring implausible parser frame duration %.3f seconds after stream start/seek",
+          packet_duration / 1000000.0);
+  }
 
   mb->mb_data_type = te->te_data_type;
   mb->mb_keyframe = keyframe;
