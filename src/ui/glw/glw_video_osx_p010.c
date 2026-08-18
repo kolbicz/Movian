@@ -145,9 +145,14 @@ bind_p010_surface(glw_video_t *gv, glw_video_surface_t *gvs)
   p010_aux_t *aux = gv->gv_aux;
   const float headroom = osx_get_edr_headroom(gv->w.glw_root);
 
-  CVPixelBufferRef metal = osx_metal_convert_p010(pb, gvs->gvs_format,
-                                                   gvs->gvs_hdr_peak_luminance,
-                                                   headroom);
+  const OSType pixel_format = CVPixelBufferGetPixelFormatType(pb);
+  const int nv12 = pixel_format ==
+                     kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ||
+                   pixel_format ==
+                     kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
+  CVPixelBufferRef metal = osx_metal_convert_yuv(pb, gvs->gvs_format,
+                                                  gvs->gvs_hdr_peak_luminance,
+                                                  headroom);
   if(metal != NULL) {
     IOSurfaceRef rgba_surface = CVPixelBufferGetIOSurface(metal);
     CGLContextObj rgba_ctx = CGLGetCurrentContext();
@@ -172,7 +177,8 @@ bind_p010_surface(glw_video_t *gv, glw_video_surface_t *gvs)
         gvs->gvs_uploaded = 2;
         if(!aux->metal_reported) {
           TRACE(TRACE_INFO, "GLW",
-                "P010 IOSurface converted by Metal into an RGBA16F EDR surface");
+                "%s IOSurface converted by Metal into an RGBA16F EDR surface",
+                nv12 ? "NV12 HDR" : "P010");
           aux->metal_reported = 1;
         }
         return 0;
@@ -185,7 +191,8 @@ bind_p010_surface(glw_video_t *gv, glw_video_surface_t *gvs)
 
   if(!aux->metal_failed_reported) {
     TRACE(TRACE_INFO, "GLW",
-          "Metal P010 conversion unavailable; retaining direct OpenGL fallback");
+          "Metal %s conversion unavailable; retaining direct OpenGL fallback",
+          nv12 ? "NV12 HDR" : "P010");
     aux->metal_failed_reported = 1;
   }
   IOSurfaceRef surface = CVPixelBufferGetIOSurface(pb);
@@ -202,9 +209,10 @@ bind_p010_surface(glw_video_t *gv, glw_video_surface_t *gvs)
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   CGLError err = CGLTexImageIOSurface2D(ctx, GL_TEXTURE_RECTANGLE_ARB,
-                                        GL_LUMINANCE16,
+                                        nv12 ? GL_LUMINANCE8 : GL_LUMINANCE16,
                                         gvs->gvs_width[0], gvs->gvs_height[0],
-                                        GL_LUMINANCE, GL_UNSIGNED_SHORT,
+                                        GL_LUMINANCE,
+                                        nv12 ? GL_UNSIGNED_BYTE : GL_UNSIGNED_SHORT,
                                         surface, 0);
   if(err != kCGLNoError) {
     TRACE(TRACE_ERROR, "GLW", "P010 luma IOSurface import failed: %s",
@@ -218,9 +226,10 @@ bind_p010_surface(glw_video_t *gv, glw_video_surface_t *gvs)
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   err = CGLTexImageIOSurface2D(ctx, GL_TEXTURE_RECTANGLE_ARB,
-                               GL_RG16,
+                               nv12 ? GL_RG8 : GL_RG16,
                                gvs->gvs_width[1], gvs->gvs_height[1],
-                               GL_RG, GL_UNSIGNED_SHORT,
+                               GL_RG,
+                               nv12 ? GL_UNSIGNED_BYTE : GL_UNSIGNED_SHORT,
                                surface, 1);
   if(err != kCGLNoError) {
     TRACE(TRACE_ERROR, "GLW", "P010 chroma IOSurface import failed: %s",
@@ -386,5 +395,19 @@ static glw_video_engine_t glw_video_p010 = {
 };
 
 GLW_REGISTER_GVE(glw_video_p010);
+
+/* 8-bit H.264 may legitimately carry BT.2020 HLG. It uses NV12 rather than
+ * P010, but shares the same timestamp-safe IOSurface/Metal EDR renderer. */
+static glw_video_engine_t glw_video_nv12_hdr = {
+  .gve_type = 'NVHE',
+  .gve_init_on_ui_thread = 1,
+  .gve_newframe = p010_newframe,
+  .gve_render = p010_render,
+  .gve_reset = p010_reset,
+  .gve_init = p010_init,
+  .gve_deliver = p010_deliver,
+};
+
+GLW_REGISTER_GVE(glw_video_nv12_hdr);
 
 #endif

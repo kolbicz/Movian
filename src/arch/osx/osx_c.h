@@ -25,9 +25,9 @@ CGLPixelFormatObj osx_get_cgl_pixel_format(struct glw_root *gr);
 
 float osx_get_edr_headroom(struct glw_root *gr);
 
-/* Convert a decoder-owned P010 IOSurface into an EDR-capable RGBA16F
- * IOSurface with Metal. The caller owns the returned pixel buffer. */
-CVPixelBufferRef osx_metal_convert_p010(CVPixelBufferRef source,
-                                        int transfer,
-                                        float hdr_peak,
-                                        float edr_headroom);
+/* Convert a decoder-owned P010 or NV12 IOSurface into an EDR-capable
+ * RGBA16F IOSurface with Metal. The caller owns the returned pixel buffer. */
+CVPixelBufferRef osx_metal_convert_yuv(CVPixelBufferRef source,
+                                       int transfer,
+                                       float hdr_peak,
+                                       float edr_headroom);

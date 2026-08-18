@@ -28,8 +28,8 @@
 #include "src/ui/glw/glw.h"
 
 CVPixelBufferRef
-osx_metal_convert_p010(CVPixelBufferRef source, int transfer,
-                       float hdr_peak, float edr_headroom)
+osx_metal_convert_yuv(CVPixelBufferRef source, int transfer,
+                      float hdr_peak, float edr_headroom)
 {
   static id<MTLDevice> device;
   static id<MTLCommandQueue> queue;
@@ -49,15 +49,15 @@ osx_metal_convert_p010(CVPixelBufferRef source, int transfer,
     NSString *shader =
       @"#include <metal_stdlib>\n"
        "using namespace metal;\n"
-       "struct Params { int transfer; float hdrPeak; float headroom; };\n"
-       "float3 yuv2020(float y,float2 uv){ y=(y-64.0/1023.0)*(1023.0/876.0); uv=(uv-float2(512.0/1023.0))*(1023.0/896.0); return float3(y+1.4746*uv.y,y-.164553*uv.x-.571353*uv.y,y+1.8814*uv.x);}\n"
-       "float3 yuv709(float y,float2 uv){ y=(y-64.0/1023.0)*(1023.0/876.0); uv=(uv-float2(512.0/1023.0))*(1023.0/896.0); return float3(y+1.7927*uv.y,y-.2132*uv.x-.5329*uv.y,y+2.1124*uv.x);}\n"
+       "struct Params { int transfer; int depth; float hdrPeak; float headroom; };\n"
+       "float3 yuv2020(float y,float2 uv,int d){ if(d==8){y=(y-16.0/255.0)*(255.0/219.0);uv=(uv-float2(128.0/255.0))*(255.0/224.0);}else{y=(y-64.0/1023.0)*(1023.0/876.0);uv=(uv-float2(512.0/1023.0))*(1023.0/896.0);} return float3(y+1.4746*uv.y,y-.164553*uv.x-.571353*uv.y,y+1.8814*uv.x);}\n"
+       "float3 yuv709(float y,float2 uv,int d){ if(d==8){y=(y-16.0/255.0)*(255.0/219.0);uv=(uv-float2(128.0/255.0))*(255.0/224.0);}else{y=(y-64.0/1023.0)*(1023.0/876.0);uv=(uv-float2(512.0/1023.0))*(1023.0/896.0);} return float3(y+1.7927*uv.y,y-.2132*uv.x-.5329*uv.y,y+2.1124*uv.x);}\n"
        "float3 hlg(float3 e){const float a=.17883277,b=.28466892,c=.55991073; return select(e*e/3.0,(exp((e-c)/a)+b)/12.0,e>=.5);}\n"
        "float3 pq(float3 e){const float m1=.1593017578125,m2=78.84375,c1=.8359375,c2=18.8515625,c3=18.6875; float3 p=pow(max(e,0.0),1.0/m2); return pow(max(p-c1,0.0)/max(c2-c3*p,.00001),1.0/m1);}\n"
        "float3 gamut(float3 c){return float3(1.6605*c.r-.5876*c.g-.0728*c.b,-.1246*c.r+1.1329*c.g-.0083*c.b,-.0182*c.r-.1006*c.g+1.1187*c.b);}\n"
        "float3 srgb(float3 x){return select(12.92*x,1.055*pow(max(x,0.0),1.0/2.4)-.055,x>.0031308);}\n"
        "float3 peakmap(float3 rgb,float src,float dst){float l=dot(rgb,float3(.2126,.7152,.0722)),k=min(1.0,dst*.75); if(l<=k||src<=dst)return rgb; float t=clamp((l-k)/max(src-k,.001),0.0,1.0); float m=k+(dst-k)*(1.0-exp(-3.0*t))/(1.0-exp(-3.0)); return rgb*(m/max(l,.0001));}\n"
-       "kernel void convert(texture2d<float,access::sample> y [[texture(0)]],texture2d<float,access::sample> uv [[texture(1)]],texture2d<half,access::write> out [[texture(2)]],constant Params&p [[buffer(0)]],uint2 q [[thread_position_in_grid]]){if(q.x>=out.get_width()||q.y>=out.get_height())return; constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear); float2 t=(float2(q)+.5)/float2(out.get_width(),out.get_height()); float3 c=max((p.transfer==16||p.transfer==18)?yuv2020(y.sample(s,t).r,uv.sample(s,t).rg):yuv709(y.sample(s,t).r,uv.sample(s,t).rg),0.0); if(p.transfer==16)c=srgb(peakmap(max(gamut(pq(c)*100.0),0.0),max(1.0,p.hdrPeak/100.0),p.headroom)); else if(p.transfer==18)c=srgb(peakmap(max(gamut(pow(hlg(c),1.2)*4.0),0.0),10.0,p.headroom)); out.write(half4(half3(min(c,p.headroom)),half(1.0)),q);}\n";
+       "kernel void convert(texture2d<float,access::sample> y [[texture(0)]],texture2d<float,access::sample> uv [[texture(1)]],texture2d<half,access::write> out [[texture(2)]],constant Params&p [[buffer(0)]],uint2 q [[thread_position_in_grid]]){if(q.x>=out.get_width()||q.y>=out.get_height())return; constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear); float2 t=(float2(q)+.5)/float2(out.get_width(),out.get_height()); float3 c=max((p.transfer==16||p.transfer==18)?yuv2020(y.sample(s,t).r,uv.sample(s,t).rg,p.depth):yuv709(y.sample(s,t).r,uv.sample(s,t).rg,p.depth),0.0); if(p.transfer==16)c=srgb(peakmap(max(gamut(pq(c)*100.0),0.0),max(1.0,p.hdrPeak/100.0),p.headroom)); else if(p.transfer==18)c=srgb(peakmap(max(gamut(pow(hlg(c),1.2)*4.0),0.0),10.0,p.headroom)); out.write(half4(half3(min(c,p.headroom)),half(1.0)),q);}\n";
     NSError *error = nil;
     id<MTLLibrary> library = [device newLibraryWithSource:shader
                                                   options:nil error:&error];
@@ -98,12 +98,19 @@ osx_metal_convert_p010(CVPixelBufferRef source, int transfer,
   if(pool == NULL || CVPixelBufferPoolCreatePixelBuffer(NULL, pool, &output))
     return NULL;
 
+  const OSType source_format = CVPixelBufferGetPixelFormatType(source);
+  const BOOL nv12 = source_format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ||
+                    source_format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
+  const MTLPixelFormat y_format = nv12 ? MTLPixelFormatR8Unorm :
+                                         MTLPixelFormatR16Unorm;
+  const MTLPixelFormat uv_format = nv12 ? MTLPixelFormatRG8Unorm :
+                                          MTLPixelFormatRG16Unorm;
   CVMetalTextureRef yref = NULL, uvref = NULL, outref = NULL;
   CVReturn status = CVMetalTextureCacheCreateTextureFromImage(NULL, cache,
-    source, NULL, MTLPixelFormatR16Unorm, width, height, 0, &yref);
+    source, NULL, y_format, width, height, 0, &yref);
   if(status == kCVReturnSuccess)
     status = CVMetalTextureCacheCreateTextureFromImage(NULL, cache, source,
-      NULL, MTLPixelFormatRG16Unorm, width / 2, height / 2, 1, &uvref);
+      NULL, uv_format, width / 2, height / 2, 1, &uvref);
   if(status == kCVReturnSuccess)
     status = CVMetalTextureCacheCreateTextureFromImage(NULL, cache, output,
       NULL, MTLPixelFormatRGBA16Float, width, height, 0, &outref);
@@ -115,8 +122,8 @@ osx_metal_convert_p010(CVPixelBufferRef source, int transfer,
     [encoder setTexture:CVMetalTextureGetTexture(yref) atIndex:0];
     [encoder setTexture:CVMetalTextureGetTexture(uvref) atIndex:1];
     [encoder setTexture:CVMetalTextureGetTexture(outref) atIndex:2];
-    struct { int transfer; float hdrPeak; float headroom; } params = {
-      transfer, hdr_peak >= 100.0f ? hdr_peak : 1000.0f,
+    struct { int transfer; int depth; float hdrPeak; float headroom; } params = {
+      transfer, nv12 ? 8 : 10, hdr_peak >= 100.0f ? hdr_peak : 1000.0f,
       edr_headroom > 1.0f ? edr_headroom : 1.0f
     };
     [encoder setBytes:&params length:sizeof(params) atIndex:0];

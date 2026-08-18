@@ -82,6 +82,7 @@ typedef struct vtb_decoder {
   int vtbd_assumed_sdr;
   int vtbd_p010_playback;
   int vtbd_p010_direct;
+  int vtbd_nv12_hdr_direct;
   int vtbd_dolby_vision_tag;
   int vtbd_dolby_vision_profile;
   int vtbd_hw_status_reported;
@@ -744,7 +745,7 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
 
     case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
     case kCVPixelFormatType_420YpCbCr8BiPlanarFullRange:
-      fi.fi_type = 'CVPB';
+      fi.fi_type = vtbd->vtbd_nv12_hdr_direct ? 'NVHE' : 'CVPB';
       fi.fi_data[0] = (void *)vf->vf_buf;
       if(fi.fi_duration > 0)
         video_deliver_frame(vd, &fi);
@@ -1718,6 +1719,11 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
                              video_settings.video_accel_p010_playback;
   vtbd->vtbd_p010_direct = vtbd->vtbd_p010_playback &&
                            video_settings.video_accel_p010_direct;
+#if TARGET_OS_OSX
+  vtbd->vtbd_nv12_hdr_direct = mc->codec_id == AV_CODEC_ID_H264 &&
+                               hevc_main10_is_hdr(mcp) &&
+                               video_settings.video_accel_p010_direct;
+#endif
 #endif
 
   const int source_depth = mcp->bits_per_component > 0 ?
@@ -1743,17 +1749,22 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 #else
   vtbd->vtbd_decode_pixel_format = vtbd->vtbd_p010_playback ?
     kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
-    kCVPixelFormatType_420YpCbCr8Planar;
+    (vtbd->vtbd_nv12_hdr_direct ?
+      kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange :
+      kCVPixelFormatType_420YpCbCr8Planar);
   vtbd->vtbd_pixel_format = vtbd->vtbd_p010_direct ?
     kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange :
-    kCVPixelFormatType_420YpCbCr8Planar;
+    (vtbd->vtbd_nv12_hdr_direct ?
+      kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange :
+      kCVPixelFormatType_420YpCbCr8Planar);
 #endif
 
   dict_set_int32(surface_dict, kCVPixelBufferPixelFormatTypeKey,
                  vtbd->vtbd_decode_pixel_format);
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
-  if(vtbd->vtbd_p010_playback && !vtbd->vtbd_p010_direct) {
+  if((vtbd->vtbd_p010_playback && !vtbd->vtbd_p010_direct) ||
+     vtbd->vtbd_nv12_hdr_direct) {
     CFMutableDictionaryRef iosurface_dict =
       CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
                                 &kCFTypeDictionaryKeyCallBacks,
@@ -1866,6 +1877,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
         vtbd->vtbd_p010_direct ? "Metal P010 bridge / OpenGL ES fallback" :
                                  "IOSurface zero-copy"
 #else
+        vtbd->vtbd_nv12_hdr_direct ? "Metal NV12 HDR / OpenGL fallback" :
         vtbd->vtbd_p010_direct ? "OpenGL IOSurface zero-copy" : "OpenGL"
 #endif
         );
