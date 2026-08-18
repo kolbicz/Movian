@@ -102,8 +102,12 @@ htsmsg_binary_des0(htsmsg_t *msg, const uint8_t *buf, size_t len, buf_t *src)
         sub = htsmsg_create_list();
 
       f->hmf_childs = sub;
-      if(htsmsg_binary_des0(sub, buf, datalen, src) < 0)
+      if(htsmsg_binary_des0(sub, buf, datalen, src) < 0) {
+	htsmsg_release(sub);
+	free(n);
+	free(f);
 	return -1;
+      }
       break;
 
     default:

@@ -47,13 +47,14 @@ vec3 map_hdr_peak_to_display(vec3 rgb)
   float luminance = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
   float source_peak = max(1.0, u_hdr_peak_luminance / 100.0);
   float display_peak = max(1.0, u_edr_headroom);
-  if(luminance <= 1.0 || source_peak <= display_peak)
+  float knee = min(1.0, display_peak * 0.75);
+  if(luminance <= knee || source_peak <= display_peak)
     return rgb;
 
-  float t = clamp((luminance - 1.0) / max(source_peak - 1.0, 0.001),
+  float t = clamp((luminance - knee) / max(source_peak - knee, 0.001),
                   0.0, 1.0);
-  const float shoulder = 2.0;
-  float mapped = 1.0 + (display_peak - 1.0) *
+  const float shoulder = 3.0;
+  float mapped = knee + (display_peak - knee) *
     (1.0 - exp(-shoulder * t)) / (1.0 - exp(-shoulder));
   return rgb * (mapped / max(luminance, 0.0001));
 }

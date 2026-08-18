@@ -373,6 +373,7 @@ ass_decode_line(ass_decoder_ctx_t *adc, const char *str)
   case ADC_SECTION_EVENTS:
     s = mystrbegins(str, "Format:");
     if(s != NULL) {
+      free(adc->adc_event_format);
       adc->adc_event_format = strdup(s);
       break;
     }
@@ -658,8 +659,10 @@ ad_dialogue_decode(const ass_decoder_ctx_t *adc, const char *line,
         break;
 
       ass_handle_override(&ad, str, end - str, fontdomain);
-      if(ad.ad_not_supported)
-          return NULL;
+      if(ad.ad_not_supported) {
+        free(ad.ad_text);
+        return NULL;
+      }
       str = end + 1;
       continue;
     }

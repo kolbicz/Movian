@@ -96,6 +96,12 @@ fa_resolve_proto(const char *url, fa_protocol_t **p,
   char buf[URL_MAX];
   int n = 0;
 
+  /* Callers commonly fall back to parsing the original URL when resolution
+   * fails.  Always initialize the out-parameter so those paths never inspect
+   * an indeterminate protocol pointer. */
+  if(p != NULL)
+    *p = NULL;
+
   while(*url != ':' && *url>31 && n < sizeof(buf) - 1)
     buf[n++] = *url++;
 

@@ -688,6 +688,10 @@ torrent_parse_infodict(torrent_t *to, htsmsg_t *info,
       }
 
       htsmsg_t *paths = htsmsg_get_list(file, "path");
+      if(paths == NULL) {
+        snprintf(errbuf, errlen, "Missing file path");
+        return 1;
+      }
 
       torrent_file_t *tf = NULL;
 
@@ -719,6 +723,18 @@ torrent_parse_infodict(torrent_t *to, htsmsg_t *info,
           TAILQ_INSERT_TAIL(tfq, tf, tf_parent_link);
           tf->tf_fullpath = strdup(filename);
         }
+      }
+
+      if(tf == NULL) {
+        free(filename);
+        snprintf(errbuf, errlen, "Empty file path");
+        return 1;
+      }
+
+      if((uint64_t)length > UINT64_MAX - offset) {
+        free(filename);
+        snprintf(errbuf, errlen, "Total torrent size overflow");
+        return 1;
       }
 
       tf->tf_offset = offset;

@@ -80,6 +80,11 @@ es_utf8_from_bytes_auto(duk_context *ctx, const char *bufstart, int bufsize)
                 x[bufsize] = 0;
                 char *rbuf = utf8_cleanup(x);
 
+                if(rbuf == NULL)
+                  rbuf = x;
+                else
+                  free(x);
+
                 return buf_create_from_malloced(strlen(rbuf), rbuf);
 
               } else {

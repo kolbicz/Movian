@@ -990,6 +990,9 @@ parse_pes_header(ts_es_t *te, const uint8_t *buf, size_t len)
   int64_t d;
   int hdr, flags, hlen;
 
+  if(len < 3)
+    return -1;
+
   hdr   = getu8(buf, len);
   flags = getu8(buf, len);
   hlen  = getu8(buf, len);
@@ -1521,13 +1524,16 @@ emit_packet(ts_es_t *te, ts_demuxer_t *td, hls_segment_t *hs)
 static void
 process_es(ts_es_t *te, const uint8_t *tsb, ts_demuxer_t *td, hls_segment_t *hs)
 {
+  static const size_t max_pes_size = 64 * 1024 * 1024;
   int off             = tsb[3] & 0x20 ? tsb[4] + 5 : 4;
   int pusi            = tsb[1] & 0x40;
-  const uint8_t *data = tsb + off;
-  int size            = 188 - off;
 
 //TRACE(TRACE_DEBUG, "HLS", "size=%i off=%i", size, off);
-  if(size<=0) return;
+  if(off < 4 || off >= 188)
+    return;
+
+  const uint8_t *data = tsb + off;
+  int size = 188 - off;
 
   if(pusi) {
     if(te->te_buf != NULL)
@@ -1537,8 +1543,19 @@ process_es(ts_es_t *te, const uint8_t *tsb, ts_demuxer_t *td, hls_segment_t *hs)
     te->te_current_seq = hs->hs_seq;
   }
 
-  if(te->te_packet_size + size > te->te_buf_size) {
-    te->te_buf_size = te->te_buf_size * 2 + size;
+  const size_t required = (size_t)te->te_packet_size + (size_t)size;
+  if(required > max_pes_size ||
+     required > SIZE_MAX - AV_INPUT_BUFFER_PADDING_SIZE) {
+    TRACE(TRACE_ERROR, "HLS", "Discarding oversized PES packet (%zu bytes)",
+          required);
+    te->te_packet_size = 0;
+    return;
+  }
+
+  if(required > (size_t)te->te_buf_size) {
+    size_t new_size = MAX(required, (size_t)te->te_buf_size * 2);
+    new_size = MIN(new_size, max_pes_size);
+    te->te_buf_size = new_size;
     te->te_buf = myreallocf(te->te_buf,
                             te->te_buf_size + AV_INPUT_BUFFER_PADDING_SIZE);
     if(te->te_buf == NULL) {

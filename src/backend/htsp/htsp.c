@@ -1793,12 +1793,16 @@ htsp_subscriber(htsp_connection_t *hc, htsp_subscription_t *hs,
 
       if((m = htsp_reqreply(hc, m)) == NULL) {
 	snprintf(errbuf, errlen, "Connection with server lost");
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
       if((err = htsmsg_get_str(m, "error")) != NULL) {
 	snprintf(errbuf, errlen, "From server: %s", err);
 	htsmsg_release(m);
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
@@ -1820,12 +1824,16 @@ htsp_subscriber(htsp_connection_t *hc, htsp_subscription_t *hs,
 
       if((m = htsp_reqreply(hc, m)) == NULL) {
 	snprintf(errbuf, errlen, "Connection with server lost");
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
       if((err = htsmsg_get_str(m, "error")) != NULL) {
 	snprintf(errbuf, errlen, "From server: %s", err);
 	htsmsg_release(m);
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
@@ -1857,12 +1865,16 @@ htsp_subscriber(htsp_connection_t *hc, htsp_subscription_t *hs,
 
       if((m = htsp_reqreply(hc, m)) == NULL) {
 	snprintf(errbuf, errlen, "Connection with server lost");
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
       if((err = htsmsg_get_str(m, "error")) != NULL) {
 	snprintf(errbuf, errlen, "From server: %s", err);
 	htsmsg_release(m);
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
@@ -1872,6 +1884,8 @@ htsp_subscriber(htsp_connection_t *hc, htsp_subscription_t *hs,
 	      event_is_action(e, ACTION_SKIP_BACKWARD)) {
 
       if(zap_channel(hc, hs, errbuf, errlen, 1, &name, vq)) {
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
@@ -1879,6 +1893,8 @@ htsp_subscriber(htsp_connection_t *hc, htsp_subscription_t *hs,
 	      event_is_action(e, ACTION_SKIP_FORWARD)) {
 
       if(zap_channel(hc, hs, errbuf, errlen, 0, &name, vq)) {
+	event_release(e);
+	free(name);
 	return NULL;
       }
 
@@ -1899,6 +1915,7 @@ htsp_subscriber(htsp_connection_t *hc, htsp_subscription_t *hs,
   if((m = htsp_reqreply(hc, m)) != NULL)
     htsmsg_release(m);
 
+  free(name);
   return e;
 }
 

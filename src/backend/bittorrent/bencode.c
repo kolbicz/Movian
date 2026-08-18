@@ -97,6 +97,7 @@ bencode_parse_string(const char *start, const char *stop,
     if(x[i] == 0) {
       *failmsg = "Unexpected NUL byte";
       *failp = start + i;
+      free(x);
       return NULL;
     }
   }

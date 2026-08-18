@@ -2650,8 +2650,13 @@ hls_play(hls_t *h, media_pipe_t *mp, char *errbuf, size_t errlen,
 
 
   h->h_primary.hd_current = hls_select_default_variant(&h->h_primary);
+  if(h->h_primary.hd_current == NULL) {
+    snprintf(errbuf, errlen, "HLS playlist contains no playable variants");
+    return NULL;
+  }
   char video_initial[32];
-  sprintf(video_initial, "hlsv:%i", h->h_primary.hd_current->hv_bitrate);
+  snprintf(video_initial, sizeof(video_initial), "hlsv:%i",
+           h->h_primary.hd_current->hv_bitrate);
   prop_set_string(mp->mp_prop_video_track_current, video_initial);
 
 #if defined(__ANDROID__)
@@ -3228,6 +3233,7 @@ hls_get_audio_track(hls_t *h, int pid, const char *mux_id, const char *language,
 	hls_audio_track_t *hat;
 	char trackuri[256];
 	char title[64];
+	snprintf(title, sizeof(title), "Audio");
 
 	rstr_t *rformat     = rstr_alloc(fmt);
 	rstr_t *rlanguage   = rstr_alloc(language);
@@ -3819,8 +3825,13 @@ hls_play_extm3u(char *buf, const char *url, media_pipe_t *mp,
 	  {
         hls_ext_x_stream_inf(&h, v, &hv, &h.h_primary);
 	  }
-      else if(s[0] != '#') { // && hv->hv_codec_avc
-	    if(video_settings.hls_limit!=0 && video_settings.hls_limit!=6 && video_settings.hls_limit!=12) // no limit / no limit (avc) / AVC/HEVC Only
+	      else if(s[0] != '#') { // && hv->hv_codec_avc
+		if(hv == NULL) {
+		  HLS_TRACE(&h, "Ignoring variant URI without EXT-X-STREAM-INF: %s",
+		            s);
+		  continue;
+		}
+		    if(video_settings.hls_limit!=0 && video_settings.hls_limit!=6 && video_settings.hls_limit!=12) // no limit / no limit (avc) / AVC/HEVC Only
 		{
 			if(
 				//SD

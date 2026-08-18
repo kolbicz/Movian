@@ -18,6 +18,7 @@
  *  For more information, contact andreas@lonelycoder.com
  */
 #include <stdint.h>
+#include <limits.h>
 #include <assert.h>
 #include <string.h>
 
@@ -28,20 +29,25 @@
 /**
  *
  */
-static void
+static int
 h264_to_annexb_inplace(uint8_t *b, size_t fsize)
 {
   uint8_t *p = b;
   while(p < b + fsize) {
+    if((size_t)(b + fsize - p) < 4)
+      return -1;
     if(p[0])
-      break; // Avoid overflows with this simple check
+      return -1;
     int len = (p[1] << 16) + (p[2] << 8) + p[3];
+    if((size_t)len > (size_t)(b + fsize - p - 4))
+      return -1;
     p[0] = 0;
     p[1] = 0;
     p[2] = 0;
     p[3] = 1;
     p += len + 4;
   }
+  return 0;
 }
 
 
@@ -56,9 +62,15 @@ h264_to_annexb_buffered(uint8_t *dst, const uint8_t *b, size_t fsize, int lsize)
   int ol = 0;
   while(p < b + fsize) {
 
+    if((size_t)(b + fsize - p) < (size_t)lsize)
+      return -1;
+
     int len = 0;
     for(i = 0; i < lsize; i++)
       len = len << 8 | *p++;
+
+    if((size_t)len > (size_t)(b + fsize - p) || len > INT_MAX - ol - 4)
+      return -1;
 
     if(dst) {
       dst[0] = 0;
@@ -85,7 +97,8 @@ h264_to_annexb(h264_annexb_ctx_t *ctx, uint8_t **datap, size_t *sizep)
 
   switch(ctx->lsize) {
   case 4:
-    h264_to_annexb_inplace(*datap, *sizep);
+    if(h264_to_annexb_inplace(*datap, *sizep))
+      return -1;
   case 0:
 
 
@@ -95,6 +108,8 @@ h264_to_annexb(h264_annexb_ctx_t *ctx, uint8_t **datap, size_t *sizep)
   case 2:
   case 1:
     l = h264_to_annexb_buffered(NULL, *datap, *sizep, ctx->lsize);
+    if(l < 0)
+      return -1;
     if(l > ctx->tmpbufsize) {
       ctx->tmpbuf = realloc(ctx->tmpbuf, l);
       ctx->tmpbufsize = l;

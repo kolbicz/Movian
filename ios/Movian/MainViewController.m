@@ -26,6 +26,15 @@ extern int ios_landscape_only;
 
 static AVSampleBufferDisplayLayer *iosNativeVideoLayer;
 static __weak UIView *iosNativeVideoOwner;
+static int iosNativeVideoTransfer = -1;
+static BOOL iosNativeVideoFirstFrameReported;
+
+static BOOL
+ios_transfer_is_hdr(int transfer)
+{
+  return transfer == AVCOL_TRC_SMPTE2084 ||
+         transfer == AVCOL_TRC_ARIB_STD_B67;
+}
 
 static BOOL
 ios_native_video_prepare_layer(UIView *owner)
@@ -44,7 +53,7 @@ ios_native_video_prepare_layer(UIView *owner)
     iosNativeVideoLayer = [AVSampleBufferDisplayLayer layer];
     iosNativeVideoLayer.videoGravity = AVLayerVideoGravityResizeAspect;
     iosNativeVideoLayer.backgroundColor = UIColor.blackColor.CGColor;
-    if(@available(iOS 17.0, *))
+    if(@available(iOS 16.0, *))
       iosNativeVideoLayer.wantsExtendedDynamicRangeContent = YES;
   }
 
@@ -61,6 +70,59 @@ ios_native_video_prepare_layer(UIView *owner)
   return YES;
 }
 
+static BOOL
+ios_native_hdr_display_available(UIView *owner)
+{
+  UIScreen *screen = owner.window.screen ?: UIScreen.mainScreen;
+  if(@available(iOS 16.0, *))
+    return screen.potentialEDRHeadroom > 1.0;
+
+  /* iOS 15 does not expose display EDR headroom. Keep HDR on the established
+   * tone-mapped compatibility path rather than guessing from a device model. */
+  return NO;
+}
+
+static void
+ios_native_video_configure_hdr(CVPixelBufferRef image, int transfer,
+                               float hdrPeak)
+{
+  const BOOL hdr = ios_transfer_is_hdr(transfer);
+  if(iosNativeVideoTransfer != transfer) {
+    iosNativeVideoTransfer = transfer;
+    if(@available(iOS 16.0, *))
+      iosNativeVideoLayer.wantsExtendedDynamicRangeContent = hdr;
+
+    UIScreen *screen = iosNativeVideoOwner.window.screen ?: UIScreen.mainScreen;
+    if(@available(iOS 16.0, *)) {
+      TRACE(TRACE_INFO, "HDR",
+            "iOS native video output: transfer=%d, EDR=%s, current-headroom=%.2f, potential-headroom=%.2f, peak=%.0f nits",
+            transfer, hdr ? "enabled" : "not requested",
+            (double)screen.currentEDRHeadroom,
+            (double)screen.potentialEDRHeadroom,
+            hdrPeak >= 100.0f ? hdrPeak : 1000.0f);
+    }
+  }
+
+  if(!hdr)
+    return;
+
+  /* Some streams carry correct format-description metadata but lose one or
+   * more attachments on their decoded buffers after a seek/variant change.
+   * AVSampleBufferDisplayLayer reads these attachments to select its native
+   * HDR presentation path, so make the explicit PQ/HLG signal complete. */
+  CVBufferSetAttachment(image, kCVImageBufferColorPrimariesKey,
+                        kCVImageBufferColorPrimaries_ITU_R_2020,
+                        kCVAttachmentMode_ShouldPropagate);
+  CVBufferSetAttachment(image, kCVImageBufferYCbCrMatrixKey,
+                        kCVImageBufferYCbCrMatrix_ITU_R_2020,
+                        kCVAttachmentMode_ShouldPropagate);
+  CVBufferSetAttachment(image, kCVImageBufferTransferFunctionKey,
+                        transfer == AVCOL_TRC_SMPTE2084 ?
+                          kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ :
+                          kCVImageBufferTransferFunction_ITU_R_2100_HLG,
+                        kCVAttachmentMode_ShouldPropagate);
+}
+
 int
 ios_native_p010_available(glw_root_t *gr)
 {
@@ -69,7 +131,7 @@ ios_native_p010_available(glw_root_t *gr)
 }
 
 int
-ios_native_p010_present(CVPixelBufferRef image)
+ios_native_p010_present(CVPixelBufferRef image, int transfer, float hdrPeak)
 {
   if(image == NULL || iosNativeVideoLayer == nil ||
      iosNativeVideoLayer.superlayer == nil)
@@ -78,6 +140,12 @@ ios_native_p010_present(CVPixelBufferRef image)
   UIView *owner = iosNativeVideoOwner;
   if(owner != nil)
     iosNativeVideoLayer.frame = owner.layer.frame;
+
+  if(ios_transfer_is_hdr(transfer) &&
+     !ios_native_hdr_display_available(owner))
+    return -2;
+
+  ios_native_video_configure_hdr(image, transfer, hdrPeak);
 
   if(iosNativeVideoLayer.status == AVQueuedSampleBufferRenderingStatusFailed)
     [iosNativeVideoLayer flush];
@@ -112,6 +180,26 @@ ios_native_p010_present(CVPixelBufferRef image)
                            kCFBooleanTrue);
     }
     [iosNativeVideoLayer enqueueSampleBuffer:sample];
+
+    if(!iosNativeVideoFirstFrameReported) {
+      iosNativeVideoFirstFrameReported = YES;
+      UIScreen *screen = owner.window.screen ?: UIScreen.mainScreen;
+      if(@available(iOS 16.0, *)) {
+        const BOOL nativeEDR = ios_transfer_is_hdr(transfer) &&
+          screen.potentialEDRHeadroom > 1.0 &&
+          iosNativeVideoLayer.wantsExtendedDynamicRangeContent;
+        TRACE(TRACE_INFO, "HDR",
+              "iOS first video frame presented: output=%s, transfer=%d, current-headroom=%.2f, potential-headroom=%.2f, peak=%.0f nits",
+              nativeEDR ? "native EDR" : "native SDR",
+              transfer, (double)screen.currentEDRHeadroom,
+              (double)screen.potentialEDRHeadroom,
+              hdrPeak >= 100.0f ? hdrPeak : 1000.0f);
+      } else {
+        TRACE(TRACE_INFO, "HDR",
+              "iOS first video frame presented: output=native SDR, transfer=%d (EDR headroom unavailable before iOS 16)",
+              transfer);
+      }
+    }
   }
 
   if(sample != NULL)
@@ -124,8 +212,11 @@ ios_native_p010_present(CVPixelBufferRef image)
 void
 ios_native_p010_flush(void)
 {
-  if(iosNativeVideoLayer != nil)
+  if(iosNativeVideoLayer != nil) {
     [iosNativeVideoLayer flushAndRemoveImage];
+    iosNativeVideoTransfer = -1;
+    iosNativeVideoFirstFrameReported = NO;
+  }
 }
 
 /*
@@ -169,14 +260,13 @@ ios_metal_convert_p010(CVPixelBufferRef source, int transfer, float hdrPeak)
        "float3 pq(float3 e) { float m1=.1593017578125,m2=78.84375,c1=.8359375,c2=18.8515625,c3=18.6875;\n"
        " float3 p=pow(max(e,0.0),1.0/m2); return pow(max(p-c1,0.0)/max(c2-c3*p,.00001),1.0/m1); }\n"
        "float3 gamut(float3 c) { return float3(1.6605*c.r-.5876*c.g-.0728*c.b,-.1246*c.r+1.1329*c.g-.0083*c.b,-.0182*c.r-.1006*c.g+1.1187*c.b); }\n"
-       "float3 tone(float3 x) { return clamp((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14),0.0,1.0); }\n"
-       "float3 tonehdr(float3 x,float peak) { float sourcePeak=max(1.0,peak/100.0); return tone(x*(10.0/sourcePeak)); }\n"
+       "float3 tone(float3 x,float src) { float l=dot(x,float3(.2126,.7152,.0722)),k=.75; if(l<=k||src<=1.0)return clamp(x,0.0,1.0); float t=clamp((l-k)/max(src-k,.001),0.0,1.0); float m=k+(1.0-k)*(1.0-exp(-3.0*t))/(1.0-exp(-3.0)); return clamp(x*(m/max(l,.0001)),0.0,1.0); }\n"
        "float3 srgb(float3 x) { return select(12.92*x,1.055*pow(max(x,0.0),1.0/2.4)-.055,x>.0031308); }\n"
        "kernel void p010bgra(texture2d<float,access::sample> y [[texture(0)]], texture2d<float,access::sample> uv [[texture(1)]], texture2d<float,access::write> out [[texture(2)]], constant Params& p [[buffer(0)]], uint2 q [[thread_position_in_grid]]) {\n"
        " if(q.x>=out.get_width()||q.y>=out.get_height()) return;\n"
        " constexpr sampler s(coord::normalized,address::clamp_to_edge,filter::linear); float2 t=(float2(q)+.5)/float2(out.get_width(),out.get_height());\n"
        " float3 c=max((p.transfer==16||p.transfer==18)?yuv2020(y.sample(s,t).r,uv.sample(s,t).rg):yuv709(y.sample(s,t).r,uv.sample(s,t).rg),0.0);\n"
-       " if(p.transfer==18) c=srgb(tone(max(gamut(pow(hlg(c),1.2)*4.0),0.0))); else if(p.transfer==16) c=srgb(tonehdr(max(gamut(pq(c)*100.0),0.0),p.hdrPeak));\n"
+       " if(p.transfer==18) c=srgb(tone(max(gamut(pow(hlg(c),1.2)*4.0),0.0),10.0)); else if(p.transfer==16) c=srgb(tone(max(gamut(pq(c)*100.0),0.0),max(1.0,p.hdrPeak/100.0)));\n"
        " out.write(float4(c,1.0),q); }\n";
     NSError *error = nil;
     id<MTLLibrary> library = [device newLibraryWithSource:shader

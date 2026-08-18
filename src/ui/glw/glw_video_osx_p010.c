@@ -310,10 +310,17 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
    * the UI thread and will be retired by p010_newframe(). */
   if(!aux->decoder_epoch_valid || aux->decoder_epoch != fi->fi_epoch) {
     glw_video_surface_t *stale;
+    glw_video_surface_t *next;
     unsigned int flushed = 0;
-    while((stale = TAILQ_FIRST(&gv->gv_decoded_queue)) != NULL) {
-      surface_release(gv, stale, &gv->gv_decoded_queue);
-      flushed++;
+    for(stale = TAILQ_FIRST(&gv->gv_decoded_queue); stale != NULL;
+        stale = next) {
+      next = TAILQ_NEXT(stale, gvs_link);
+      /* The currently displayed surfaces can remain linked on the decoded
+       * queue.  Let the UI retire those after it advances to the new epoch. */
+      if(stale != gv->gv_sa && stale != gv->gv_sb) {
+        surface_release(gv, stale, &gv->gv_decoded_queue);
+        flushed++;
+      }
     }
     aux->decoder_epoch = fi->fi_epoch;
     aux->decoder_epoch_valid = 1;

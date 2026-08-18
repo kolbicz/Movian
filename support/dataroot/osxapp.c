@@ -23,11 +23,10 @@ const char *app_dataroot(void)
       //      CFRelease(mainBundle);
       
       CFURLGetFileSystemRepresentation(url, 1, (uint8_t *)buf, sizeof(buf));
-      //      CFRelease(url);
+      CFRelease(url);
     }
     initialized = 1;
     pthread_mutex_unlock(&mtx);
   }
   return buf;
 }
-

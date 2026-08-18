@@ -83,9 +83,14 @@ typedef struct vtb_decoder {
   int vtbd_p010_playback;
   int vtbd_p010_direct;
   int vtbd_dolby_vision_tag;
+  int vtbd_dolby_vision_profile;
   int vtbd_hw_status_reported;
   int vtbd_output_reported;
   int vtbd_sdr_output_reported;
+  unsigned int vtbd_decode_errors;
+  int vtbd_decode_error_notified;
+  int vtbd_hdr10plus_reported;
+  int vtbd_dv5_transfer_assumed_reported;
   float vtbd_reported_hdr_peak_luminance;
 } vtb_decoder_t;
 
@@ -102,12 +107,13 @@ read_be32(const uint8_t *p)
          ((uint32_t)p[2] << 8) | p[3];
 }
 
-static void
+static CFDataRef
 vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
 {
+  CFDataRef hdr10plus = NULL;
   const int nls = vtbd->vtbd_nal_length_size;
   if(nls < 1 || nls > 4)
-    return;
+    return NULL;
 
   while(size >= (size_t)nls) {
     uint32_t nal_size = 0;
@@ -116,7 +122,7 @@ vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
     data += nls;
     size -= nls;
     if(nal_size > size || nal_size < 3)
-      return;
+      break;
 
     const int nal_type = (data[0] >> 1) & 0x3f;
     if(nal_type == 39 || nal_type == 40) {
@@ -171,6 +177,19 @@ vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
             vtbd->vtbd_sei_max_cll = max_cll;
             metadata_changed = 1;
           }
+        } else if(payload_type == 4 && payload_size >= 7 &&
+                  rbsp[off] == 0xb5 &&
+                  read_be16(rbsp + off + 1) == 0x003c &&
+                  read_be16(rbsp + off + 3) == 0x0001 &&
+                  rbsp[off + 5] == 4) {
+          /* SMPTE ST 2094-40 uses application_identifier 4 inside a
+           * registered ITU-T T.35 SEI message.  CoreMedia expects the exact
+           * T.35 body beginning with country_code, not the HEVC SEI header or
+           * emulation-prevention bytes. */
+          if(hdr10plus != NULL)
+            CFRelease(hdr10plus);
+          hdr10plus = CFDataCreate(kCFAllocatorDefault, rbsp + off,
+                                   payload_size);
         }
 
         const float peak = vtbd->vtbd_sei_max_cll != 0 ?
@@ -192,6 +211,7 @@ vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
     data += nal_size;
     size -= nal_size;
   }
+  return hdr10plus;
 }
 
 static void
@@ -261,10 +281,21 @@ vtb_create_session(vtb_decoder_t *vtbd)
       vtbd->vtbd_session,
       kVTDecompressionPropertyKey_PropagatePerFrameHDRDisplayMetadata,
       kCFBooleanTrue);
-    TRACE(metadata_status == noErr ? TRACE_INFO : TRACE_ERROR, "VTB",
-          "Per-frame HDR metadata propagation %s (status=%d)",
-          metadata_status == noErr ? "enabled" : "failed",
-          (int)metadata_status);
+#if TARGET_OS_IPHONE
+    static int unsupported_reported;
+    if(metadata_status == kVTPropertyNotSupportedErr) {
+      if(__sync_bool_compare_and_swap(&unsupported_reported, 0, 1))
+        TRACE(TRACE_INFO, "VTB",
+              "Per-frame HDR metadata propagation is not supported by this iOS VideoToolbox implementation (status=%d); continuing with pixel-buffer metadata",
+              (int)metadata_status);
+    } else
+#endif
+    {
+      TRACE(metadata_status == noErr ? TRACE_INFO : TRACE_ERROR, "VTB",
+            "Per-frame HDR metadata propagation %s (status=%d)",
+            metadata_status == noErr ? "enabled" : "failed",
+            (int)metadata_status);
+    }
   }
   if(status || !vtbd->vtbd_hdr_to_sdr || vtbd->vtbd_p010_playback)
     return status;
@@ -460,12 +491,15 @@ copy_attachment_string(CVBufferRef buf, CFStringRef key,
  * container value and incorrectly drawing PQ output through the SDR shader.
  */
 static int
-output_color_transfer(CVPixelBufferRef imageBuffer, int fallback)
+output_color_transfer(CVPixelBufferRef imageBuffer, int fallback,
+                      int *metadata_found)
 {
   CFTypeRef value = CVBufferCopyAttachment(
     imageBuffer, kCVImageBufferTransferFunctionKey, NULL);
   int transfer = fallback;
+  *metadata_found = 0;
   if(value != NULL && CFGetTypeID(value) == CFStringGetTypeID()) {
+    *metadata_found = 1;
     if(CFEqual(value, kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ))
       transfer = AVCOL_TRC_SMPTE2084;
     else if(CFEqual(value, kCVImageBufferTransferFunction_ITU_R_2100_HLG))
@@ -782,6 +816,27 @@ picture_out(void *decompressionOutputRefCon,
   media_buf_meta_t *mbm = &mbm_storage;
   vtb_decoder_t *vtbd = decompressionOutputRefCon;
 
+  if(status != noErr) {
+    vtbd->vtbd_decode_errors++;
+    if(vtbd->vtbd_decode_errors == 1 ||
+       !(vtbd->vtbd_decode_errors % 60))
+      TRACE(TRACE_ERROR, "VTB",
+            "Asynchronous decode failed: status=%d flags=0x%x frame=%u%s",
+            (int)status, (unsigned int)infoFlags,
+            vtbd->vtbd_decode_errors,
+            vtbd->vtbd_dolby_vision_tag ? " Dolby-Vision" : "");
+    if(vtbd->vtbd_dolby_vision_profile == 5 &&
+       status == kVTVideoDecoderMalfunctionErr &&
+       !vtbd->vtbd_decode_error_notified) {
+      vtbd->vtbd_decode_error_notified = 1;
+      notify_add(NULL, NOTIFY_ERROR, NULL, 8,
+                 _("Dolby Vision Profile 5 playback is not supported on this Apple device"));
+      if(vtbd->vtbd_vd != NULL && vtbd->vtbd_vd->vd_mp != NULL)
+        prop_set(vtbd->vtbd_vd->vd_mp->mp_prop_root,
+                 "loading", PROP_SET_INT, 0);
+    }
+  }
+
   if(imageBuffer == NULL)
     return; // No frame, typically from kVTDecodeFrame_DoNotOutputFrame
 
@@ -798,8 +853,17 @@ picture_out(void *decompressionOutputRefCon,
   }
 
   if(vtbd->vtbd_dolby_vision_tag) {
-    const int output_transfer =
-      output_color_transfer(imageBuffer, vtbd->vtbd_color_transfer);
+    int metadata_found;
+    int output_transfer = output_color_transfer(
+      imageBuffer, vtbd->vtbd_color_transfer, &metadata_found);
+    if(!metadata_found && vtbd->vtbd_dolby_vision_profile == 5) {
+      output_transfer = AVCOL_TRC_SMPTE2084;
+      if(!vtbd->vtbd_dv5_transfer_assumed_reported) {
+        vtbd->vtbd_dv5_transfer_assumed_reported = 1;
+        TRACE(TRACE_INFO, "VTB",
+              "Dolby Vision Profile 5 decoder output has no transfer attachment; using its defined PQ transfer for rendering");
+      }
+    }
     if(output_transfer != vtbd->vtbd_color_transfer) {
       TRACE(TRACE_INFO, "VTB",
             "Dolby Vision renderer transfer updated from %d to %d using decoder output metadata",
@@ -898,10 +962,13 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
 
   vtbd->vtbd_vd = vd;
 
+  CFDataRef hdr10plus = NULL;
   if(vtbd->vtbd_codec_id == AV_CODEC_ID_HEVC)
-    vtb_parse_hevc_hdr_sei(vtbd, mb->mb_data, mb->mb_size);
+    hdr10plus = vtb_parse_hevc_hdr_sei(vtbd, mb->mb_data, mb->mb_size);
 
   if(vtbd->vtbd_session == NULL) {
+    if(hdr10plus != NULL)
+      CFRelease(hdr10plus);
     TRACE(TRACE_ERROR, "VTB", "Decoder session is unavailable");
     return;
   }
@@ -912,6 +979,8 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
                                        kCFAllocatorNull,
                                        NULL, 0, mb->mb_size, 0, &block_buf);
   if(status) {
+    if(hdr10plus != NULL)
+      CFRelease(hdr10plus);
     TRACE(TRACE_ERROR, "VTB", "Data buffer allocation error %d", status);
     return;
   }
@@ -930,6 +999,8 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
 
   CFRelease(block_buf);
   if(status) {
+    if(hdr10plus != NULL)
+      CFRelease(hdr10plus);
     TRACE(TRACE_ERROR, "VTB", "Sample buffer allocation error %d", status);
     return;
   }
@@ -955,7 +1026,24 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
                            kCMSampleAttachmentKey_DependsOnOthers,
                            kCFBooleanTrue);
     }
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+    if(hdr10plus != NULL) {
+      if(__builtin_available(macOS 13.0, iOS 16.0, tvOS 16.0, *)) {
+        CFDictionarySetValue(attachment,
+                             kCMSampleAttachmentKey_HDR10PlusPerFrameData,
+                             hdr10plus);
+        if(!vtbd->vtbd_hdr10plus_reported) {
+          vtbd->vtbd_hdr10plus_reported = 1;
+          TRACE(TRACE_INFO, "VTB",
+                "HDR10+ ST 2094-40 metadata attached to VideoToolbox samples");
+        }
+      }
+    }
+#endif
   }
+
+  if(hdr10plus != NULL)
+    CFRelease(hdr10plus);
 
   media_buf_meta_t *frame_opaque = malloc(sizeof(*frame_opaque));
   if(frame_opaque == NULL) {
@@ -1012,6 +1100,8 @@ vtb_flush(struct media_codec *mc, struct video_decoder *vd)
   vtbd->vtbd_output_reported = 0;
   vtbd->vtbd_hw_status_reported = 0;
   vtbd->vtbd_sdr_output_reported = 0;
+  vtbd->vtbd_decode_errors = 0;
+  vtbd->vtbd_decode_error_notified = 0;
   hts_mutex_unlock(&vtbd->vtbd_mutex);
 
   OSStatus status = vtb_create_session(vtbd);
@@ -1062,6 +1152,155 @@ dict_set_int32(CFMutableDictionaryRef dict, CFStringRef key, int value)
 }
 
 
+/* Some dvhe/hev1 MP4 files carry a minimal 23-byte hvcC record and repeat
+ * VPS/SPS/PPS in-band at each random-access point.  VideoToolbox cannot create
+ * a session from the empty hvcC record, while libavcodec can and consequently
+ * becomes an incorrect 8-bit fallback for HDR.  Delay decoder creation until
+ * the first access unit and complete hvcC from its parameter-set NAL units. */
+typedef struct hevc_inband_config {
+  media_codec_t *decoder;
+  media_codec_params_t params;
+  uint8_t *base_hvcc;
+  uint8_t *hvcc;
+} hevc_inband_config_t;
+
+static int
+hevc_complete_hvcc(const media_codec_params_t *mcp,
+                   const uint8_t *sample, size_t sample_size,
+                   uint8_t **result, size_t *result_size)
+{
+  const uint8_t *base = mcp->extradata;
+  const int nls = (base[21] & 3) + 1;
+  const uint8_t *ps[3] = {NULL, NULL, NULL};
+  size_t ps_size[3] = {0, 0, 0};
+
+  while(sample_size >= (size_t)nls) {
+    uint32_t nal_size = 0;
+    for(int i = 0; i < nls; i++)
+      nal_size = (nal_size << 8) | sample[i];
+    sample += nls;
+    sample_size -= nls;
+    if(nal_size > sample_size || nal_size < 2)
+      break;
+
+    const int nal_type = (sample[0] >> 1) & 0x3f;
+    if(nal_type >= 32 && nal_type <= 34 && ps[nal_type - 32] == NULL) {
+      ps[nal_type - 32] = sample;
+      ps_size[nal_type - 32] = nal_size;
+    }
+    sample += nal_size;
+    sample_size -= nal_size;
+  }
+
+  if(ps[0] == NULL || ps[1] == NULL || ps[2] == NULL)
+    return -1;
+
+  size_t size = 23;
+  for(int i = 0; i < 3; i++) {
+    /* hvcC stores each NAL-unit length in 16 bits. Reject a malformed access
+     * unit instead of truncating that field while copying the full payload. */
+    if(ps_size[i] > UINT16_MAX)
+      return -1;
+    size += 5 + ps_size[i];
+  }
+  uint8_t *hvcc = malloc(size);
+  if(hvcc == NULL)
+    return -1;
+
+  memcpy(hvcc, base, 23);
+  hvcc[22] = 3;
+  uint8_t *p = hvcc + 23;
+  for(int i = 0; i < 3; i++) {
+    *p++ = 0x80 | (32 + i); /* array_complete + NAL unit type */
+    *p++ = 0;
+    *p++ = 1;
+    *p++ = ps_size[i] >> 8;
+    *p++ = ps_size[i];
+    memcpy(p, ps[i], ps_size[i]);
+    p += ps_size[i];
+  }
+  *result = hvcc;
+  *result_size = size;
+  return 0;
+}
+
+static void
+hevc_inband_decode(media_codec_t *mc, video_decoder_t *vd,
+                   media_queue_t *mq, media_buf_t *mb, int reqsize)
+{
+  hevc_inband_config_t *hic = mc->opaque;
+  if(hic->decoder == NULL) {
+    size_t hvcc_size;
+    if(hevc_complete_hvcc(&hic->params, mb->mb_data, mb->mb_size,
+                          &hic->hvcc, &hvcc_size)) {
+      TRACE(TRACE_DEBUG, "VTB",
+            "Waiting for in-band HEVC VPS/SPS/PPS before creating decoder");
+      return;
+    }
+    hic->params.extradata = hic->hvcc;
+    hic->params.extradata_size = hvcc_size;
+    hic->decoder = media_codec_create(mc->codec_id, 0, NULL, NULL,
+                                      &hic->params, mc->mp);
+    if(hic->decoder == NULL) {
+      /* A rejected nested decoder is retryable at a later random-access
+       * point, but the completed configuration must not leak on every frame. */
+      free(hic->hvcc);
+      hic->hvcc = NULL;
+      hic->params.extradata = hic->base_hvcc;
+      hic->params.extradata_size = 23;
+      return;
+    }
+    TRACE(TRACE_INFO, "VTB",
+          "Bootstrapped HEVC decoder from in-band VPS/SPS/PPS (%zu-byte hvcC)",
+          hvcc_size);
+  }
+  hic->decoder->decode(hic->decoder, vd, mq, mb, reqsize);
+}
+
+static void
+hevc_inband_flush(media_codec_t *mc, video_decoder_t *vd)
+{
+  hevc_inband_config_t *hic = mc->opaque;
+  if(hic->decoder != NULL && hic->decoder->flush != NULL)
+    hic->decoder->flush(hic->decoder, vd);
+}
+
+static void
+hevc_inband_close(media_codec_t *mc)
+{
+  hevc_inband_config_t *hic = mc->opaque;
+  if(hic->decoder != NULL)
+    media_codec_deref(hic->decoder);
+  free(hic->base_hvcc);
+  free(hic->hvcc);
+  free(hic);
+}
+
+static int
+hevc_inband_open(media_codec_t *mc, const media_codec_params_t *mcp)
+{
+  hevc_inband_config_t *hic = calloc(1, sizeof(*hic));
+  if(hic == NULL)
+    return 1;
+  hic->params = *mcp;
+  uint8_t *base = malloc(mcp->extradata_size);
+  if(base == NULL) {
+    free(hic);
+    return 1;
+  }
+  memcpy(base, mcp->extradata, mcp->extradata_size);
+  hic->base_hvcc = base;
+  hic->params.extradata = base;
+  mc->opaque = hic;
+  mc->decode = hevc_inband_decode;
+  mc->flush = hevc_inband_flush;
+  mc->close = hevc_inband_close;
+  TRACE(TRACE_INFO, "VTB",
+        "Deferring HEVC decoder creation for in-band VPS/SPS/PPS");
+  return 0;
+}
+
+
 /**
  *
  */
@@ -1082,6 +1321,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   const int dolby_vision = mcp->dovi_valid ||
     mcp->codec_tag == MKTAG('d', 'v', 'h', 'e') ||
     mcp->codec_tag == MKTAG('d', 'v', 'h', '1');
+  const int dolby_profile5 = mcp->dovi_valid && mcp->dovi_profile == 5;
 
   switch(mc->codec_id) {
   case AV_CODEC_ID_H264:
@@ -1093,7 +1333,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
      * Apple's Dolby-aware decoder interpret its RPU/IPT-PQ signal rather than
      * opening it as ordinary HEVC and feeding those planes to the generic PQ
      * shader.  Keep compatible Dolby profiles on the proven HEVC path. */
-    codec_type = mcp->dovi_valid && mcp->dovi_profile == 5 ?
+    codec_type = dolby_profile5 ?
       kCMVideoCodecType_DolbyVisionHEVC : kCMVideoCodecType_HEVC;
     config_atom = CFSTR("hvcC");
     break;
@@ -1217,6 +1457,10 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     return h264_annexb_to_avc(mc, mp, &video_vtb_codec_create);
   }
 
+  if(mc->codec_id == AV_CODEC_ID_HEVC && codec_config_size == 23 &&
+     codec_config[22] == 0)
+    return hevc_inband_open(mc, mcp);
+
   int av1_depth = 0;
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
@@ -1314,13 +1558,24 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
                        kCVImageBufferChromaLocation_Left);
 
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
-  if(((mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2) ||
+  if((dolby_profile5 ||
+      (mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2) ||
       (mc->codec_id == AV_CODEC_ID_AV1 && av1_depth == 10)) &&
      video_settings.video_accel_p010_playback) {
     add_source_color_extensions(config_dict, mcp);
     TRACE(TRACE_INFO, "VTB",
           "%s P010 format description preserves source color metadata: transfer=%d, primaries=%d, matrix=%d",
           vtb_codec_name(mc->codec_id),
+          mcp->color_transfer, mcp->color_primaries, mcp->color_matrix);
+  } else if(mc->codec_id == AV_CODEC_ID_H264 &&
+            hevc_main10_is_hdr(mcp)) {
+    /* HLG is also used with 8-bit AVC (for example Sony XAVC camera clips).
+     * It remains an NV12 decode, but the format description must retain the
+     * BT.2020/HLG signal so AVSampleBufferDisplayLayer can present it as EDR
+     * instead of the legacy OpenGL renderer treating it as ordinary SDR. */
+    add_source_color_extensions(config_dict, mcp);
+    TRACE(TRACE_INFO, "VTB",
+          "H264 HDR format description preserves source color metadata: transfer=%d, primaries=%d, matrix=%d",
           mcp->color_transfer, mcp->color_primaries, mcp->color_matrix);
   }
 #endif
@@ -1339,10 +1594,14 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     CFRelease(extradata);
 
     /* FFmpeg exposes the dvcC/dvvC configuration as stream side data rather
-     * than folding it into hvcC.  Pass it to VideoToolbox as a sibling sample
-     * description atom so Apple silicon can apply the Dolby Vision RPU/profile
-     * information instead of treating dvh1/dvhe as untagged HEVC Main10. */
-    if(mc->codec_id == AV_CODEC_ID_HEVC && mcp->dovi_valid) {
+     * than folding it into hvcC.  Profile 5 has no compatible base layer, so
+     * pass its Dolby configuration to Apple's Dolby-aware decoder.  Profiles
+     * 8.1 and 8.4 do have HDR10 and HLG base layers respectively; attaching
+     * dvvC makes some iOS versions select a Dolby path that accepts the
+     * session but rejects every submitted frame.  Omit it for Profile 8 and
+     * let the ordinary HEVC decoder consume the compatible base layer. */
+    if(mc->codec_id == AV_CODEC_ID_HEVC && mcp->dovi_valid &&
+       mcp->dovi_profile == 5) {
       uint8_t dvcc[24] = {0};
       dvcc[0] = mcp->dovi_version_major;
       dvcc[1] = mcp->dovi_version_minor;
@@ -1390,7 +1649,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     return 1;
   }
 
-  if(((mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2) ||
+  if((dolby_profile5 ||
+      (mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2) ||
       (mc->codec_id == AV_CODEC_ID_AV1 && av1_depth == 10)) &&
      video_settings.video_accel_probe_p010)
     probe_p010_output(fmt, config_dict, mcp->width, mcp->height);
@@ -1436,15 +1696,22 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   if(vtbd->vtbd_hdr_peak_luminance < 100.0f)
     vtbd->vtbd_hdr_peak_luminance = 1000.0f;
   vtbd->vtbd_assumed_sdr = assumed_sdr;
-  vtbd->vtbd_dolby_vision_tag = dolby_vision;
-  vtbd->vtbd_hdr_to_sdr =
-                         ((mc->codec_id == AV_CODEC_ID_HEVC &&
-                           stream_profile == 2) ||
-                          (mc->codec_id == AV_CODEC_ID_AV1 &&
-                           av1_depth == 10)) &&
-                          hevc_main10_is_hdr(mcp);
+  /* This records the decoder path, not merely the source tag.  Profile 8 is
+   * deliberately decoded as its HDR10/HLG HEVC base layer and must not enter
+   * Dolby-specific output handling or error reporting after a seek. */
+  vtbd->vtbd_dolby_vision_tag =
+    codec_type == kCMVideoCodecType_DolbyVisionHEVC;
+  vtbd->vtbd_dolby_vision_profile = mcp->dovi_valid ?
+    mcp->dovi_profile : 0;
+  vtbd->vtbd_hdr_to_sdr = dolby_profile5 ||
+                         (hevc_main10_is_hdr(mcp) &&
+                          ((mc->codec_id == AV_CODEC_ID_HEVC &&
+                            stream_profile == 2) ||
+                           (mc->codec_id == AV_CODEC_ID_AV1 &&
+                            av1_depth == 10)));
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
-  vtbd->vtbd_p010_playback = ((mc->codec_id == AV_CODEC_ID_HEVC &&
+  vtbd->vtbd_p010_playback = (dolby_profile5 ||
+                             (mc->codec_id == AV_CODEC_ID_HEVC &&
                               stream_profile == 2) ||
                              (mc->codec_id == AV_CODEC_ID_AV1 &&
                               av1_depth == 10)) &&
@@ -1455,7 +1722,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   const int source_depth = mcp->bits_per_component > 0 ?
     mcp->bits_per_component :
-    (mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2 ? 10 :
+    (dolby_profile5 ? 10 :
+     mc->codec_id == AV_CODEC_ID_HEVC && stream_profile == 2 ? 10 :
      mc->codec_id == AV_CODEC_ID_AV1 && av1_depth ? av1_depth : 8);
 
   dict_set_int32(surface_dict, kCVPixelBufferWidthKey, mcp->width);
@@ -1570,7 +1838,11 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   TRACE(TRACE_INFO, "VTB",
         "Opened %s decoder %dx%d, source-depth=%d, transfer=%d, primaries=%d, matrix=%d, range=%d, hardware=required, pixel-format=%s, renderer=%s",
         mc->codec_id == AV_CODEC_ID_HEVC ?
-          (vtbd->vtbd_p010_direct ? "HEVC Main10 direct-P010" :
+          (dolby_profile5 && vtbd->vtbd_p010_direct ?
+             "Dolby Vision Profile 5 direct-P010" :
+           dolby_profile5 && vtbd->vtbd_p010_playback ?
+             "Dolby Vision Profile 5 P010-to-SDR" :
+           vtbd->vtbd_p010_direct ? "HEVC Main10 direct-P010" :
            vtbd->vtbd_p010_playback ? "HEVC Main10 P010-to-SDR" :
            vtbd->vtbd_hdr_to_sdr ? "HEVC Main10 HDR-to-SDR" :
            vtbd->vtbd_assumed_sdr ? "HEVC Main10 SDR assumed" :

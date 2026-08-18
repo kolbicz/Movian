@@ -304,7 +304,8 @@ parse_shunting_yard(token_t *expr, errorinfo_t *ei, glw_root_t *gr)
    *
    * The check ifself is a bit ugly though
    */
-  if(expr->child->type == TOKEN_RESOLVED_ATTRIBUTE &&
+  if(expr->child != NULL &&
+     expr->child->type == TOKEN_RESOLVED_ATTRIBUTE &&
      !strcmp(expr->child->t_attrib->name, "style"))
     type = TOKEN_PURE_RPN;
 

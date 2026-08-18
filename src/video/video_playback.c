@@ -751,6 +751,12 @@ vq_entries_callback(void *opaque, prop_event_t event, ...)
   case PROP_HAVE_MORE_CHILDS_YES:
   case PROP_HAVE_MORE_CHILDS_NO:
   case PROP_SUGGEST_FOCUS:
+  case PROP_SELECT_CHILD:
+  case PROP_REQ_NEW_CHILD:
+  case PROP_REQ_DELETE_VECTOR:
+  case PROP_REQ_DELETE:
+  case PROP_EXT_EVENT:
+  case PROP_REQ_MOVE_CHILD:
     break;
 
   default:

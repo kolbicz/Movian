@@ -606,24 +606,35 @@ metadata_from_libav(char *dst, size_t dstlen,
   if(codec->id == AV_CODEC_ID_DTS && profile != NULL)
     name = NULL;
 
-  int off = 0;
+  if(dstlen == 0)
+    return;
+
+  size_t off = 0;
+  dst[0] = 0;
+
+#define APPEND_METADATA(...) do {                                      \
+    if(off < dstlen) {                                                  \
+      int n__ = snprintf(dst + off, dstlen - off, __VA_ARGS__);         \
+      if(n__ < 0)                                                       \
+        return;                                                         \
+      off += MIN((size_t)n__, dstlen - off - 1);                        \
+    }                                                                   \
+  } while(0)
 
   if(name) {
-    off = snprintf(dst, dstlen, "%s", codec->name);
+    APPEND_METADATA("%s", codec->name);
     char *n = dst;
     while(*n) {
-      *n = toupper((int)*n);
+      *n = toupper((unsigned char)*n);
       n++;
     }
   }
 
   if(profile != NULL)
-    off += snprintf(dst + off, dstlen - off,
-                    "%s%s", off ? " " : "", profile);
+    APPEND_METADATA("%s%s", off ? " " : "", profile);
 
   if(codec->id == AV_CODEC_ID_H264 && avctx->level != FF_LEVEL_UNKNOWN)
-    off += snprintf(dst + off, dstlen - off,
-                    " (Level %d.%d)",
+    APPEND_METADATA(" (Level %d.%d)",
                     avctx->level / 10, avctx->level % 10);
 
   if(avctx->codec_type == AVMEDIA_TYPE_AUDIO) {
@@ -632,17 +643,16 @@ metadata_from_libav(char *dst, size_t dstlen,
     av_get_channel_layout_string(buf, sizeof(buf), avctx->channels,
                                  avctx->channel_layout);
 
-    off += snprintf(dst + off, dstlen - off, ", %d Hz, %s",
-		    avctx->sample_rate, buf);
+    APPEND_METADATA(", %d Hz, %s", avctx->sample_rate, buf);
   }
 
   if(avctx->width)
-    off += snprintf(dst + off, dstlen - off,
-		    ", %dx%d", avctx->width, avctx->height);
+    APPEND_METADATA(", %dx%d", avctx->width, avctx->height);
 
   if(avctx->hwaccel != NULL)
-    off += snprintf(dst + off, dstlen - off, " (%s)",
-                    avctx->hwaccel->name);
+    APPEND_METADATA(" (%s)", avctx->hwaccel->name);
+
+#undef APPEND_METADATA
 }
 
 /**
@@ -730,4 +740,3 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   }
 
 }
-

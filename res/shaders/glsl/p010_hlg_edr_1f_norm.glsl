@@ -39,6 +39,20 @@ vec3 linear_to_srgb(vec3 x)
   return mix(lo, hi, step(vec3(0.0031308), x));
 }
 
+vec3 map_hlg_to_display(vec3 rgb)
+{
+  float luminance = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+  float display_peak = max(1.0, u_edr_headroom);
+  const float source_peak = 10.0;
+  float knee = min(1.0, display_peak * 0.75);
+  if(luminance <= knee || source_peak <= display_peak)
+    return rgb;
+  float t = clamp((luminance-knee) / max(source_peak-knee, 0.001), 0.0, 1.0);
+  float mapped = knee + (display_peak-knee) *
+    (1.0-exp(-3.0*t)) / (1.0-exp(-3.0));
+  return rgb * (mapped / max(luminance, 0.0001));
+}
+
 void main()
 {
   float y = texture2DRect(u_t0, f_tex0).r;
@@ -46,6 +60,6 @@ void main()
   vec3 hlg = max(bt2020_ycbcr_to_rgb(y, uv), vec3(0.0));
   vec3 linear2020 = pow(hlg_inverse_oetf(hlg), vec3(1.2)) * 4.0;
   vec3 linear709 = max(bt2020_to_bt709(linear2020), vec3(0.0));
-  vec3 edr = linear_to_srgb(linear709);
+  vec3 edr = linear_to_srgb(map_hlg_to_display(linear709));
   gl_FragColor = vec4(min(edr, vec3(u_edr_headroom)), u_color.a);
 }

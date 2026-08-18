@@ -1379,9 +1379,8 @@ upgrade_init(void)
   (void)install; /* Retain the shared updater code without invoking it. */
   artifact_type = "bin";
 #if TARGET_OS_IPHONE
-  // iOS displays the M7 master changelog but never offers in-app updates.
-  // Reuse the macOS feed because M7 does not publish a separate iOS manifest.
-  archname = "osx";
+  // iOS has a release-notes-only manifest and never offers in-app updates.
+  archname = "ios";
   release_notes_only = 1;
 #elif TARGET_OS_OSX && defined(__arm64__)
   archname = "osx-arm";

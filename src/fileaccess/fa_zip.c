@@ -250,7 +250,7 @@ zip_archive_load(zip_archive_t *za)
   char *buf, *ptr;
   size_t scan_size;
   int64_t scan_off, asize;
-  int i, l;
+  int i;
 
   int64_t cds_off;
   size_t cds_size;
@@ -307,6 +307,12 @@ zip_archive_load(zip_archive_t *za)
   }
 
   free(buf);
+  if(cds_size < sizeof(zip_hdr_file_header_t) ||
+     cds_size > (uint64_t)asize || cds_off > asize) {
+    fa_close(fh);
+    return -1;
+  }
+
   if((buf = malloc(cds_size)) == NULL) {
     fa_close(fh);
     return -1;
@@ -314,7 +320,7 @@ zip_archive_load(zip_archive_t *za)
 
   if(fa_seek(fh, cds_off, SEEK_SET) != cds_off ||
      fa_read(fh, buf, cds_size) != cds_size)
-    memset(buf, 0, cds_off);
+    memset(buf, 0, cds_size);
 
   int64_t displacement = 0;
 
@@ -325,8 +331,15 @@ zip_archive_load(zip_archive_t *za)
 
     int64_t o2 = fs.fs_size - (cds_size + (TRAILER_SCAN_SIZE - i));
 
-    fa_seek(fh, o2, SEEK_SET);
-    if(fa_read(fh, buf, cds_size) != cds_size) {
+    if(o2 < 0 || o2 > fs.fs_size ||
+       (uint64_t)cds_size > (uint64_t)(fs.fs_size - o2)) {
+      free(buf);
+      fa_close(fh);
+      return -1;
+    }
+
+    if(fa_seek(fh, o2, SEEK_SET) != o2 ||
+       fa_read(fh, buf, cds_size) != cds_size) {
       free(buf);
       fa_close(fh);
       return -1;
@@ -348,7 +361,7 @@ zip_archive_load(zip_archive_t *za)
 
 
   ptr = buf;
-  while(cds_size > sizeof(zip_hdr_file_header_t)) {
+  while(cds_size >= sizeof(zip_hdr_file_header_t)) {
 
     fhdr = (zip_hdr_file_header_t *)ptr;
 
@@ -356,17 +369,23 @@ zip_archive_load(zip_archive_t *za)
        fhdr->magic[2] != 1   || fhdr->magic[3] != 2) {
       break;
     }
-    l = ZIPHDR_GET16(fhdr, filename_len);
-    if(l == 0) {
+    const size_t filename_len = ZIPHDR_GET16(fhdr, filename_len);
+    const size_t entry_len = sizeof(zip_hdr_file_header_t) + filename_len +
+      ZIPHDR_GET16(fhdr, extra_len) + ZIPHDR_GET16(fhdr, comment_len);
+
+    if(filename_len == 0 || entry_len > cds_size) {
       break;
     }
 
-    fname = malloc(l + 1);
+    fname = malloc(filename_len + 1);
+    if(fname == NULL)
+      break;
 
-    memcpy(fname, fhdr->filename, l);
-    fname[l] = 0;
+    memcpy(fname, fhdr->filename, filename_len);
+    fname[filename_len] = 0;
 
-    if(fname[l - 1] != '/') {
+    if(fname[filename_len - 1] != '/' &&
+       fname[filename_len - 1] != '\\') {
       /* Not a directory */
       if((zf = zip_archive_find_file(za, za->za_root, fname, 1)) != NULL) {
 	zf->zf_uncompressed_size = ZIPHDR_GET32(fhdr, uncompressed_size);
@@ -379,13 +398,8 @@ zip_archive_load(zip_archive_t *za)
 
     free(fname);
 
-    l = sizeof(zip_hdr_file_header_t) +
-      ZIPHDR_GET16(fhdr, filename_len) +
-      ZIPHDR_GET16(fhdr, extra_len) +
-      ZIPHDR_GET16(fhdr, comment_len);
-
-    cds_size -= l;
-    ptr += l;
+    cds_size -= entry_len;
+    ptr += entry_len;
   }
 
   free(buf);
@@ -487,6 +501,65 @@ zip_archive_find(const char *url, const char **rp)
 
 
 /**
+ * Remove . and .. segments from a ZIP member path.
+ *
+ * The tree walk in zip_archive_find_file() compares each segment against the
+ * names stored in the archive. Without normalization, a parent-relative path
+ * can work while a plugin is unpacked on the native filesystem, then fail
+ * after installation when the same plugin is read from its ZIP archive.
+ *
+ * Returns a malloc'ed copy, or NULL when the path climbs above the archive
+ * root. A trailing separator is preserved because zip_archive_find_file()
+ * interprets it as a directory requirement.
+ */
+static char *
+zip_normalize_member(const char *in)
+{
+  size_t len = strlen(in);
+  char *out = malloc(len + 1);
+  if(out == NULL)
+    return NULL;
+
+  const int trailing_sep = len > 0 &&
+    (in[len - 1] == '/' || in[len - 1] == '\\');
+  const char *s = in;
+  char *w = out;
+
+  while(*s) {
+    const char *seg = s;
+    while(*s != 0 && *s != '/' && *s != '\\')
+      s++;
+    const size_t seglen = s - seg;
+    if(*s)
+      s++;
+
+    if(seglen == 0 || (seglen == 1 && seg[0] == '.'))
+      continue;
+
+    if(seglen == 2 && seg[0] == '.' && seg[1] == '.') {
+      if(w == out) {
+        free(out);
+        return NULL;
+      }
+      w--; /* Remove the separator following the previous segment. */
+      while(w > out && w[-1] != '/')
+        w--;
+      continue;
+    }
+
+    memcpy(w, seg, seglen);
+    w += seglen;
+    *w++ = '/';
+  }
+
+  if(w > out && !trailing_sep)
+    w--;
+  *w = 0;
+  return out;
+}
+
+
+/**
  *
  */
 static zip_file_t *
@@ -498,7 +571,18 @@ zip_file_find(const char *url)
   if(za == NULL)
     return NULL;
 
-  rf = *r ? zip_archive_find_file(za, za->za_root, r, 0) : za->za_root;
+  /* Normalize only the member suffix after zip_archive_find() has selected
+   * the archive. The archive URL belongs to the outer filesystem and must not
+   * be rewritten here. */
+  char *normalized = zip_normalize_member(r);
+  if(normalized == NULL) {
+    zip_archive_unref(za);
+    return NULL;
+  }
+
+  rf = *normalized ?
+    zip_archive_find_file(za, za->za_root, normalized, 0) : za->za_root;
+  free(normalized);
 
   if(rf == NULL)
     zip_archive_unref(za);

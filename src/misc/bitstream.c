@@ -82,7 +82,10 @@ read_golomb_ue(bitstream_t *bs)
     b = read_bits1(bs);
   }
 
-  return (1 << lzb) - 1 + read_bits(bs, lzb);
+  if(lzb < 0 || lzb >= 32)
+    return 0;
+
+  return (1U << lzb) - 1 + read_bits(bs, lzb);
 }
 
 

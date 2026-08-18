@@ -56,7 +56,7 @@ typedef struct jpegpriv {
 static int
 parse_sof(jpeginfo_t *ji, const uint8_t *buf, size_t len, int flags)
 {
-  if(len < 5)
+  if(len < 6)
     return -1;
 
   ji->ji_height = buf[1] << 8 | buf[2];
@@ -77,6 +77,9 @@ jpeg_time(const char *d)
 {
   struct tm tm = {0};
   char dummy;
+
+  if(d == NULL)
+    return 0;
 
   if(sscanf(d, "%d%c%d%c%d %d:%d:%d",
 	    &tm.tm_year, &dummy, &tm.tm_mon, &dummy, &tm.tm_mday,
@@ -102,7 +105,7 @@ static int
 parse_app1(jpeginfo_t *ji, const uint8_t *buf, size_t len, int flags)
 {
   int bigendian;
-  int ifdbase;
+  uint32_t ifdbase;
   int ifd = 0;
 
 
@@ -148,13 +151,14 @@ parse_app1(jpeginfo_t *ji, const uint8_t *buf, size_t len, int flags)
   while(ifdbase) {
     //    printf("  IDF Offset = %d\n", ifdbase);
 
-    if(len < ifdbase + 2)
+    if(ifdbase > len || len - ifdbase < 2)
       return -1;
 
     int i, entries = EXIF16(ifdbase);
     //    printf("  %d entries\n", entries);
 
-    if(len < ifdbase + 2 + entries * 12 + 4)
+    const size_t table_size = 2 + (size_t)entries * 12 + 4;
+    if(table_size > len - ifdbase)
       return -1;
 
     for(i = 0; i < entries; i++) {
@@ -227,12 +231,13 @@ parse_app1(jpeginfo_t *ji, const uint8_t *buf, size_t len, int flags)
     }
 
     ifd++;
-    ifdbase = EXIF32(ifdbase + 2 + entries * 12);
+    ifdbase = EXIF32(ifdbase + 2 + (size_t)entries * 12);
   }
 
   if(flags & JPEG_INFO_THUMBNAIL && 
      thumbnail_jpeg_offset != -1 && thumbnail_jpeg_size != -1 &&
-     thumbnail_jpeg_offset + thumbnail_jpeg_size <= len) {
+     (size_t)thumbnail_jpeg_offset <= len &&
+     (size_t)thumbnail_jpeg_size <= len - (size_t)thumbnail_jpeg_offset) {
 
     //    printf("  Thumbnail @ %d, %d bytes\n", thumbnail_jpeg_offset, thumbnail_jpeg_size);
     ji->ji_thumbnail = image_coded_create_from_data(buf + thumbnail_jpeg_offset,
@@ -253,12 +258,18 @@ jpeg_read(jpegpriv_t *jp, void *buf, int64_t offset, int size)
 {
   int r;
 
+  if(offset < 0 || size < 0 || offset > INT64_MAX - size)
+    return -1;
+
   if(jp->jp_readbuf != NULL &&  offset >= jp->jp_readbuf_offset && 
      offset + size <= jp->jp_readbuf_end) {
     memcpy(buf, &jp->jp_readbuf[offset - jp->jp_readbuf_offset], size);
   } else {
     r = size + 1024;
-    jp->jp_readbuf = realloc(jp->jp_readbuf, r);
+    uint8_t *newbuf = realloc(jp->jp_readbuf, r);
+    if(newbuf == NULL)
+      return -1;
+    jp->jp_readbuf = newbuf;
     r = jp->jp_reader(jp->jp_readhandle, jp->jp_readbuf, offset, r);
 
     if(r < size)
@@ -310,6 +321,10 @@ jpeg_info(jpeginfo_t *ji, jpegreader_t *reader, void *handle, int flags,
     len -= 4;
     buf += 4;
     offset += 4;
+    if(mlen < 2) {
+      snprintf(errbuf, errlen, "Invalid JPEG section length");
+      break;
+    }
     mlen -= 2;
 
     jip = NULL;

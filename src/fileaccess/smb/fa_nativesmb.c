@@ -1313,6 +1313,10 @@ smb_tree_connect_andX(cifs_connection_t *cc, const char *share,
 
       if(r == -1) {
 	/* Rejected */
+	if(ct == NULL) {
+	  snprintf(errbuf, errlen, "Authentication rejected by user");
+	  return NULL;
+	}
 	snprintf(ct->ct_errbuf, sizeof(ct->ct_errbuf),
 		 "Authentication rejected by user");
 	ct->ct_status = CT_ERROR;
@@ -2779,7 +2783,12 @@ smb_NetServerEnum2(cifs_tree_t *ct, char *errbuf, size_t errlen)
 {
   cifs_connection_t *cc = ct->ct_cc;
   const char *domain = cc->cc_primary_domain ?: "WORKGROUP";
-  int dlen = strlen(domain) + 1;
+  size_t domain_len = strlen(domain);
+  if(domain_len > 255) {
+    snprintf(errbuf, errlen, "SMB domain name is too long");
+    return NULL;
+  }
+  int dlen = domain_len + 1;
 
   int tlen = sizeof(SMB_enum_servers_req_t) + dlen;
   SMB_enum_servers_req_t *req = alloca(tlen);

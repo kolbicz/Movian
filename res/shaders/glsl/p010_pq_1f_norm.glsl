@@ -3,6 +3,7 @@
 uniform sampler2DRect u_t0;
 uniform sampler2DRect u_t1;
 uniform vec4 u_color;
+uniform float u_hdr_peak_luminance;
 varying vec2 f_tex0;
 
 vec3 bt2020_ycbcr_to_rgb(float y, vec2 uv)
@@ -33,10 +34,16 @@ vec3 bt2020_to_bt709(vec3 c)
               -0.0182*c.r - 0.1006*c.g + 1.1187*c.b);
 }
 
-vec3 aces_sdr(vec3 x)
+vec3 map_hdr_to_sdr(vec3 x)
 {
-  return clamp((x * (2.51*x + 0.03)) /
-               (x * (2.43*x + 0.59) + 0.14), 0.0, 1.0);
+  float luminance = dot(x, vec3(0.2126, 0.7152, 0.0722));
+  float source_peak = max(1.0, u_hdr_peak_luminance / 100.0);
+  const float knee = 0.75;
+  if(luminance <= knee || source_peak <= 1.0)
+    return clamp(x, 0.0, 1.0);
+  float t = clamp((luminance-knee) / max(source_peak-knee, 0.001), 0.0, 1.0);
+  float mapped = knee + (1.0-knee) * (1.0-exp(-3.0*t)) / (1.0-exp(-3.0));
+  return clamp(x * (mapped / max(luminance, 0.0001)), 0.0, 1.0);
 }
 
 vec3 linear_to_srgb(vec3 x)
@@ -53,5 +60,5 @@ void main()
   vec3 pq = max(bt2020_ycbcr_to_rgb(y, uv), vec3(0.0));
   vec3 linear2020 = pq_eotf(pq) * 100.0; // 10,000-nit PQ to 100-nit SDR units
   vec3 linear709 = max(bt2020_to_bt709(linear2020), vec3(0.0));
-  gl_FragColor = vec4(linear_to_srgb(aces_sdr(linear709)), u_color.a);
+  gl_FragColor = vec4(linear_to_srgb(map_hdr_to_sdr(linear709)), u_color.a);
 }

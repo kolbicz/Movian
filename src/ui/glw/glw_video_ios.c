@@ -48,6 +48,7 @@ typedef struct gvv_aux {
   int gvv_native_epoch_valid;
   int gvv_decoder_epoch;
   int gvv_decoder_epoch_valid;
+  int gvv_output_reported;
 } gvv_aux_t;
 
 
@@ -62,7 +63,8 @@ extern CVEAGLContext ios_get_gles_context(glw_root_t *gr);
 extern CVPixelBufferRef ios_metal_convert_p010(CVPixelBufferRef source,
                                                int transfer, float hdr_peak);
 extern int ios_native_p010_available(glw_root_t *gr);
-extern int ios_native_p010_present(CVPixelBufferRef image);
+extern int ios_native_p010_present(CVPixelBufferRef image, int transfer,
+                                   float hdr_peak);
 extern void ios_native_p010_flush(void);
 
 /**
@@ -405,6 +407,45 @@ gvv_render(glw_video_t *gv, glw_rctx_t *rc)
   
   if(sa == NULL)
     return;
+
+  gvv_aux_t *gvv = gv->gv_aux;
+  const int hdr = sa->gvs_format == AVCOL_TRC_SMPTE2084 ||
+                  sa->gvs_format == AVCOL_TRC_ARIB_STD_B67;
+  if(hdr && gvv != NULL) {
+    if(!gvv->gvv_native_enabled)
+      gvv->gvv_native_enabled = ios_native_p010_available(gv->w.glw_root);
+    if(gvv->gvv_native_enabled) {
+      if(!gvv->gvv_native_epoch_valid ||
+         gvv->gvv_native_epoch != sa->gvs_epoch) {
+        ios_native_p010_flush();
+        gvv->gvv_native_epoch = sa->gvs_epoch;
+        gvv->gvv_native_epoch_valid = 1;
+      }
+      if(sa->gvs_uploaded == 3)
+        return;
+      const int native_result = sa->gvs_opaque != NULL ?
+        ios_native_p010_present(sa->gvs_opaque, sa->gvs_format,
+                                sa->gvs_hdr_peak_luminance) : -1;
+      if(native_result > 0) {
+        sa->gvs_uploaded = 3;
+        if(!gvv->gvv_output_reported) {
+          gvv->gvv_output_reported = 1;
+          TRACE(TRACE_INFO, "GLW",
+                "NV12 HDR IOSurface presented directly by AVSampleBufferDisplayLayer");
+        }
+        return;
+      }
+      if(native_result == 0)
+        return;
+      gvv->gvv_native_enabled = 0;
+      ios_native_p010_flush();
+      if(!gvv->gvv_native_failed_reported) {
+        gvv->gvv_native_failed_reported = 1;
+        TRACE(TRACE_INFO, "GLW",
+              "Native NV12 HDR output unavailable; using SDR compatibility renderer");
+      }
+    }
+  }
   
   gv->gv_width  = sa->gvs_width[0];
   gv->gv_height = sa->gvs_height[0];
@@ -446,14 +487,24 @@ gvv_deliver(const frame_info_t *fi, glw_video_t *gv, glw_video_engine_t *gve)
   
   CFRetain(img);
   s->gvs_opaque = img;
+  s->gvs_uploaded = 0;
   s->gvs_width[0] = fi->fi_width;
   s->gvs_height[0] = fi->fi_height;
   s->gvs_width[1] = fi->fi_width >> 1;
   s->gvs_height[1] = fi->fi_height >> 1;
   s->gvs_width[2] = fi->fi_width >> 1;
   s->gvs_height[2] = fi->fi_height >> 1;
+  s->gvs_format = fi->fi_color_transfer;
+  s->gvs_hdr_peak_luminance = fi->fi_hdr_peak_luminance;
   glw_video_put_surface(gv, s, fi->fi_pts, fi->fi_epoch, fi->fi_duration, 0, 0);
   return 0;
+}
+
+static void
+cvpb_reset(glw_video_t *gv)
+{
+  ios_native_p010_flush();
+  gvv_reset(gv);
 }
 
 
@@ -465,7 +516,7 @@ static glw_video_engine_t glw_video_cvpb = {
   .gve_init_on_ui_thread = 1,
   .gve_newframe = gvv_newframe,
   .gve_render   = gvv_render,
-  .gve_reset    = gvv_reset,
+  .gve_reset    = cvpb_reset,
   .gve_init     = gvv_init,
   .gve_deliver  = gvv_deliver,
 };
@@ -640,7 +691,8 @@ p010_ios_render(glw_video_t *gv, glw_rctx_t *rc)
     if(sa->gvs_uploaded == 3)
       return;
     int native_result = sa->gvs_opaque != NULL ?
-      ios_native_p010_present(sa->gvs_opaque) : -1;
+      ios_native_p010_present(sa->gvs_opaque, sa->gvs_format,
+                              sa->gvs_hdr_peak_luminance) : -1;
     if(native_result > 0) {
       sa->gvs_uploaded = 3;
       static int logged;
@@ -658,13 +710,29 @@ p010_ios_render(glw_video_t *gv, glw_rctx_t *rc)
     ios_native_p010_flush();
     if(!gvv->gvv_native_failed_reported) {
       gvv->gvv_native_failed_reported = 1;
-      TRACE(TRACE_ERROR, "GLW",
-            "Native P010 display layer failed; switching session to compatibility renderer");
+      if(native_result == -2)
+        TRACE(TRACE_INFO, "GLW",
+              "Native HDR output unavailable on this display; using SDR compatibility renderer");
+      else
+        TRACE(TRACE_ERROR, "GLW",
+              "Native P010 display layer failed; switching session to compatibility renderer");
     }
   }
 
   if(p010_ios_upload(gv, sa))
     return;
+
+  if(!gvv->gvv_output_reported) {
+    gvv->gvv_output_reported = 1;
+    TRACE(TRACE_INFO, "HDR",
+          "iOS first video frame presented: output=%s, transfer=%d, peak=%.0f nits",
+          sa->gvs_format == AVCOL_TRC_SMPTE2084 ||
+          sa->gvs_format == AVCOL_TRC_ARIB_STD_B67 ?
+            "SDR tone-mapped" : "SDR",
+          sa->gvs_format,
+          sa->gvs_hdr_peak_luminance >= 100.0f ?
+            sa->gvs_hdr_peak_luminance : 1000.0f);
+  }
 
   gv->gv_width = sa->gvs_width[0];
   gv->gv_height = sa->gvs_height[0];
@@ -717,10 +785,19 @@ p010_ios_deliver(const frame_info_t *fi, glw_video_t *gv,
   if(!gvv->gvv_decoder_epoch_valid ||
      gvv->gvv_decoder_epoch != fi->fi_epoch) {
     glw_video_surface_t *stale;
+    glw_video_surface_t *next;
     unsigned int flushed = 0;
-    while((stale = TAILQ_FIRST(&gv->gv_decoded_queue)) != NULL) {
-      surface_release(gv, stale, &gv->gv_decoded_queue);
-      flushed++;
+    for(stale = TAILQ_FIRST(&gv->gv_decoded_queue); stale != NULL;
+        stale = next) {
+      next = TAILQ_NEXT(stale, gvs_link);
+      /* gv_sa/gv_sb may still reside on the decoded queue while the UI is
+       * presenting them.  Their ownership ends in glw_video_newframe_blend;
+       * releasing either here trips surface_release()'s invariant and can
+       * hand a displayed IOSurface back to the decoder. */
+      if(stale != gv->gv_sa && stale != gv->gv_sb) {
+        surface_release(gv, stale, &gv->gv_decoded_queue);
+        flushed++;
+      }
     }
     gvv->gvv_decoder_epoch = fi->fi_epoch;
     gvv->gvv_decoder_epoch_valid = 1;

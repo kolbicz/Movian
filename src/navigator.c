@@ -304,10 +304,13 @@ nav_create(void)
 
 	TRACE(TRACE_TUN, "navigator", "Auto-start plugin: %s", gconf.plugin_autostart);
 	char plugin_autostart_path[64];
-	if(!strstr(gconf.plugin_autostart, ":"))
-		sprintf(plugin_autostart_path, "%s:start", gconf.plugin_autostart);
-	else
-		sprintf(plugin_autostart_path, "%s", gconf.plugin_autostart);
+	int pathlen = snprintf(plugin_autostart_path, sizeof(plugin_autostart_path),
+	                       strstr(gconf.plugin_autostart, ":") ? "%s" : "%s:start",
+	                       gconf.plugin_autostart);
+	if(pathlen < 0 || (size_t)pathlen >= sizeof(plugin_autostart_path)) {
+	  TRACE(TRACE_ERROR, "navigator", "Plugin auto-start URL is too long");
+	  return nav;
+	}
 
     event_t *ep = event_create_openurl(
                                       .url  = plugin_autostart_path,

@@ -278,6 +278,9 @@ audio_set_passthru_metadata(audio_decoder_t *ad, const AVCodec *codec,
 static void
 audio_setup_spdif_muxer(audio_decoder_t *ad, AVCodec *codec)
 {
+  if(codec == NULL)
+    return;
+
   AVOutputFormat *ofmt = av_guess_format("spdif", NULL, NULL);
   if(ofmt == NULL)
     return;
@@ -285,12 +288,23 @@ audio_setup_spdif_muxer(audio_decoder_t *ad, AVCodec *codec)
   const int mux_buffer_size = 16384;
   assert(ad->ad_mux_buffer == NULL);
   ad->ad_mux_buffer = malloc(mux_buffer_size);
+  if(ad->ad_mux_buffer == NULL)
+    return;
 
   AVFormatContext *fctx = avformat_alloc_context();
+  if(fctx == NULL) {
+    free(ad->ad_mux_buffer);
+    ad->ad_mux_buffer = NULL;
+    return;
+  }
   fctx->oformat = ofmt;
   fctx->pb = avio_alloc_context(ad->ad_mux_buffer, mux_buffer_size,
 				1, ad, NULL, spdif_mux_write, NULL);
+  if(fctx->pb == NULL)
+    goto bad;
   AVStream *s = avformat_new_stream(fctx, codec);
+  if(s == NULL)
+    goto bad;
   s->codec->sample_rate = 48000; // ???
   if(avcodec_open2(s->codec, codec, NULL)) {
 
@@ -416,6 +430,13 @@ audio_process_audio(audio_decoder_t *ad, media_buf_t *mb)
         ac->ac_get_mode(ad, mc->codec_id,
                         ctx ? ctx->extradata : NULL,
                         ctx ? ctx->extradata_size : 0) : AUDIO_MODE_PCM;
+
+      if(codec == NULL && ad->ad_mode != AUDIO_MODE_PCM) {
+        TRACE(TRACE_ERROR, "audio",
+              "Pass-through requested for unavailable codec 0x%x",
+              mc->codec_id);
+        ad->ad_mode = AUDIO_MODE_PCM;
+      }
 
       if(ad->ad_mode == AUDIO_MODE_SPDIF) {
         audio_setup_spdif_muxer(ad, codec);

@@ -791,9 +791,14 @@ utf8_from_bytes(const void *str, int len, const charset_t *cs,
 	if(cs != NULL)
 	  snprintf(how, howlen, "Decoded as %s (detected language: %s)",
 		   name, lang ?: "<Unknown>");
-	else
+	else {
 	  TRACE(TRACE_ERROR, "STR", "Language %s not found internally",
 		name);
+	  cs = &charsets[0];
+	  snprintf(how, howlen,
+	           "Unsupported detected encoding %s, decoding as %s",
+	           name, cs->title);
+	}
       } else {
         cs = &charsets[0];
         snprintf(how, howlen,
