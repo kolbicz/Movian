@@ -261,23 +261,23 @@ upnp_init(int http_server_port)
 
   upnp_avtransport_init();
 
-  http_path_add("/upnp/description.xml", NULL, send_dev_description, 1);
-  http_path_add("/upnp/AVTransport/scpd.xml", NULL, send_avt_scpd, 1);
-  http_path_add("/upnp/ConnectionManager/scpd.xml", NULL, send_cm_scpd, 1);
-  http_path_add("/upnp/RenderingControl/scpd.xml", NULL, send_rc_scpd, 1);
+  http_path_add_service("/upnp/description.xml", NULL, send_dev_description, 1);
+  http_path_add_service("/upnp/AVTransport/scpd.xml", NULL, send_avt_scpd, 1);
+  http_path_add_service("/upnp/ConnectionManager/scpd.xml", NULL, send_cm_scpd, 1);
+  http_path_add_service("/upnp/RenderingControl/scpd.xml", NULL, send_rc_scpd, 1);
 
-  http_path_add("/upnp/ConnectionManager/control",
+  http_path_add_service("/upnp/ConnectionManager/control",
 		&upnp_ConnectionManager_2, upnp_control, 1);
-  http_path_add("/upnp/RenderingControl/control",
+  http_path_add_service("/upnp/RenderingControl/control",
 		&upnp_RenderingControl_2, upnp_control, 1);
-  http_path_add("/upnp/AVTransport/control",
+  http_path_add_service("/upnp/AVTransport/control",
 		&upnp_AVTransport_2, upnp_control, 1);
 
-  http_path_add("/upnp/ConnectionManager/subscribe",
+  http_path_add_service("/upnp/ConnectionManager/subscribe",
 		&upnp_ConnectionManager_2, upnp_subscribe, 1);
-  http_path_add("/upnp/RenderingControl/subscribe",
+  http_path_add_service("/upnp/RenderingControl/subscribe",
 		&upnp_RenderingControl_2, upnp_subscribe, 1);
-  http_path_add("/upnp/AVTransport/subscribe",
+  http_path_add_service("/upnp/AVTransport/subscribe",
 		&upnp_AVTransport_2, upnp_subscribe, 1);
 
 

@@ -41,6 +41,10 @@ struct http_path *http_path_add(const char *path, void *opaque,
                                 http_callback_t *callback,
                                 int leaf);
 
+struct http_path *http_path_add_service(const char *path, void *opaque,
+                                        http_callback_t *callback,
+                                        int leaf);
+
 
 typedef void (websocket_callback_removed_t)(void *path_opaque);
 
@@ -62,6 +66,13 @@ struct http_path *http_add_websocket(const char *path,
                                      websocket_callback_data_t *data,
                                      websocket_callback_disconnected_t *fini,
                                      websocket_callback_removed_t *removed);
+
+struct http_path *http_add_service_websocket(const char *path,
+                                             void *opaque,
+                                             websocket_callback_connected_t *init,
+                                             websocket_callback_data_t *data,
+                                             websocket_callback_disconnected_t *fini,
+                                             websocket_callback_removed_t *removed);
 
 void websocket_send(http_connection_t *hc, int opcode, const void *data,
 		    size_t len);
@@ -95,3 +106,5 @@ void http_set_response_hdr(http_connection_t *hc, const char *name,
 			   const char *value);
 
 void http_req_args_fill_htsmsg(http_connection_t* hc, htsmsg_t* msg);
+
+void http_server_set_port(const char *value);

@@ -92,7 +92,6 @@ typedef struct vtb_decoder {
   int vtbd_decode_error_notified;
   int vtbd_hdr10plus_reported;
   int vtbd_dv5_transfer_assumed_reported;
-  float vtbd_reported_hdr_peak_luminance;
 } vtb_decoder_t;
 
 static uint16_t
@@ -161,7 +160,6 @@ vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
         if(payload_size > rbsp_size - off)
           break;
 
-        int metadata_changed = 0;
         if(payload_type == 137 && payload_size >= 24) {
           const float mastering_peak =
             read_be32(rbsp + off + 16) / 10000.0f;
@@ -169,14 +167,12 @@ vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
              fabsf(vtbd->vtbd_sei_mastering_peak_luminance -
                    mastering_peak) >= 1.0f) {
             vtbd->vtbd_sei_mastering_peak_luminance = mastering_peak;
-            metadata_changed = 1;
           }
         } else if(payload_type == 144 && payload_size >= 4) {
           const unsigned max_cll = read_be16(rbsp + off);
           if(max_cll >= 100 && max_cll <= 10000 &&
              vtbd->vtbd_sei_max_cll != max_cll) {
             vtbd->vtbd_sei_max_cll = max_cll;
-            metadata_changed = 1;
           }
         } else if(payload_type == 4 && payload_size >= 7 &&
                   rbsp[off] == 0xb5 &&
@@ -195,16 +191,8 @@ vtb_parse_hevc_hdr_sei(vtb_decoder_t *vtbd, const uint8_t *data, size_t size)
 
         const float peak = vtbd->vtbd_sei_max_cll != 0 ?
           vtbd->vtbd_sei_max_cll : vtbd->vtbd_sei_mastering_peak_luminance;
-        if(peak > 0) {
+        if(peak > 0)
           vtbd->vtbd_hdr_peak_luminance = peak;
-          if(metadata_changed) {
-            TRACE(TRACE_INFO, "VTB",
-                  "HEVC SEI HDR metadata: mastering peak=%.0f nits, MaxCLL=%u, effective peak=%.0f nits",
-                  vtbd->vtbd_sei_mastering_peak_luminance,
-                  vtbd->vtbd_sei_max_cll, peak);
-            vtbd->vtbd_reported_hdr_peak_luminance = peak;
-          }
-        }
         off += payload_size;
       }
       free(rbsp);
@@ -243,12 +231,6 @@ vtb_update_hdr_peak_from_pixel_buffer(vtb_decoder_t *vtbd,
   if(peak < 100)
     peak = 1000;
   vtbd->vtbd_hdr_peak_luminance = peak;
-  if(fabsf(vtbd->vtbd_reported_hdr_peak_luminance - peak) >= 1.0f) {
-    TRACE(TRACE_INFO, "VTB",
-          "Per-frame HDR metadata: mastering peak=%.0f nits, MaxCLL=%u, effective peak=%.0f nits",
-          mastering_peak, max_cll, peak);
-    vtbd->vtbd_reported_hdr_peak_luminance = peak;
-  }
 }
 
 static void dict_set_int32(CFMutableDictionaryRef dict, CFStringRef key,
@@ -1234,8 +1216,6 @@ hevc_inband_decode(media_codec_t *mc, video_decoder_t *vd,
     size_t hvcc_size;
     if(hevc_complete_hvcc(&hic->params, mb->mb_data, mb->mb_size,
                           &hic->hvcc, &hvcc_size)) {
-      TRACE(TRACE_DEBUG, "VTB",
-            "Waiting for in-band HEVC VPS/SPS/PPS before creating decoder");
       return;
     }
     hic->params.extradata = hic->hvcc;

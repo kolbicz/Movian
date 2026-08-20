@@ -48,7 +48,6 @@ typedef struct gvv_aux {
   int gvv_native_epoch_valid;
   int gvv_decoder_epoch;
   int gvv_decoder_epoch_valid;
-  int gvv_output_reported;
 } gvv_aux_t;
 
 
@@ -428,11 +427,6 @@ gvv_render(glw_video_t *gv, glw_rctx_t *rc)
                                 sa->gvs_hdr_peak_luminance) : -1;
       if(native_result > 0) {
         sa->gvs_uploaded = 3;
-        if(!gvv->gvv_output_reported) {
-          gvv->gvv_output_reported = 1;
-          TRACE(TRACE_INFO, "GLW",
-                "NV12 HDR IOSurface presented directly by AVSampleBufferDisplayLayer");
-        }
         return;
       }
       if(native_result == 0)
@@ -721,18 +715,6 @@ p010_ios_render(glw_video_t *gv, glw_rctx_t *rc)
 
   if(p010_ios_upload(gv, sa))
     return;
-
-  if(!gvv->gvv_output_reported) {
-    gvv->gvv_output_reported = 1;
-    TRACE(TRACE_INFO, "HDR",
-          "iOS first video frame presented: output=%s, transfer=%d, peak=%.0f nits",
-          sa->gvs_format == AVCOL_TRC_SMPTE2084 ||
-          sa->gvs_format == AVCOL_TRC_ARIB_STD_B67 ?
-            "SDR tone-mapped" : "SDR",
-          sa->gvs_format,
-          sa->gvs_hdr_peak_luminance >= 100.0f ?
-            sa->gvs_hdr_peak_luminance : 1000.0f);
-  }
 
   gv->gv_width = sa->gvs_width[0];
   gv->gv_height = sa->gvs_height[0];

@@ -22,6 +22,8 @@
 
 #define STPP_VERSION 3
 
+void stpp_set_network_access(int enabled);
+
 // These things are sent over the wire so no changes here please
 
 #define STPP_CMD_HELLO       0

@@ -98,9 +98,8 @@ airplay_rate(http_connection_t *hc, const char *remain, void *opaque,
 void
 airplay_init(void)
 {
-  http_path_add("/reverse", NULL, airplay_reverse, 1);
-  http_path_add("/scrub", NULL, airplay_scrub, 1);
-  http_path_add("/play", NULL, airplay_play, 1);
-  http_path_add("/rate", NULL, airplay_rate, 1);
+  http_path_add_service("/reverse", NULL, airplay_reverse, 1);
+  http_path_add_service("/scrub", NULL, airplay_scrub, 1);
+  http_path_add_service("/play", NULL, airplay_play, 1);
+  http_path_add_service("/rate", NULL, airplay_rate, 1);
 }
-

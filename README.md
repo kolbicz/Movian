@@ -1,8 +1,8 @@
 # Movian M7 for Apple platforms
 
-This branch contains Movian **7.0.273** for:
+This branch contains Movian **7.0.273.1** for:
 
-- iOS and iPadOS 16 or newer (`arm64`), distributed as an unsigned IPA for
+- iOS and iPadOS 15 or newer (`arm64`), distributed as an unsigned IPA for
   TrollStore/sideloading and as rootless and RootHide jailbreak packages. See
   the [iOS installation guide](docs/ios-installation.md).
 - Apple Silicon macOS 15 or newer, distributed as a Developer ID signed,
@@ -32,7 +32,7 @@ submodule or contain old overlaid source snapshots.
 ```sh
 ./Autobuild/ios.sh
 ./Autobuild/ios-deb.sh
-./configure.osx --build=m7osx --version=7.0.273
+./configure.osx --build=m7osx --version=7.0.273.1
 make -j8 dist
 ./Autobuild/macos-release.sh --no-build
 ```

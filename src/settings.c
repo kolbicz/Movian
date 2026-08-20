@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <assert.h>
+#include <sys/stat.h>
 
 #include "main.h"
 #include "settings.h"
@@ -37,6 +38,8 @@
 #include "db/kvstore.h"
 #include "misc/minmax.h"
 #include "usage.h"
+#include "api/stpp.h"
+#include "networking/http_server.h"
 
 #if ENABLE_NETLOG
 #include <netinet/in.h>
@@ -278,7 +281,7 @@ settings_add_int(setting_t *s, int delta)
 /**
  *
  */
-void
+prop_t *
 settings_create_info(prop_t *parent, const char *image,
 		     prop_t *description)
 {
@@ -286,6 +289,7 @@ settings_create_info(prop_t *parent, const char *image,
   prop_set(r, "description", PROP_SET_LINK, description);
   if(image != NULL)
     prop_set(r, "image", PROP_SET_STRING, image);
+  return r;
 }
 
 
@@ -918,6 +922,10 @@ setting_create(int type, prop_t *model, int flags, ...)
       initial_int = INT32_MIN;
       break;
 
+    case SETTING_TAG_VALUE_SUFFIX:
+      prop_link(va_arg(ap, prop_t *), prop_create(s->s_root, "valueSuffix"));
+      break;
+
     case 0:
       break;
 
@@ -1335,6 +1343,59 @@ set_system_name(void *opaque, const char *str)
 
 }
 
+#if ENABLE_HTTPSERVER
+static int
+network_access_default(void)
+{
+  char path[1024];
+  struct stat st;
+
+  /* A pre-7.0.273.1 installation has no network_access setting because all
+   * listeners were exposed unconditionally.  Its kvstore database is created
+   * after settings_init(), so its presence here reliably distinguishes an
+   * already-used installation from a genuinely fresh first launch. */
+  if(gconf.persistent_path != NULL &&
+     snprintf(path, sizeof(path), "%s/kvstore/kvstore.db",
+              gconf.persistent_path) < (int)sizeof(path) &&
+     !stat(path, &st))
+    return 1;
+  return 0;
+}
+
+static void
+set_http_interface(void *opaque, int enabled)
+{
+  gconf.enable_http_interface = enabled;
+  TRACE(TRACE_INFO, "HTTPSERVER", "Web interface and diagnostics %s",
+        enabled ? "enabled" : "disabled");
+}
+
+static void
+set_network_access(void *opaque, const char *value)
+{
+  const int enabled = atoi(value);
+  gconf.enable_network_access = enabled;
+
+  prop_setv(prop_get_global(), "network", "networkAccess", NULL,
+            PROP_SET_INT, enabled);
+  if(enabled) {
+    prop_setv(prop_get_global(), "network", "serviceSuffix", NULL,
+              PROP_SET_STRING, "");
+    prop_setv(prop_get_global(), "network", "remoteOffText", NULL,
+              PROP_SET_VOID);
+  } else {
+    prop_setv(prop_get_global(), "network", "serviceSuffix", NULL,
+              PROP_SET_RSTRING, _(" (localhost only)"));
+    prop_setv(prop_get_global(), "network", "remoteOffText", NULL,
+              PROP_SET_RSTRING, _("Not available with Localhost only"));
+  }
+  stpp_set_network_access(enabled);
+  TRACE(TRACE_INFO, "Network", "Network access set to %s (restart required)",
+        enabled ? "all interfaces" : "localhost only");
+
+}
+#endif
+
 
 /**
  *
@@ -1420,28 +1481,68 @@ settings_init(void)
                  SETTING_STORE("netinfo", "sysname"),
                  NULL);
 
-  /* Keep the existing high-throughput SMB2 behavior as the default. */
-  gconf.enable_smb_large_read = 1;
-  setting_create(SETTING_BOOL, gconf.settings_network, SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("SMB Large Buffer")),
-                 SETTING_VALUE(1),
-                 SETTING_WRITE_BOOL(&gconf.enable_smb_large_read),
-                 SETTING_STORE("netinfo", "smb_large_read"),
-                 NULL);
+#if ENABLE_HTTPSERVER
+  /* Preserve Test 16 values and migrate older installations, whose services
+   * previously listened on all interfaces. Fresh installs remain localhost
+   * only until the user explicitly opts in. */
+  rstr_t *network_access_value =
+    htsmsg_store_get_str("netinfo", "network_access");
+  if(network_access_value == NULL) {
+    const int legacy_network_access =
+      htsmsg_store_get_int("netinfo", "network_access", -1);
+    if(legacy_network_access != -1) {
+      htsmsg_store_set("netinfo", "network_access", HMF_STR,
+                       legacy_network_access ? "1" : "0");
+      network_access_value = rstr_alloc(legacy_network_access ? "1" : "0");
+    }
+  }
 
-  /* 1 = SMB1, 2 = SMB2, 3 = both. Preserve our enabled SMB2 EAs. */
-  gconf.enable_smb_xattr = 3;
+  const int network_access_default_enabled = network_access_value != NULL ?
+    atoi(rstr_get(network_access_value)) : network_access_default();
+  if(network_access_value == NULL)
+    htsmsg_store_set("netinfo", "network_access", HMF_STR,
+                     network_access_default_enabled ? "1" : "0");
+  rstr_release(network_access_value);
+
   setting_create(SETTING_MULTIOPT, gconf.settings_network,
                  SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("SMB Extended Attributes")),
-                 SETTING_VALUE("3"),
-                 SETTING_OPTION("0", _p("Off")),
-                 SETTING_OPTION("1", _p("SMBv1")),
-                 SETTING_OPTION("2", _p("SMBv2")),
-                 SETTING_OPTION("3", _p("On")),
-                 SETTING_WRITE_INT(&gconf.enable_smb_xattr),
-                 SETTING_STORE("netinfo", "smb_xattr"),
+                 SETTING_TITLE(_p("Network access")),
+                 SETTING_VALUE(network_access_default_enabled ? "1" : "0"),
+                 SETTING_OPTION("0", _p("Localhost only")),
+                 SETTING_OPTION("1", _p("All interfaces")),
+                 SETTING_CALLBACK(set_network_access, NULL),
+                 SETTING_STORE("netinfo", "network_access"),
                  NULL);
+
+  settings_create_info(gconf.settings_network, NULL,
+                       _p("Web interface, FTP and remote control accept connections "
+                          "from other devices only when set to All interfaces. "
+                          "Restart required."));
+
+  settings_create_separator(gconf.settings_network, _p("Web interface & diagnostics"));
+
+  setting_create(SETTING_BOOL, gconf.settings_network,
+                 SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Enable")),
+                 SETTING_VALUE(0),
+                 SETTING_CALLBACK(set_http_interface, NULL),
+                 SETTING_VALUE_SUFFIX(prop_create_multi(prop_get_global(),
+                                                        "network",
+                                                        "serviceSuffix", NULL)),
+                 SETTING_STORE("netinfo", "http_interface"),
+                 NULL);
+
+  setting_create(SETTING_STRING, gconf.settings_network,
+                 SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Port")),
+                 SETTING_VALUE("42000"),
+                 SETTING_CALLBACK(http_server_set_port, NULL),
+                 SETTING_STORE("httpserver", "port"),
+                 NULL);
+
+  settings_create_info(gconf.settings_network, NULL,
+                       _p("Port changes take effect after restart."));
+#endif
 
 
   // Look and feel settings
@@ -1461,6 +1562,42 @@ settings_init(void)
 
 
 }
+
+
+/**
+ * SMB is a client, so keep its controls after the listening services in the
+ * Network settings page.  The latter are registered by the asyncio group.
+ */
+static void
+smb_client_settings_init(void)
+{
+  settings_create_separator(gconf.settings_network, _p("SMB client"));
+
+  /* Keep the existing high-throughput SMB2 behavior as the default. */
+  gconf.enable_smb_large_read = 1;
+  setting_create(SETTING_BOOL, gconf.settings_network, SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Large buffer")),
+                 SETTING_VALUE(1),
+                 SETTING_WRITE_BOOL(&gconf.enable_smb_large_read),
+                 SETTING_STORE("netinfo", "smb_large_read"),
+                 NULL);
+
+  /* 1 = SMB1, 2 = SMB2, 3 = both. Preserve our enabled SMB2 EAs. */
+  gconf.enable_smb_xattr = 3;
+  setting_create(SETTING_MULTIOPT, gconf.settings_network,
+                 SETTINGS_INITIAL_UPDATE,
+                 SETTING_TITLE(_p("Extended attributes")),
+                 SETTING_VALUE("3"),
+                 SETTING_OPTION("0", _p("Off")),
+                 SETTING_OPTION("1", _p("SMBv1")),
+                 SETTING_OPTION("2", _p("SMBv2")),
+                 SETTING_OPTION("3", _p("On")),
+                 SETTING_WRITE_INT(&gconf.enable_smb_xattr),
+                 SETTING_STORE("netinfo", "smb_xattr"),
+                 NULL);
+}
+
+INITME(INIT_GROUP_ASYNCIO, smb_client_settings_init, NULL, 20);
 
 
 

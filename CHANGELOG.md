@@ -1,5 +1,29 @@
 # Changelog
 
+## 7.0.273.1 - 2026-08-20
+
+- Kept the plugin-facing Apple HTTP user agent at `Movian Apple 7.0.273` so
+  plugins remain aligned with the M7 7.0.273 core.
+- Added explicit Localhost only and All interfaces network binding modes.
+  Fresh installations default to localhost; existing installations retain
+  their previously reachable network-service behavior during migration.
+- Added independent controls for the web interface and diagnostics, FTP and
+  Movian remote control, plus configurable web and FTP ports and clear restart
+  behavior for listener changes.
+- Restricted web diagnostics, FTP, remote control, AirPlay, STPP and UPnP to
+  the selected network exposure policy and added concise service-state logs.
+- Added native EDR presentation for 8-bit H.264 video carrying BT.2020 HLG,
+  including the Sony XAVC `C0062.MP4` format, on supported Apple displays.
+- Improved Dolby Vision Profile 5 and Profile 8 handling, HDR10+ metadata,
+  HDR/HLG tone mapping, decoder fallback and unsupported-device reporting.
+- Added support for HEVC files that provide VPS/SPS/PPS in-band with an empty
+  `hvcC` record, improving startup and seeking for affected MP4 files.
+- Hardened ZIP/plugin handling and numerous media, subtitle, torrent, SMB,
+  JSON, JPEG, audio and binary parsing paths against malformed input, leaks,
+  overflows and out-of-bounds access.
+- Removed redundant preview renderer, HDR metadata and per-frame decoder debug
+  messages while retaining concise operational and error diagnostics.
+
 ## 7.0.273 - 2026-08-13
 
 - Added and validated Apple VideoToolbox hardware decoding for H.264, HEVC

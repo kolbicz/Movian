@@ -43,6 +43,14 @@
 
 static int stpp_controller = 1;
 static int stpp_controllee = 1;
+static setting_t *stpp_controllee_setting;
+
+void
+stpp_set_network_access(int enabled)
+{
+  if(!enabled && stpp_controllee_setting != NULL)
+    setting_set(stpp_controllee_setting, SETTING_BOOL, 0);
+}
 
 
 RB_HEAD(stpp_subscription_tree, stpp_subscription);
@@ -1265,7 +1273,8 @@ stpp_fini(http_connection_t *hc, void *opaque)
 static void
 ws_init(void)
 {
-  http_add_websocket("/api/stpp", NULL, stpp_init, stpp_input, stpp_fini, NULL);
+  http_add_service_websocket("/api/stpp", NULL, stpp_init, stpp_input,
+                             stpp_fini, NULL);
 }
 
 
@@ -1722,6 +1731,8 @@ static void
 stpp_set_controllee(void *opaque, int on)
 {
   stpp_controllee = on;
+  TRACE(TRACE_INFO, "STPP", "Movian remote control %s",
+        on ? "enabled" : "disabled");
   stpp_broadcast(1);
 }
 
@@ -1746,15 +1757,25 @@ stpp_discover_init(void)
                  PROP_TAG_COURIER, asyncio_courier,
                  NULL);
 
-  settings_create_separator(gconf.settings_network, _p("Remote control"));
+  settings_create_separator(gconf.settings_network,
+                            _p("Remote control (Movian app)"));
 
-  setting_create(SETTING_BOOL, gconf.settings_network, SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("Allow remote control")),
-                 SETTING_VALUE(1),
-                 SETTING_CALLBACK(stpp_set_controllee, NULL),
-                 SETTING_COURIER(asyncio_courier),
-                 SETTING_STORE("stpp", "enablecontrollee"),
-                 NULL);
+  stpp_controllee_setting =
+    setting_create(SETTING_BOOL, gconf.settings_network,
+                   SETTINGS_INITIAL_UPDATE,
+                   SETTING_TITLE(_p("Enable")),
+                   SETTING_VALUE(0),
+                   SETTING_CALLBACK(stpp_set_controllee, NULL),
+                   SETTING_COURIER(asyncio_courier),
+                   SETTING_PROP_ENABLER(prop_create(prop_create(prop_get_global(),
+                                                                "network"),
+                                                    "networkAccess")),
+                   SETTING_ZERO_TEXT(prop_create_multi(prop_get_global(),
+                                                       "network",
+                                                       "remoteOffText", NULL)),
+                   SETTING_STORE("stpp", "enablecontrollee"),
+                   NULL);
+  stpp_set_network_access(gconf.enable_network_access);
 
 
   asyncio_register_for_network_changes(stpp_netif_update);

@@ -19,6 +19,7 @@
  */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <errno.h>
@@ -42,6 +43,17 @@ static HTS_LWMUTEX_DECL(http_paths_lwmutex);
 
 LIST_HEAD(http_connection_list, http_connection);
 int http_server_port;
+static int http_server_configured_port = 42000;
+
+void
+http_server_set_port(const char *value)
+{
+  const int port = value != NULL && value[0] != 0 ? atoi(value) : 42000;
+  http_server_configured_port = port > 0 && port <= 65535 ? port : 42000;
+  TRACE(TRACE_INFO, "HTTPSERVER",
+        "Web interface port set to %d (restart required)",
+        http_server_configured_port);
+}
 
 /**
  *
@@ -53,6 +65,7 @@ struct http_path {
   http_callback_t *hp_callback;
   int hp_len;
   int hp_mode;
+  int hp_service;
   atomic_t hp_refcount;
 #define HTTP_PATH_MODE_NORMAL    0
 #define HTTP_PATH_MODE_LEAF      1
@@ -187,9 +200,9 @@ hp_cmp(const http_path_t *a, const http_path_t *b)
 /**
  * Add a callback for a given "virtual path" on our HTTP server
  */
-http_path_t *
-http_path_add(const char *path, void *opaque, http_callback_t *callback,
-	      int leaf)
+static http_path_t *
+http_path_add0(const char *path, void *opaque, http_callback_t *callback,
+	       int leaf, int service)
 {
   http_path_t *hp = calloc(1, sizeof(http_path_t));
   atomic_set(&hp->hp_refcount, 1);
@@ -198,23 +211,37 @@ http_path_add(const char *path, void *opaque, http_callback_t *callback,
   hp->hp_opaque = opaque;
   hp->hp_callback = callback;
   hp->hp_mode = !!leaf;
+  hp->hp_service = service;
   hts_lwmutex_lock(&http_paths_lwmutex);
   LIST_INSERT_SORTED(&http_paths, hp, hp_link, hp_cmp, http_path_t);
   hts_lwmutex_unlock(&http_paths_lwmutex);
   return hp;
 }
 
+http_path_t *
+http_path_add(const char *path, void *opaque, http_callback_t *callback,
+	      int leaf)
+{
+  return http_path_add0(path, opaque, callback, leaf, 0);
+}
+
+http_path_t *
+http_path_add_service(const char *path, void *opaque, http_callback_t *callback,
+	              int leaf)
+{
+  return http_path_add0(path, opaque, callback, leaf, 1);
+}
+
 
 /**
  *
  */
-http_path_t *
-http_add_websocket(const char *path,
-                   void *opaque,
-		   websocket_callback_connected_t *co,
-		   websocket_callback_data_t *data,
-		   websocket_callback_disconnected_t *disco,
-                   websocket_callback_removed_t *removed)
+static http_path_t *
+http_add_websocket0(const char *path, void *opaque,
+		    websocket_callback_connected_t *co,
+		    websocket_callback_data_t *data,
+		    websocket_callback_disconnected_t *disco,
+                    websocket_callback_removed_t *removed, int service)
 {
   http_path_t *hp = calloc(1, sizeof(http_path_t));
   atomic_set(&hp->hp_refcount, 1);
@@ -226,10 +253,31 @@ http_add_websocket(const char *path,
   hp->hp_ws_disconnected = disco;
   hp->hp_ws_removed = removed;
   hp->hp_mode = HTTP_PATH_MODE_WEBSOCKET;
+  hp->hp_service = service;
   hts_lwmutex_lock(&http_paths_lwmutex);
   LIST_INSERT_HEAD(&http_paths, hp, hp_link);
   hts_lwmutex_unlock(&http_paths_lwmutex);
   return hp;
+}
+
+http_path_t *
+http_add_websocket(const char *path, void *opaque,
+		   websocket_callback_connected_t *co,
+		   websocket_callback_data_t *data,
+		   websocket_callback_disconnected_t *disco,
+                   websocket_callback_removed_t *removed)
+{
+  return http_add_websocket0(path, opaque, co, data, disco, removed, 0);
+}
+
+http_path_t *
+http_add_service_websocket(const char *path, void *opaque,
+		           websocket_callback_connected_t *co,
+		           websocket_callback_data_t *data,
+		           websocket_callback_disconnected_t *disco,
+                           websocket_callback_removed_t *removed)
+{
+  return http_add_websocket0(path, opaque, co, data, disco, removed, 1);
 }
 
 /**
@@ -331,6 +379,7 @@ http_rc2str(int code)
   case HTTP_STATUS_OK:              return "Ok";
   case HTTP_STATUS_NOT_FOUND:       return "Not found";
   case HTTP_STATUS_UNAUTHORIZED:    return "Unauthorized";
+  case HTTP_STATUS_FORBIDDEN:       return "Forbidden";
   case HTTP_STATUS_BAD_REQUEST:     return "Bad request";
   case HTTP_STATUS_FOUND:           return "Found";
   case HTTP_STATUS_METHOD_NOT_ALLOWED: return "Method not allowed";
@@ -690,6 +739,12 @@ http_cmd_get(http_connection_t *hc, http_cmd_t method)
   hp = http_path_retain(hp);
   hts_lwmutex_unlock(&http_paths_lwmutex);
 
+  if(!hp->hp_service && !gconf.enable_http_interface) {
+    http_path_release(hp);
+    http_error(hc, HTTP_STATUS_FORBIDDEN, NULL);
+    return 0;
+  }
+
   if(args != NULL)
     http_parse_uri_args(&hc->hc_req_args, args, 0);
 
@@ -766,6 +821,11 @@ http_read_post(http_connection_t *hc, htsbuf_queue_t *q)
   }
   hp = http_path_retain(hp);
   hts_lwmutex_unlock(&http_paths_lwmutex);
+  if(!hp->hp_service && !gconf.enable_http_interface) {
+    http_path_release(hp);
+    http_error(hc, HTTP_STATUS_FORBIDDEN, NULL);
+    return 0;
+  }
   http_exec(hc, hp, remain, HTTP_CMD_POST);
   http_path_release(hp);
   return 0;
@@ -1161,22 +1221,28 @@ http_accept(void *opaque, int fd, const net_addr_t *local_addr,
 static void
 http_server_init(void)
 {
-  http_server_fd = asyncio_listen("http-server", 42000,
-                                  http_accept, NULL, 1);
+  http_server_fd = asyncio_listen("http-server", http_server_configured_port,
+                                  http_accept, NULL,
+                                  gconf.enable_network_access);
 
   if(gconf.http_server_ssl_key != NULL && gconf.http_server_ssl_crt != NULL) {
     void *ctx = asyncio_ssl_create_server(gconf.http_server_ssl_key,
                                           gconf.http_server_ssl_crt);
     if(ctx != NULL)
-      asyncio_listen("http-server", 42443, http_accept, ctx, 1);
+      asyncio_listen("http-server", 42443, http_accept, ctx,
+                     gconf.enable_network_access);
   }
 
 #if STOS
-  asyncio_listen("http-server", 80, http_accept, NULL, 1);
+  asyncio_listen("http-server", 80, http_accept, NULL,
+                 gconf.enable_network_access);
 #endif
 
   if(http_server_fd != NULL) {
     http_server_port = asyncio_get_port(http_server_fd);
+    TRACE(TRACE_INFO, "HTTPSERVER", "Listening on %s, port %d",
+          gconf.enable_network_access ? "all interfaces" : "localhost",
+          http_server_port);
 
 #if ENABLE_UPNP
     if(!gconf.disable_upnp)

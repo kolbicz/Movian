@@ -961,7 +961,8 @@ enable_disable(void)
       asyncio_del_fd(ftp_server_fd);
 
     ftp_server_fd = asyncio_listen("ftp-server", ftp_server_port,
-                                   ftp_accept, NULL, 0);
+                                   ftp_accept, NULL,
+                                   gconf.enable_network_access);
   } else {
     if(ftp_server_fd == NULL)
       return;
@@ -979,6 +980,9 @@ static void
 set_enable(void *opaque, int v)
 {
   ftp_server_enable = v;
+  TRACE(TRACE_INFO, "FTP", "FTP server %s (port=%d, binding=%s)",
+        v ? "enabled" : "disabled", ftp_server_port,
+        gconf.enable_network_access ? "all interfaces" : "localhost only");
   enable_disable();
 }
 
@@ -990,6 +994,7 @@ static void
 set_port(void *opaque, const char *str)
 {
   ftp_server_port = atoi(str);
+  TRACE(TRACE_INFO, "FTP", "FTP server port set to %d", ftp_server_port);
   enable_disable();
 }
 
@@ -1027,16 +1032,19 @@ ftp_server_init(void)
   settings_create_separator(gconf.settings_network, _p("FTP server"));
 
   setting_create(SETTING_BOOL, gconf.settings_network, SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("Enable FTP server")),
+                 SETTING_TITLE(_p("Enable")),
                  SETTING_VALUE(0),
                  SETTING_CALLBACK(set_enable, NULL),
+                 SETTING_VALUE_SUFFIX(prop_create_multi(prop_get_global(),
+                                                        "network",
+                                                        "serviceSuffix", NULL)),
                  SETTING_STORE("ftpserver", "enable"),
                  SETTING_COURIER(asyncio_courier),
                  NULL);
 
   setting_create(SETTING_STRING, gconf.settings_network,
                  SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("Server TCP port")),
+                 SETTING_TITLE(_p("Port")),
                  SETTING_VALUE("2121"),
                  SETTING_CALLBACK(set_port, NULL),
                  SETTING_STORE("ftpserver", "port"),

@@ -1,4 +1,5 @@
 widget(container_x, {
+  hidden: !$self.enabled;
   style: "ListItem";
 
   widget(icon, {

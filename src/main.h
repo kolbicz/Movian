@@ -240,6 +240,8 @@ typedef struct gconf {
   int disable_analytics;
   int enable_bin_replace;
   int enable_omnigrade;
+  int enable_http_interface;
+  int enable_network_access;
   int enable_http_debug;
   int disable_http_reuse;
   int enable_experimental;

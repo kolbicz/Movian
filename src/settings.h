@@ -67,8 +67,8 @@ void setting_detach(setting_t *s);
 
 void settings_init(void);
 
-void settings_create_info(prop_t *parent, const char *image,
-			  prop_t *description);
+prop_t *settings_create_info(prop_t *parent, const char *image,
+                             prop_t *description);
 
 
 void settings_create_bound_string(prop_t *parent, prop_t *title,
@@ -102,6 +102,7 @@ enum {
   SETTING_TAG_VALUE_ORIGIN,
   SETTING_TAG_GROUP,
   SETTING_TAG_INHERIT,
+  SETTING_TAG_VALUE_SUFFIX,
 };
 
 #define SETTING_TITLE(a)                        SETTING_TAG_TITLE, a
@@ -128,6 +129,7 @@ enum {
 #define SETTING_VALUE_ORIGIN(a)                 SETTING_TAG_VALUE_ORIGIN, a
 #define SETTING_GROUP(a)                        SETTING_TAG_GROUP, a
 #define SETTING_INHERIT(a)                      SETTING_TAG_INHERIT, a
+#define SETTING_VALUE_SUFFIX(a)                 SETTING_TAG_VALUE_SUFFIX, a
 #define SETTING_END                             NULL
 
 

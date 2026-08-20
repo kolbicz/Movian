@@ -4,7 +4,8 @@ widget(container_z, {
   ListItemBevel();
   ListItemHighlight();
 
-  focusable: true;
+  focusable: $self.enabled;
+  alpha: select($self.enabled, 1.0, 0.4);
   onEvent(activate, {
     toggle($self.value);
   });
@@ -25,7 +26,11 @@ widget(container_z, {
 
     widget(label, {
       style: select($self.value, "ListItemValueOn", "ListItemValueOff");
-      caption: select($self.value, _("On"), _("Off"));
+      caption: select($self.value,
+                      _("On") + select(isVoid($self.valueSuffix), "",
+                                        $self.valueSuffix),
+                      select(!isVoid($self.zerotext),
+                             $self.zerotext, _("Off")));
     });
   });
 });

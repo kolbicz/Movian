@@ -83,24 +83,13 @@ ios_native_hdr_display_available(UIView *owner)
 }
 
 static void
-ios_native_video_configure_hdr(CVPixelBufferRef image, int transfer,
-                               float hdrPeak)
+ios_native_video_configure_hdr(CVPixelBufferRef image, int transfer)
 {
   const BOOL hdr = ios_transfer_is_hdr(transfer);
   if(iosNativeVideoTransfer != transfer) {
     iosNativeVideoTransfer = transfer;
     if(@available(iOS 16.0, *))
       iosNativeVideoLayer.wantsExtendedDynamicRangeContent = hdr;
-
-    UIScreen *screen = iosNativeVideoOwner.window.screen ?: UIScreen.mainScreen;
-    if(@available(iOS 16.0, *)) {
-      TRACE(TRACE_INFO, "HDR",
-            "iOS native video output: transfer=%d, EDR=%s, current-headroom=%.2f, potential-headroom=%.2f, peak=%.0f nits",
-            transfer, hdr ? "enabled" : "not requested",
-            (double)screen.currentEDRHeadroom,
-            (double)screen.potentialEDRHeadroom,
-            hdrPeak >= 100.0f ? hdrPeak : 1000.0f);
-    }
   }
 
   if(!hdr)
@@ -145,7 +134,7 @@ ios_native_p010_present(CVPixelBufferRef image, int transfer, float hdrPeak)
      !ios_native_hdr_display_available(owner))
     return -2;
 
-  ios_native_video_configure_hdr(image, transfer, hdrPeak);
+  ios_native_video_configure_hdr(image, transfer);
 
   if(iosNativeVideoLayer.status == AVQueuedSampleBufferRenderingStatusFailed)
     [iosNativeVideoLayer flush];
