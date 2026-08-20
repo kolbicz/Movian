@@ -22,6 +22,8 @@ typedef struct p010_aux {
   unsigned int late_frames_dropped;
   int decoder_epoch;
   int decoder_epoch_valid;
+  int normalized_video_epoch;
+  int normalized_audio_epoch;
   int metal_reported;
   int metal_failed_reported;
 } p010_aux_t;
@@ -313,11 +315,48 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
 
   p010_aux_t *aux = gv->gv_aux;
 
+  /* HLS can publish the first post-seek video frames with the decoder's old
+   * epoch even after the media pipe and the new audio clock have advanced.
+   * Direct P010 feeds that epoch into the common renderer, which then refuses
+   * to synchronize or discard late frames.  The copied SDR path hides this
+   * because it naturally drains while converting frames.
+   *
+   * Only normalize when the audio clock belongs to the media pipe's current
+   * epoch and its PTS is plausibly on the same timeline.  This excludes a
+   * stale pre-seek audio clock and genuine HLS discontinuities. */
+  media_pipe_t *mp = gv->gv_mp;
+  int64_t aclock = PTS_UNSET;
+  int audio_epoch = 0;
+  int pipe_epoch;
+  hts_mutex_lock(&mp->mp_clock_mutex);
+  pipe_epoch = mp->mp_epoch;
+  if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
+    aclock = mp->mp_audio_clock + arch_get_avtime() -
+      mp->mp_audio_clock_avtime + mp->mp_avdelta;
+    audio_epoch = mp->mp_audio_clock_epoch;
+  }
+  hts_mutex_unlock(&mp->mp_clock_mutex);
+
+  int render_epoch = fi->fi_epoch;
+  if(aclock != PTS_UNSET && fi->fi_pts != PTS_UNSET &&
+     audio_epoch != fi->fi_epoch && audio_epoch == pipe_epoch &&
+     llabs(aclock - fi->fi_pts) < 30000000) {
+    render_epoch = audio_epoch;
+    if(aux->normalized_video_epoch != fi->fi_epoch ||
+       aux->normalized_audio_epoch != audio_epoch) {
+      TRACE(TRACE_INFO, "GLW",
+            "Direct P010 normalized post-seek video epoch %d to audio epoch %d",
+            fi->fi_epoch, audio_epoch);
+      aux->normalized_video_epoch = fi->fi_epoch;
+      aux->normalized_audio_epoch = audio_epoch;
+    }
+  }
+
   /* A seek changes the decoder epoch.  Do not let decoded frames from the
    * previous epoch occupy the small zero-copy IOSurface pool while the new
    * epoch waits for a free slot.  The currently displayed surface is owned by
    * the UI thread and will be retired by p010_newframe(). */
-  if(!aux->decoder_epoch_valid || aux->decoder_epoch != fi->fi_epoch) {
+  if(!aux->decoder_epoch_valid || aux->decoder_epoch != render_epoch) {
     glw_video_surface_t *stale;
     glw_video_surface_t *next;
     unsigned int flushed = 0;
@@ -331,30 +370,19 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
         flushed++;
       }
     }
-    aux->decoder_epoch = fi->fi_epoch;
+    aux->decoder_epoch = render_epoch;
     aux->decoder_epoch_valid = 1;
     aux->late_frames_dropped = 0;
     if(flushed != 0)
       TRACE(TRACE_INFO, "GLW",
             "Direct P010 seek flushed %u stale queued frame(s) for epoch %d",
-            flushed, fi->fi_epoch);
+            flushed, render_epoch);
   }
 
   /* Catch up before retaining the decoder IOSurface or waiting for one of the
    * four renderer slots.  Without this, HDR/HLG seeks can leave audio running
    * while obsolete 4K frames are imported and displayed for several seconds. */
-  media_pipe_t *mp = gv->gv_mp;
-  int64_t aclock = PTS_UNSET;
-  int audio_epoch = 0;
-  hts_mutex_lock(&mp->mp_clock_mutex);
-  if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
-    aclock = mp->mp_audio_clock + arch_get_avtime() -
-      mp->mp_audio_clock_avtime + mp->mp_avdelta;
-    audio_epoch = mp->mp_audio_clock_epoch;
-  }
-  hts_mutex_unlock(&mp->mp_clock_mutex);
-
-  if(aclock != PTS_UNSET && audio_epoch == fi->fi_epoch &&
+  if(aclock != PTS_UNSET && audio_epoch == render_epoch &&
      fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 250000) {
     aux->late_frames_dropped++;
     if(aux->late_frames_dropped == 1 ||
@@ -379,7 +407,7 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
   s->gvs_format = fi->fi_color_transfer;
   s->gvs_hdr_peak_luminance = fi->fi_hdr_peak_luminance;
   s->gvs_uploaded = 0;
-  glw_video_put_surface(gv, s, fi->fi_pts, fi->fi_epoch,
+  glw_video_put_surface(gv, s, fi->fi_pts, render_epoch,
                         fi->fi_duration, 0, 0);
   return 0;
 }
