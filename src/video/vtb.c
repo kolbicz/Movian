@@ -69,7 +69,6 @@ typedef struct vtb_decoder {
   int64_t vtbd_flush_to;
   int64_t vtbd_last_pts;
   int vtbd_estimated_duration;
-  int vtbd_duration_correction_reported;
   int vtbd_pixel_format;
   int vtbd_decode_pixel_format;
   int vtbd_codec_id;
@@ -697,32 +696,9 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   /* Never allow malformed container/parser timing to pin one decoded frame
    * on screen for seconds or hours.  Durations outside the useful video-frame
    * range are replaced by the PTS-derived estimate. */
-  const int parser_duration = vf->vf_mbm.mbm_duration > 1000 &&
-                              vf->vf_mbm.mbm_duration < 1000000 ?
-                              vf->vf_mbm.mbm_duration : 0;
-  const int estimated_duration = vtbd->vtbd_estimated_duration > 1000 &&
-                                 vtbd->vtbd_estimated_duration < 1000000 ?
-                                 vtbd->vtbd_estimated_duration : 0;
-  fi.fi_duration = parser_duration != 0 ? parser_duration : estimated_duration;
-
-  /* Some fMP4 streams retain a segment-scale parser duration after a seek
-   * even though adjacent decoded PTS values show the real frame cadence.
-   * Direct P010 has only four retained IOSurfaces, so one such duration can
-   * pin the pool while audio continues.  Prefer the measured PTS cadence only
-   * for a clearly disproportionate P010 duration; ordinary VFR timing and
-   * small parser/PTS differences remain unchanged. */
-  if(vtbd->vtbd_pixel_format ==
-       kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange &&
-     parser_duration != 0 && estimated_duration != 0 &&
-     parser_duration > estimated_duration * 4) {
-    fi.fi_duration = estimated_duration;
-    if(!vtbd->vtbd_duration_correction_reported) {
-      TRACE(TRACE_INFO, "VTB",
-            "Correcting implausible P010 parser frame duration %dms to PTS-derived %dms",
-            parser_duration / 1000, estimated_duration / 1000);
-      vtbd->vtbd_duration_correction_reported = 1;
-    }
-  }
+  fi.fi_duration = vf->vf_mbm.mbm_duration > 1000 &&
+                   vf->vf_mbm.mbm_duration < 1000000 ?
+                   vf->vf_mbm.mbm_duration : vtbd->vtbd_estimated_duration;
 
   siz = CVImageBufferGetEncodedSize(vf->vf_buf);
   fi.fi_width = siz.width;

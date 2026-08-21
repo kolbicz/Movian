@@ -276,9 +276,14 @@ glw_video_compute_blend(glw_video_t *gv, glw_video_surface_t *sa,
 
   if(!interpolation) {
 
-    sa->gvs_duration -= output_duration;
+    /* When this is the only queued frame, do not synthesize presentation time
+     * beyond its real duration.  Once a successor arrives we again consume a
+     * full output interval and carry any spill into that successor. */
+    const int advance = sb == NULL ?
+      MIN(output_duration, MAX(sa->gvs_duration, 0)) : output_duration;
+    sa->gvs_duration -= advance;
     if(sa->gvs_pts != PTS_UNSET)
-      sa->gvs_pts += output_duration;
+      sa->gvs_pts += advance;
 
     if(sa->gvs_duration < 0 && sb != NULL) {
 
@@ -330,8 +335,16 @@ glw_video_compute_blend(glw_video_t *gv, glw_video_surface_t *sa,
   } else {
     gv->gv_sa = sa;
     gv->gv_sb = NULL;
+
+    /* No successor is available yet.  Advance only through the remaining
+     * duration of this frame.  Continuing to advance an already exhausted
+     * frame makes its synthetic PTS run arbitrarily ahead of the audio clock;
+     * A/V sync then holds forever before it can release a surface, which can
+     * deadlock small zero-copy decoder pools after a seek or underrun. */
+    const int advance = MIN(output_duration, MAX(sa->gvs_duration, 0));
+    sa->gvs_duration -= advance;
     if(sa->gvs_pts != PTS_UNSET)
-      sa->gvs_pts += output_duration;
+      sa->gvs_pts += advance;
 
     pts = sa->gvs_pts;
   }
