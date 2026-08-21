@@ -26,6 +26,7 @@ typedef struct p010_aux {
   int hold_state_valid;
   int hold_state;
   int64_t hold_started;
+  unsigned int late_frames_dropped;
 } p010_aux_t;
 
 typedef struct reap_task {
@@ -389,6 +390,7 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
     }
     aux->decoder_epoch = fi->fi_epoch;
     aux->decoder_epoch_valid = 1;
+    aux->late_frames_dropped = 0;
     TRACE(TRACE_INFO, "P010-SYNC",
           "decoder epoch changed to %d: frame-pts=%"PRId64" audio-clock=%"PRId64" audio-epoch=%d delta=%"PRId64"ms flushed=%u",
           fi->fi_epoch, fi->fi_pts, aclock, audio_epoch,
@@ -400,7 +402,14 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
    * four renderer slots.  Without this, HDR/HLG seeks can leave audio running
    * while obsolete 4K frames are imported and displayed for several seconds. */
   if(aclock != PTS_UNSET && audio_epoch == fi->fi_epoch &&
-     fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 250000) {
+     fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 100000) {
+    aux->late_frames_dropped++;
+    if(aux->late_frames_dropped == 1 ||
+       !(aux->late_frames_dropped % 30))
+      TRACE(TRACE_INFO, "P010-SYNC",
+            "pre-queue catch-up dropped %u frame(s) in epoch %d; current frame is %"PRId64"ms behind audio",
+            aux->late_frames_dropped, fi->fi_epoch,
+            (aclock - fi->fi_pts) / 1000);
     return 0;
   }
 
