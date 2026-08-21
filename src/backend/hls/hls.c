@@ -932,21 +932,25 @@ hls_segment_close(hls_segment_t *hs)
   hls_t *h = hd->hd_hls;
   if(hs->hs_size > 0 && hs->hs_first_byte_time != 0) {
     const int64_t end = hs->hs_last_byte_time ?: arch_get_ts();
-    const int64_t transfer_us = MAX(1, end - hs->hs_first_byte_time);
-    const int first_byte_ms = (int)((hs->hs_first_byte_time -
-                                     hs->hs_open_time) / 1000);
-    const double mbps = hs->hs_size * 8.0 / transfer_us;
+    /* A streaming fa_read() may block until its requested buffer is full, so
+     * the return time is not a true first-byte timestamp.  Measure the
+     * complete open-to-last-read interval instead; that is also the rate that
+     * determines whether the media buffer grows or drains. */
+    const int64_t total_us = MAX(1, end - hs->hs_open_time);
+    const int open_ms = (int)((hs->hs_opened_time - hs->hs_open_time) / 1000);
+    const int read_ms = (int)((end - hs->hs_opened_time) / 1000);
+    const double mbps = hs->hs_size * 8.0 / total_us;
     const double segment_s = hs->hs_duration / 1000000.0;
     const double buffer_s = h->h_mp->mp_buffer_delay / 1000000.0;
     const double required_mbps = hd->hd_current != NULL ?
       hd->hd_current->hv_bitrate / 1000000.0 : 0.0;
 
-    if(first_byte_ms >= 500 || mbps < required_mbps * 1.5 ||
+    if(open_ms >= 500 || mbps < required_mbps * 1.5 ||
        buffer_s < 6.0 || !(hs->hs_seq % 20)) {
       TRACE(TRACE_INFO, "HLS-NET",
-            "segment=%d bytes=%d first-byte=%d ms transfer=%.2f s rate=%.2f Mbit/s media=%.2f s required=%.2f Mbit/s buffer=%.2f s",
-            hs->hs_seq, hs->hs_size, first_byte_ms,
-            transfer_us / 1000000.0, mbps, segment_s,
+            "segment=%d bytes=%d open=%d ms read=%d ms total=%.2f s rate=%.2f Mbit/s media=%.2f s required=%.2f Mbit/s buffer=%.2f s",
+            hs->hs_seq, hs->hs_size, open_ms, read_ms,
+            total_us / 1000000.0, mbps, segment_s,
             required_mbps, buffer_s);
     }
   }

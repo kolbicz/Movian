@@ -26,6 +26,10 @@ typedef struct p010_aux {
   int normalized_audio_epoch;
   int metal_reported;
   int metal_failed_reported;
+  unsigned int surface_wait_serial;
+  unsigned int wait_newframes;
+  int waiting_for_surface;
+  int64_t surface_wait_started;
 } p010_aux_t;
 
 typedef struct reap_task {
@@ -33,6 +37,16 @@ typedef struct reap_task {
   GLuint tex[2];
   void *opaque;
 } reap_task_t;
+
+static unsigned int
+surface_queue_count(const struct glw_video_surface_queue *q)
+{
+  const glw_video_surface_t *s;
+  unsigned int count = 0;
+  TAILQ_FOREACH(s, q, gvs_link)
+    count++;
+  return count;
+}
 
 static const float cmatrix_ITUR_BT_709[16] = {
   1.164400,  1.164400, 1.164400, 0,
@@ -91,6 +105,16 @@ surface_release(glw_video_t *gv, glw_video_surface_t *gvs,
   TAILQ_REMOVE(fromqueue, gvs, gvs_link);
   TAILQ_INSERT_TAIL(&gv->gv_avail_queue, gvs, gvs_link);
   hts_cond_signal(&gv->gv_avail_queue_cond);
+
+  p010_aux_t *aux = gv->gv_aux;
+  if(aux != NULL && aux->waiting_for_surface && aux->wait_newframes <= 1)
+    TRACE(TRACE_INFO, "P010-QUEUE",
+          "wait=%u UI released a surface (available=%u decoded=%u displaying=%u parked=%u)",
+          aux->surface_wait_serial,
+          surface_queue_count(&gv->gv_avail_queue),
+          surface_queue_count(&gv->gv_decoded_queue),
+          surface_queue_count(&gv->gv_displaying_queue),
+          surface_queue_count(&gv->gv_parked_queue));
 }
 
 static void
@@ -134,6 +158,20 @@ p010_newframe(glw_video_t *gv, video_decoder_t *vd, int flags)
     surface_init(gv, gvs);
   }
   glw_need_refresh(gv->w.glw_root, 0);
+  p010_aux_t *aux = gv->gv_aux;
+  if(aux != NULL && aux->waiting_for_surface) {
+    aux->wait_newframes++;
+    if(aux->wait_newframes == 1 || !(aux->wait_newframes % 120))
+      TRACE(TRACE_INFO, "P010-QUEUE",
+            "wait=%u UI tick=%u before blend (available=%u decoded=%u displaying=%u parked=%u sa=%s sb=%s flags=0x%x)",
+            aux->surface_wait_serial, aux->wait_newframes,
+            surface_queue_count(&gv->gv_avail_queue),
+            surface_queue_count(&gv->gv_decoded_queue),
+            surface_queue_count(&gv->gv_displaying_queue),
+            surface_queue_count(&gv->gv_parked_queue),
+            gv->gv_sa != NULL ? "set" : "null",
+            gv->gv_sb != NULL ? "set" : "null", flags);
+  }
   return glw_video_newframe_blend(gv, vd, flags, &surface_release, 0);
 }
 
@@ -395,7 +433,37 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
     return 0;
   }
 
-  if((s = glw_video_get_surface(gv, NULL, NULL)) == NULL)
+  const int surface_starved = TAILQ_FIRST(&gv->gv_avail_queue) == NULL;
+  if(surface_starved) {
+    aux->waiting_for_surface = 1;
+    aux->surface_wait_started = arch_get_ts();
+    aux->surface_wait_serial++;
+    aux->wait_newframes = 0;
+    TRACE(TRACE_INFO, "P010-QUEUE",
+          "wait=%u decoder blocked for surface (decoded=%u displaying=%u parked=%u sa=%s sb=%s pts=%"PRId64" epoch=%d)",
+          aux->surface_wait_serial,
+          surface_queue_count(&gv->gv_decoded_queue),
+          surface_queue_count(&gv->gv_displaying_queue),
+          surface_queue_count(&gv->gv_parked_queue),
+          gv->gv_sa != NULL ? "set" : "null",
+          gv->gv_sb != NULL ? "set" : "null",
+          fi->fi_pts, render_epoch);
+  }
+
+  s = glw_video_get_surface(gv, NULL, NULL);
+  if(surface_starved) {
+    const int waited_ms = (int)((arch_get_ts() -
+                                 aux->surface_wait_started) / 1000);
+    TRACE(TRACE_INFO, "P010-QUEUE",
+          "wait=%u decoder obtained surface after %d ms and %u UI tick(s) (available=%u decoded=%u displaying=%u parked=%u)",
+          aux->surface_wait_serial, waited_ms, aux->wait_newframes,
+          surface_queue_count(&gv->gv_avail_queue),
+          surface_queue_count(&gv->gv_decoded_queue),
+          surface_queue_count(&gv->gv_displaying_queue),
+          surface_queue_count(&gv->gv_parked_queue));
+    aux->waiting_for_surface = 0;
+  }
+  if(s == NULL)
     return -1;
 
   CFRetain(pb);
