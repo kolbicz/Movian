@@ -19,14 +19,11 @@ typedef struct p010_aux {
   int import_reported;
   int shader_transfer_reported;
   float reported_headroom;
+  unsigned int late_frames_dropped;
   int decoder_epoch;
   int decoder_epoch_valid;
   int metal_reported;
   int metal_failed_reported;
-  int hold_state_valid;
-  int hold_state;
-  int64_t hold_started;
-  unsigned int late_frames_dropped;
 } p010_aux_t;
 
 typedef struct reap_task {
@@ -94,16 +91,6 @@ surface_release(glw_video_t *gv, glw_video_surface_t *gvs,
   hts_cond_signal(&gv->gv_avail_queue_cond);
 }
 
-static unsigned int
-surface_queue_count(struct glw_video_surface_queue *queue)
-{
-  glw_video_surface_t *s;
-  unsigned int count = 0;
-  TAILQ_FOREACH(s, queue, gvs_link)
-    count++;
-  return count;
-}
-
 static void
 load_texture(glw_root_t *gr, glw_program_t *gp, void *aux,
              const glw_backend_texture_t *b, int num)
@@ -130,7 +117,7 @@ p010_init(glw_video_t *gv)
     TAILQ_INSERT_TAIL(&gv->gv_avail_queue, &gv->gv_surfaces[i], gvs_link);
 
   TRACE(TRACE_INFO, "GLW",
-        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, blocking surface backpressure)");
+        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input)");
   return 0;
 }
 
@@ -138,43 +125,11 @@ static int64_t
 p010_newframe(glw_video_t *gv, video_decoder_t *vd, int flags)
 {
   glw_video_surface_t *gvs;
-  p010_aux_t *aux = gv->gv_aux;
   hts_mutex_assert(&gv->gv_surface_mutex);
 
   while((gvs = TAILQ_FIRST(&gv->gv_parked_queue)) != NULL) {
     TAILQ_REMOVE(&gv->gv_parked_queue, gvs, gvs_link);
     surface_init(gv, gvs);
-  }
-
-  if(!aux->hold_state_valid || aux->hold_state != vd->vd_hold) {
-    media_pipe_t *mp = gv->gv_mp;
-    int64_t aclock = PTS_UNSET;
-    int audio_epoch = 0;
-    const int64_t now = arch_get_ts();
-    hts_mutex_lock(&mp->mp_clock_mutex);
-    if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
-      aclock = mp->mp_audio_clock + gv->w.glw_root->gr_frame_start_avtime -
-        mp->mp_audio_clock_avtime + mp->mp_avdelta;
-      audio_epoch = mp->mp_audio_clock_epoch;
-    }
-    hts_mutex_unlock(&mp->mp_clock_mutex);
-
-    const glw_video_surface_t *head =
-      TAILQ_FIRST(&gv->gv_decoded_queue);
-    const int held_ms = aux->hold_state_valid && aux->hold_state ?
-      (int)((now - aux->hold_started) / 1000) : 0;
-    TRACE(TRACE_INFO, "P010-SYNC",
-          "hold=%s previous-hold=%dms decoded=%u displaying=%u available=%u video-pts=%"PRId64" video-epoch=%d audio-clock=%"PRId64" audio-epoch=%d",
-          vd->vd_hold ? "enter" : "leave", held_ms,
-          surface_queue_count(&gv->gv_decoded_queue),
-          surface_queue_count(&gv->gv_displaying_queue),
-          surface_queue_count(&gv->gv_avail_queue),
-          head != NULL ? (int64_t)head->gvs_pts : (int64_t)PTS_UNSET,
-          head != NULL ? head->gvs_epoch : 0, aclock, audio_epoch);
-    aux->hold_state_valid = 1;
-    aux->hold_state = vd->vd_hold;
-    if(vd->vd_hold)
-      aux->hold_started = now;
   }
 
   glw_need_refresh(gv->w.glw_root, 0);
@@ -391,11 +346,10 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
     aux->decoder_epoch = fi->fi_epoch;
     aux->decoder_epoch_valid = 1;
     aux->late_frames_dropped = 0;
-    TRACE(TRACE_INFO, "P010-SYNC",
-          "decoder epoch changed to %d: frame-pts=%"PRId64" audio-clock=%"PRId64" audio-epoch=%d delta=%"PRId64"ms flushed=%u",
-          fi->fi_epoch, fi->fi_pts, aclock, audio_epoch,
-          aclock != PTS_UNSET && fi->fi_pts != PTS_UNSET ?
-            (aclock - fi->fi_pts) / 1000 : (int64_t)0, flushed);
+    if(flushed != 0)
+      TRACE(TRACE_INFO, "GLW",
+            "Direct P010 seek flushed %u stale queued frame(s) for epoch %d",
+            flushed, fi->fi_epoch);
   }
 
   /* Catch up before retaining the decoder IOSurface or waiting for one of the
@@ -405,31 +359,19 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
      fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 100000) {
     aux->late_frames_dropped++;
     if(aux->late_frames_dropped == 1 ||
-       !(aux->late_frames_dropped % 30))
-      TRACE(TRACE_INFO, "P010-SYNC",
-            "pre-queue catch-up dropped %u frame(s) in epoch %d; current frame is %"PRId64"ms behind audio",
-            aux->late_frames_dropped, fi->fi_epoch,
-            (aclock - fi->fi_pts) / 1000);
+       !(aux->late_frames_dropped % 60))
+      TRACE(TRACE_INFO, "GLW",
+            "Direct P010 catch-up dropped %u late frame(s), video behind audio by %d ms",
+            aux->late_frames_dropped,
+            (int)((aclock - fi->fi_pts) / 1000));
     return 0;
   }
 
   /* Preserve normal decoder backpressure.  Consuming or recycling frames
    * when this small zero-copy pool is full drains the media queue faster than
    * playback, which makes HLS enter buffering and pins the displayed frame. */
-  const int surface_starved = TAILQ_FIRST(&gv->gv_avail_queue) == NULL;
-  const int64_t wait_started = surface_starved ? arch_get_ts() : 0;
   if((s = glw_video_get_surface(gv, NULL, NULL)) == NULL)
     return -1;
-  if(surface_starved) {
-    const int wait_ms = (int)((arch_get_ts() - wait_started) / 1000);
-    if(wait_ms >= 250)
-      TRACE(TRACE_INFO, "P010-SYNC",
-            "surface wait ended after %dms: frame-pts=%"PRId64" frame-epoch=%d audio-clock=%"PRId64" audio-epoch=%d decoded=%u displaying=%u available=%u",
-            wait_ms, fi->fi_pts, fi->fi_epoch, aclock, audio_epoch,
-            surface_queue_count(&gv->gv_decoded_queue),
-            surface_queue_count(&gv->gv_displaying_queue),
-            surface_queue_count(&gv->gv_avail_queue));
-  }
 
   CFRetain(pb);
   s->gvs_opaque = pb;
