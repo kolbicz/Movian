@@ -90,6 +90,9 @@ typedef struct hls_segment {
   fa_handle_t *hs_fh;
 
   int64_t hs_open_time;
+  int64_t hs_opened_time;
+  int64_t hs_first_byte_time;
+  int64_t hs_last_byte_time;
   int hs_blocked_counter;
 
 } hls_segment_t;
@@ -255,11 +258,6 @@ LIST_HEAD(hls_discontinuity_segment_list, hls_discontinuity_segment);
 typedef struct hls {
   const char *h_baseurl;
 
-  /* Privacy-safe diagnostics. These contain only scheme, host and port;
-   * never paths, query parameters, credentials or authorization tokens. */
-  char h_playlist_origin[320];
-  char h_segment_origin[320];
-
   int h_debug;
 
   media_pipe_t *h_mp;
@@ -300,6 +298,8 @@ typedef struct hls {
   hls_error_t h_last_error;
 
 } hls_t;
+
+int hls_segment_read(hls_segment_t *hs, void *buf, size_t size);
 
 
 

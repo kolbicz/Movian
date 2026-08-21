@@ -52,44 +52,6 @@ static int64_t last_pos = -1;
 #define HLS_CORRUPTION_MEASURE_PERIOD (60 * 1000000)
 
 /**
- * Report the network origin of an HLS resource without exposing its path,
- * query string, embedded authorization, cookies or signed CDN parameters.
- * Repeated resources from the same origin are suppressed.
- */
-static void
-hls_report_origin(char *last, size_t lastlen, const char *kind,
-                  const char *url)
-{
-  char proto[16];
-  char hostname[256];
-  char origin[320];
-  int port = -1;
-
-  if(url == NULL)
-    return;
-
-  url_split(proto, sizeof(proto), NULL, 0, hostname, sizeof(hostname),
-            &port, NULL, 0, url);
-  if(proto[0] == 0 || hostname[0] == 0)
-    return;
-
-  const int default_port =
-    (!strcmp(proto, "http") && port == 80) ||
-    (!strcmp(proto, "https") && port == 443);
-  if(port > 0 && !default_port)
-    snprintf(origin, sizeof(origin), "%s://%s:%d", proto, hostname, port);
-  else
-    snprintf(origin, sizeof(origin), "%s://%s", proto, hostname);
-
-  if(last != NULL && !strcmp(last, origin))
-    return;
-  if(last != NULL)
-    snprintf(last, lastlen, "%s", origin);
-
-  TRACE(TRACE_INFO, "HLS-ORIGIN", "%s origin: %s", kind, origin);
-}
-
-/**
  * Relevant docs:
  *
  * http://tools.ietf.org/html/draft-pantos-http-live-streaming-07
@@ -430,9 +392,6 @@ hls_variant_update(hls_variant_t *hv, media_pipe_t *mp)
     return 0;
 
   hls_t *h = hv->hv_demuxer->hd_hls;
-
-  hls_report_origin(h->h_playlist_origin, sizeof(h->h_playlist_origin),
-                    "media playlist", hv->hv_url);
 
   hv->hv_loaded = time(NULL);
 
@@ -828,9 +787,6 @@ hls_segment_open(hls_segment_t *hs)
   hls_demuxer_t *hd = hv->hv_demuxer;
   hls_t *h = hd->hd_hls;
 
-  hls_report_origin(h->h_segment_origin, sizeof(h->h_segment_origin),
-                    "media segment", hs->hs_url);
-
   assert(hs->hs_fh == NULL);
   hs->hs_open_time = arch_get_ts();
   hs->hs_blocked_counter = h->h_blocked;
@@ -849,6 +805,10 @@ hls_segment_open(hls_segment_t *hs)
 
 	if(fh == NULL)
 	{
+		TRACE(TRACE_INFO, "HLS-NET",
+		      "segment=%d open failed after %d ms status=%d",
+		      hs->hs_seq, (int)((arch_get_ts() - hs->hs_open_time) / 1000),
+		      foe.foe_protocol_error);
 		if(cancellable_is_cancelled(hd->hd_cancellable))
 			return HLS_ERROR_SEGMENT_NOT_FOUND;
 
@@ -871,6 +831,13 @@ hls_segment_open(hls_segment_t *hs)
 			return HLS_ERROR_SEGMENT_BROKEN;
 		}
 	}
+
+  hs->hs_opened_time = arch_get_ts();
+  const int open_ms = (int)((hs->hs_opened_time - hs->hs_open_time) / 1000);
+  if(open_ms >= 500 || !(hs->hs_seq % 20))
+    TRACE(TRACE_INFO, "HLS-NET",
+          "segment=%d opened in %d ms buffer=%.2f s",
+          hs->hs_seq, open_ms, h->h_mp->mp_buffer_delay / 1000000.0);
 
   fa_set_read_timeout(fh, 15000);
 
@@ -934,6 +901,25 @@ hls_segment_open(hls_segment_t *hs)
 
 
 /**
+ * Read and account for an HLS media segment. Diagnostics intentionally carry
+ * no URL, hostname, path, headers, cookies or authorization information.
+ */
+int
+hls_segment_read(hls_segment_t *hs, void *buf, size_t size)
+{
+  const int r = fa_read(hs->hs_fh, buf, size);
+  if(r > 0) {
+    const int64_t now = arch_get_ts();
+    if(hs->hs_first_byte_time == 0)
+      hs->hs_first_byte_time = now;
+    hs->hs_last_byte_time = now;
+    hs->hs_size += r;
+  }
+  return r;
+}
+
+
+/**
  *
  */
 void
@@ -942,43 +928,28 @@ hls_segment_close(hls_segment_t *hs)
   if(hs->hs_fh == NULL)
     return;
 
-#if 0
   hls_demuxer_t *hd = hs->hs_variant->hv_demuxer;
   hls_t *h = hd->hd_hls;
+  if(hs->hs_size > 0 && hs->hs_first_byte_time != 0) {
+    const int64_t end = hs->hs_last_byte_time ?: arch_get_ts();
+    const int64_t transfer_us = MAX(1, end - hs->hs_first_byte_time);
+    const int first_byte_ms = (int)((hs->hs_first_byte_time -
+                                     hs->hs_open_time) / 1000);
+    const double mbps = hs->hs_size * 8.0 / transfer_us;
+    const double segment_s = hs->hs_duration / 1000000.0;
+    const double buffer_s = h->h_mp->mp_buffer_delay / 1000000.0;
+    const double required_mbps = hd->hd_current != NULL ?
+      hd->hd_current->hv_bitrate / 1000000.0 : 0.0;
 
-  if(hs->hs_blocked_counter == h->h_blocked) {
-    int64_t ts = arch_get_ts() - hs->hs_open_time;
-    if(ts > 1000 && hs->hs_size > 0) {
-      int64_t bw = 8000000LL * hs->hs_size / ts;
-      bw = MIN(100000000, bw);
-
-      int low_buffer = h->h_mp->mp_buffer_delay < 6000000; //video_settings.video_buffer_size*1000000;//6000000;
-
-      const char *delta;
-      if(hd->hd_bw == 0) {
-        hd->hd_bw = bw;
-        delta = "Initial";
-      } else if(bw < hd->hd_bw) {
-        delta = "Decrease";
-        if(low_buffer)
-          hd->hd_bw = (hd->hd_bw + bw) / 2;
-        else
-          hd->hd_bw = (hd->hd_bw * 7 + bw) / 8;
-      } else {
-        delta = "Increase";
-        hd->hd_bw = (hd->hd_bw + bw) / 2;
-      }
-      HLS_TRACE(h, "Estimated bandwidth updated %d bps "
-                "(most recent segment %d bps) "
-                "buffer: %ds (%s) delta: %s\n",
-                hd->hd_bw, (int)bw,
-                (int)(h->h_mp->mp_buffer_delay / 1000000),
-                low_buffer ? "Low" : "OK",
-                delta);
-      hd->hd_bw_updated = 1;
+    if(first_byte_ms >= 500 || mbps < required_mbps * 1.5 ||
+       buffer_s < 6.0 || !(hs->hs_seq % 20)) {
+      TRACE(TRACE_INFO, "HLS-NET",
+            "segment=%d bytes=%d first-byte=%d ms transfer=%.2f s rate=%.2f Mbit/s media=%.2f s required=%.2f Mbit/s buffer=%.2f s",
+            hs->hs_seq, hs->hs_size, first_byte_ms,
+            transfer_us / 1000000.0, mbps, segment_s,
+            required_mbps, buffer_s);
     }
   }
-#endif
   fa_close(hs->hs_fh);
   hs->hs_fh = NULL;
 }
@@ -3180,6 +3151,15 @@ hls_play(hls_t *h, media_pipe_t *mp, char *errbuf, size_t errlen,
 	if(loading != (mp->mp_hold_flags & MP_HOLD_PRE_BUFFERING))
 	{
 		loading = (mp->mp_hold_flags & MP_HOLD_PRE_BUFFERING);
+		const hls_variant_t *active = h->h_primary.hd_current;
+		TRACE(TRACE_INFO, "HLS-BUFFER",
+		      "%s buffer=%.2f s bytes=%u/%u variant=%dx%d %.2f Mbit/s",
+		      loading ? "underrun/prebuffer started" : "playback recovered",
+		      mp->mp_buffer_delay / 1000000.0,
+		      mp->mp_buffer_current, mp->mp_buffer_limit,
+		      active != NULL ? active->hv_width : 0,
+		      active != NULL ? active->hv_height : 0,
+		      active != NULL ? active->hv_bitrate / 1000000.0 : 0.0);
 		prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, (loading!=0));
     }
 
@@ -3980,10 +3960,6 @@ hls_playvideo(const char *url, media_pipe_t *mp,
 
   char *baseurl = NULL;
 
-  char manifest_origin[320] = {0};
-  hls_report_origin(manifest_origin, sizeof(manifest_origin),
-                    "master manifest request", url);
-
   buf = fa_load(url,
                 FA_LOAD_ERRBUF(errbuf, errlen),
                 FA_LOAD_FLAGS(FA_COMPRESSION),
@@ -3994,8 +3970,6 @@ hls_playvideo(const char *url, media_pipe_t *mp,
     free(baseurl);
     return NULL;
   }
-  hls_report_origin(manifest_origin, sizeof(manifest_origin),
-                    "master manifest response", baseurl);
   buf = buf_make_writable(buf);
   char *s = buf_str(buf);
   event_t *e;
