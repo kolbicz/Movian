@@ -52,6 +52,44 @@ static int64_t last_pos = -1;
 #define HLS_CORRUPTION_MEASURE_PERIOD (60 * 1000000)
 
 /**
+ * Report the network origin of an HLS resource without exposing its path,
+ * query string, embedded authorization, cookies or signed CDN parameters.
+ * Repeated resources from the same origin are suppressed.
+ */
+static void
+hls_report_origin(char *last, size_t lastlen, const char *kind,
+                  const char *url)
+{
+  char proto[16];
+  char hostname[256];
+  char origin[320];
+  int port = -1;
+
+  if(url == NULL)
+    return;
+
+  url_split(proto, sizeof(proto), NULL, 0, hostname, sizeof(hostname),
+            &port, NULL, 0, url);
+  if(proto[0] == 0 || hostname[0] == 0)
+    return;
+
+  const int default_port =
+    (!strcmp(proto, "http") && port == 80) ||
+    (!strcmp(proto, "https") && port == 443);
+  if(port > 0 && !default_port)
+    snprintf(origin, sizeof(origin), "%s://%s:%d", proto, hostname, port);
+  else
+    snprintf(origin, sizeof(origin), "%s://%s", proto, hostname);
+
+  if(last != NULL && !strcmp(last, origin))
+    return;
+  if(last != NULL)
+    snprintf(last, lastlen, "%s", origin);
+
+  TRACE(TRACE_INFO, "HLS-ORIGIN", "%s origin: %s", kind, origin);
+}
+
+/**
  * Relevant docs:
  *
  * http://tools.ietf.org/html/draft-pantos-http-live-streaming-07
@@ -392,6 +430,9 @@ hls_variant_update(hls_variant_t *hv, media_pipe_t *mp)
     return 0;
 
   hls_t *h = hv->hv_demuxer->hd_hls;
+
+  hls_report_origin(h->h_playlist_origin, sizeof(h->h_playlist_origin),
+                    "media playlist", hv->hv_url);
 
   hv->hv_loaded = time(NULL);
 
@@ -785,7 +826,10 @@ hls_segment_open(hls_segment_t *hs)
   fa_handle_t *fh;
   char errbuf[512];
   hls_demuxer_t *hd = hv->hv_demuxer;
-  const hls_t *h = hd->hd_hls;
+  hls_t *h = hd->hd_hls;
+
+  hls_report_origin(h->h_segment_origin, sizeof(h->h_segment_origin),
+                    "media segment", hs->hs_url);
 
   assert(hs->hs_fh == NULL);
   hs->hs_open_time = arch_get_ts();
@@ -3936,6 +3980,10 @@ hls_playvideo(const char *url, media_pipe_t *mp,
 
   char *baseurl = NULL;
 
+  char manifest_origin[320] = {0};
+  hls_report_origin(manifest_origin, sizeof(manifest_origin),
+                    "master manifest request", url);
+
   buf = fa_load(url,
                 FA_LOAD_ERRBUF(errbuf, errlen),
                 FA_LOAD_FLAGS(FA_COMPRESSION),
@@ -3946,6 +3994,8 @@ hls_playvideo(const char *url, media_pipe_t *mp,
     free(baseurl);
     return NULL;
   }
+  hls_report_origin(manifest_origin, sizeof(manifest_origin),
+                    "master manifest response", baseurl);
   buf = buf_make_writable(buf);
   char *s = buf_str(buf);
   event_t *e;

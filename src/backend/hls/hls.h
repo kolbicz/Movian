@@ -255,6 +255,11 @@ LIST_HEAD(hls_discontinuity_segment_list, hls_discontinuity_segment);
 typedef struct hls {
   const char *h_baseurl;
 
+  /* Privacy-safe diagnostics. These contain only scheme, host and port;
+   * never paths, query parameters, credentials or authorization tokens. */
+  char h_playlist_origin[320];
+  char h_segment_origin[320];
+
   int h_debug;
 
   media_pipe_t *h_mp;
