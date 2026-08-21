@@ -116,7 +116,7 @@ p010_init(glw_video_t *gv)
     TAILQ_INSERT_TAIL(&gv->gv_avail_queue, &gv->gv_surfaces[i], gvs_link);
 
   TRACE(TRACE_INFO, "GLW",
-        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, jump catch-up, bounded 100 ms rolling backpressure)");
+        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, blocking surface backpressure)");
   return 0;
 }
 
@@ -131,56 +131,6 @@ p010_newframe(glw_video_t *gv, video_decoder_t *vd, int flags)
     surface_init(gv, gvs);
   }
 
-  /* The generic GLW synchronizer catches up by retiring at most one decoded
-   * frame per display refresh.  After an HLS seek or a long underrun that is
-   * visibly equivalent to fast-forwarding through frames that can no longer
-   * be presented on time.  Direct P010 is especially prone to this because
-   * its small zero-copy surface pool can already contain late frames when the
-   * audio clock restarts.
-   *
-   * Re-evaluate the live audio clock on the UI thread and retire every queued
-   * frame more than 250 ms late in one pass.  Never recycle gv_sa/gv_sb here:
-   * they may still be sampled by the current draw and the normal new-frame
-   * path owns their transition back to the available queue. */
-  if(!vd->vd_hold) {
-    media_pipe_t *mp = gv->gv_mp;
-    int64_t aclock = PTS_UNSET;
-    int audio_epoch = 0;
-
-    hts_mutex_lock(&mp->mp_clock_mutex);
-    if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
-      aclock = mp->mp_audio_clock + gv->w.glw_root->gr_frame_start_avtime -
-        mp->mp_audio_clock_avtime + mp->mp_avdelta;
-      audio_epoch = mp->mp_audio_clock_epoch;
-    }
-    hts_mutex_unlock(&mp->mp_clock_mutex);
-
-    if(aclock != PTS_UNSET) {
-      glw_video_surface_t *next;
-      unsigned int dropped = 0;
-      int64_t oldest_lateness = 0;
-
-      for(gvs = TAILQ_FIRST(&gv->gv_decoded_queue); gvs != NULL;
-          gvs = next) {
-        next = TAILQ_NEXT(gvs, gvs_link);
-        const int64_t frame_pts = (int64_t)gvs->gvs_pts;
-        const int64_t lateness = aclock - frame_pts;
-        if(gvs != gv->gv_sa && gvs != gv->gv_sb &&
-           gvs->gvs_epoch == audio_epoch && gvs->gvs_pts != PTS_UNSET &&
-           lateness > 250000) {
-          if(dropped == 0)
-            oldest_lateness = lateness;
-          surface_release(gv, gvs, &gv->gv_decoded_queue);
-          dropped++;
-        }
-      }
-
-      if(dropped != 0)
-        TRACE(TRACE_INFO, "GLW",
-              "Direct P010 jumped over %u late queued frame(s) (oldest %d ms behind audio)",
-              dropped, (int)(oldest_lateness / 1000));
-    }
-  }
   glw_need_refresh(gv->w.glw_root, 0);
   return glw_video_newframe_blend(gv, vd, flags, &surface_release, 0);
 }
@@ -408,34 +358,11 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
     return 0;
   }
 
-  /* A Direct P010 frame owns its VideoToolbox IOSurface until the GLW surface
-   * is returned.  Do not let that four-surface pool block the decoder thread
-   * indefinitely: after a seek the PLAY/flush control message can be queued
-   * behind the decode call, while GLW intentionally holds the first frame.
-   * That circular wait was measured at 18--38 seconds.
-   *
-   * Normal 50/60 fps backpressure releases a surface within one or two UI
-   * frames.  If none is returned within 100 ms, recycle the oldest queued
-   * surface that is not currently visible.  This keeps a rolling set of the
-   * newest decoded frames while playback is held for buffering, instead of
-   * retaining four stale post-seek frames and discarding everything newer. */
-  s = TAILQ_FIRST(&gv->gv_avail_queue);
-  if(s == NULL) {
-    hts_cond_wait_timeout(&gv->gv_avail_queue_cond,
-                          &gv->gv_surface_mutex, 100);
-    s = TAILQ_FIRST(&gv->gv_avail_queue);
-    if(s == NULL) {
-      TAILQ_FOREACH(s, &gv->gv_decoded_queue, gvs_link) {
-        if(s != gv->gv_sa && s != gv->gv_sb)
-          break;
-      }
-      if(s == NULL)
-        return 0;
-      surface_release(gv, s, &gv->gv_decoded_queue);
-      s = TAILQ_FIRST(&gv->gv_avail_queue);
-    }
-  }
-  TAILQ_REMOVE(&gv->gv_avail_queue, s, gvs_link);
+  /* Preserve normal decoder backpressure.  Consuming or recycling frames
+   * when this small zero-copy pool is full drains the media queue faster than
+   * playback, which makes HLS enter buffering and pins the displayed frame. */
+  if((s = glw_video_get_surface(gv, NULL, NULL)) == NULL)
+    return -1;
 
   CFRetain(pb);
   s->gvs_opaque = pb;
