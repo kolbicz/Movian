@@ -163,11 +163,13 @@ p010_newframe(glw_video_t *gv, video_decoder_t *vd, int flags)
       for(gvs = TAILQ_FIRST(&gv->gv_decoded_queue); gvs != NULL;
           gvs = next) {
         next = TAILQ_NEXT(gvs, gvs_link);
+        const int64_t frame_pts = (int64_t)gvs->gvs_pts;
+        const int64_t lateness = aclock - frame_pts;
         if(gvs != gv->gv_sa && gvs != gv->gv_sb &&
            gvs->gvs_epoch == audio_epoch && gvs->gvs_pts != PTS_UNSET &&
-           aclock - gvs->gvs_pts > 250000) {
+           lateness > 250000) {
           if(dropped == 0)
-            oldest_lateness = aclock - gvs->gvs_pts;
+            oldest_lateness = lateness;
           surface_release(gv, gvs, &gv->gv_decoded_queue);
           dropped++;
         }
