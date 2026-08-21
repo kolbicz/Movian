@@ -116,7 +116,7 @@ p010_init(glw_video_t *gv)
     TAILQ_INSERT_TAIL(&gv->gv_avail_queue, &gv->gv_surfaces[i], gvs_link);
 
   TRACE(TRACE_INFO, "GLW",
-        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, bounded 100 ms backpressure)");
+        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, bounded 100 ms rolling backpressure)");
   return 0;
 }
 
@@ -364,16 +364,24 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
    * That circular wait was measured at 18--38 seconds.
    *
    * Normal 50/60 fps backpressure releases a surface within one or two UI
-   * frames.  If none is returned within 100 ms, discard only this incoming
-   * frame (before retaining its IOSurface), allowing the decoder to process
-   * pending control messages and resume the renderer. */
+   * frames.  If none is returned within 100 ms, recycle the oldest queued
+   * surface that is not currently visible.  This keeps a rolling set of the
+   * newest decoded frames while playback is held for buffering, instead of
+   * retaining four stale post-seek frames and discarding everything newer. */
   s = TAILQ_FIRST(&gv->gv_avail_queue);
   if(s == NULL) {
     hts_cond_wait_timeout(&gv->gv_avail_queue_cond,
                           &gv->gv_surface_mutex, 100);
     s = TAILQ_FIRST(&gv->gv_avail_queue);
     if(s == NULL) {
-      return 0;
+      TAILQ_FOREACH(s, &gv->gv_decoded_queue, gvs_link) {
+        if(s != gv->gv_sa && s != gv->gv_sb)
+          break;
+      }
+      if(s == NULL)
+        return 0;
+      surface_release(gv, s, &gv->gv_decoded_queue);
+      s = TAILQ_FIRST(&gv->gv_avail_queue);
     }
   }
   TAILQ_REMOVE(&gv->gv_avail_queue, s, gvs_link);
