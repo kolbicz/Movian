@@ -2522,6 +2522,9 @@ static void
 hls_seek(hls_t *h, int64_t ts)
 {
   media_pipe_t *mp = h->h_mp;
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+  const int old_epoch = mp->mp_epoch;
+#endif
 
   //mp_flush(mp);
 
@@ -2569,6 +2572,14 @@ hls_seek(hls_t *h, int64_t ts)
   mp->mp_audio.mq_seektarget = ts;
   mp->mp_subtitle.mq_seektarget = ts;
   mp_flush(mp);
+
+#if defined(__APPLE__) && !TARGET_OS_IPHONE
+  TRACE(TRACE_INFO, "HLS-SEEK",
+        "target=%"PRId64" epoch=%d->%d video-segment=%"PRId64
+        " audio-segment=%"PRId64,
+        ts, old_epoch, mp->mp_epoch,
+        h->h_primary.hd_seek_to_segment, h->h_audio.hd_seek_to_segment);
+#endif
 
   mp->mp_video.mq_demuxer_flags &= ~HLS_QUEUE_KEYFRAME_SEEN;
   mp->mp_audio.mq_demuxer_flags &= ~HLS_QUEUE_KEYFRAME_SEEN;
