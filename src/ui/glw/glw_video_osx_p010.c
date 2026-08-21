@@ -19,17 +19,12 @@ typedef struct p010_aux {
   int import_reported;
   int shader_transfer_reported;
   float reported_headroom;
-  unsigned int late_frames_dropped;
   int decoder_epoch;
   int decoder_epoch_valid;
   int normalized_video_epoch;
   int normalized_audio_epoch;
   int metal_reported;
   int metal_failed_reported;
-  unsigned int surface_wait_serial;
-  unsigned int wait_newframes;
-  int waiting_for_surface;
-  int64_t surface_wait_started;
 } p010_aux_t;
 
 typedef struct reap_task {
@@ -37,16 +32,6 @@ typedef struct reap_task {
   GLuint tex[2];
   void *opaque;
 } reap_task_t;
-
-static unsigned int
-surface_queue_count(const struct glw_video_surface_queue *q)
-{
-  const glw_video_surface_t *s;
-  unsigned int count = 0;
-  TAILQ_FOREACH(s, q, gvs_link)
-    count++;
-  return count;
-}
 
 static const float cmatrix_ITUR_BT_709[16] = {
   1.164400,  1.164400, 1.164400, 0,
@@ -106,15 +91,6 @@ surface_release(glw_video_t *gv, glw_video_surface_t *gvs,
   TAILQ_INSERT_TAIL(&gv->gv_avail_queue, gvs, gvs_link);
   hts_cond_signal(&gv->gv_avail_queue_cond);
 
-  p010_aux_t *aux = gv->gv_aux;
-  if(aux != NULL && aux->waiting_for_surface && aux->wait_newframes <= 1)
-    TRACE(TRACE_INFO, "P010-QUEUE",
-          "wait=%u UI released a surface (available=%u decoded=%u displaying=%u parked=%u)",
-          aux->surface_wait_serial,
-          surface_queue_count(&gv->gv_avail_queue),
-          surface_queue_count(&gv->gv_decoded_queue),
-          surface_queue_count(&gv->gv_displaying_queue),
-          surface_queue_count(&gv->gv_parked_queue));
 }
 
 static void
@@ -143,7 +119,7 @@ p010_init(glw_video_t *gv)
     TAILQ_INSERT_TAIL(&gv->gv_avail_queue, &gv->gv_surfaces[i], gvs_link);
 
   TRACE(TRACE_INFO, "GLW",
-        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input)");
+        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, bounded 100 ms backpressure)");
   return 0;
 }
 
@@ -158,20 +134,6 @@ p010_newframe(glw_video_t *gv, video_decoder_t *vd, int flags)
     surface_init(gv, gvs);
   }
   glw_need_refresh(gv->w.glw_root, 0);
-  p010_aux_t *aux = gv->gv_aux;
-  if(aux != NULL && aux->waiting_for_surface) {
-    aux->wait_newframes++;
-    if(aux->wait_newframes == 1 || !(aux->wait_newframes % 120))
-      TRACE(TRACE_INFO, "P010-QUEUE",
-            "wait=%u UI tick=%u before blend (available=%u decoded=%u displaying=%u parked=%u sa=%s sb=%s flags=0x%x)",
-            aux->surface_wait_serial, aux->wait_newframes,
-            surface_queue_count(&gv->gv_avail_queue),
-            surface_queue_count(&gv->gv_decoded_queue),
-            surface_queue_count(&gv->gv_displaying_queue),
-            surface_queue_count(&gv->gv_parked_queue),
-            gv->gv_sa != NULL ? "set" : "null",
-            gv->gv_sb != NULL ? "set" : "null", flags);
-  }
   return glw_video_newframe_blend(gv, vd, flags, &surface_release, 0);
 }
 
@@ -410,7 +372,6 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
     }
     aux->decoder_epoch = render_epoch;
     aux->decoder_epoch_valid = 1;
-    aux->late_frames_dropped = 0;
     if(flushed != 0)
       TRACE(TRACE_INFO, "GLW",
             "Direct P010 seek flushed %u stale queued frame(s) for epoch %d",
@@ -422,49 +383,29 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
    * while obsolete 4K frames are imported and displayed for several seconds. */
   if(aclock != PTS_UNSET && audio_epoch == render_epoch &&
      fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 250000) {
-    aux->late_frames_dropped++;
-    if(aux->late_frames_dropped == 1 ||
-       !(aux->late_frames_dropped % 60)) {
-      TRACE(TRACE_INFO, "GLW",
-            "Direct P010 catch-up dropped %u late frame(s), video behind audio by %d ms",
-            aux->late_frames_dropped,
-            (int)((aclock - fi->fi_pts) / 1000));
-    }
     return 0;
   }
 
-  const int surface_starved = TAILQ_FIRST(&gv->gv_avail_queue) == NULL;
-  if(surface_starved) {
-    aux->waiting_for_surface = 1;
-    aux->surface_wait_started = arch_get_ts();
-    aux->surface_wait_serial++;
-    aux->wait_newframes = 0;
-    TRACE(TRACE_INFO, "P010-QUEUE",
-          "wait=%u decoder blocked for surface (decoded=%u displaying=%u parked=%u sa=%s sb=%s pts=%"PRId64" epoch=%d)",
-          aux->surface_wait_serial,
-          surface_queue_count(&gv->gv_decoded_queue),
-          surface_queue_count(&gv->gv_displaying_queue),
-          surface_queue_count(&gv->gv_parked_queue),
-          gv->gv_sa != NULL ? "set" : "null",
-          gv->gv_sb != NULL ? "set" : "null",
-          fi->fi_pts, render_epoch);
+  /* A Direct P010 frame owns its VideoToolbox IOSurface until the GLW surface
+   * is returned.  Do not let that four-surface pool block the decoder thread
+   * indefinitely: after a seek the PLAY/flush control message can be queued
+   * behind the decode call, while GLW intentionally holds the first frame.
+   * That circular wait was measured at 18--38 seconds.
+   *
+   * Normal 50/60 fps backpressure releases a surface within one or two UI
+   * frames.  If none is returned within 100 ms, discard only this incoming
+   * frame (before retaining its IOSurface), allowing the decoder to process
+   * pending control messages and resume the renderer. */
+  s = TAILQ_FIRST(&gv->gv_avail_queue);
+  if(s == NULL) {
+    hts_cond_wait_timeout(&gv->gv_avail_queue_cond,
+                          &gv->gv_surface_mutex, 100);
+    s = TAILQ_FIRST(&gv->gv_avail_queue);
+    if(s == NULL) {
+      return 0;
+    }
   }
-
-  s = glw_video_get_surface(gv, NULL, NULL);
-  if(surface_starved) {
-    const int waited_ms = (int)((arch_get_ts() -
-                                 aux->surface_wait_started) / 1000);
-    TRACE(TRACE_INFO, "P010-QUEUE",
-          "wait=%u decoder obtained surface after %d ms and %u UI tick(s) (available=%u decoded=%u displaying=%u parked=%u)",
-          aux->surface_wait_serial, waited_ms, aux->wait_newframes,
-          surface_queue_count(&gv->gv_avail_queue),
-          surface_queue_count(&gv->gv_decoded_queue),
-          surface_queue_count(&gv->gv_displaying_queue),
-          surface_queue_count(&gv->gv_parked_queue));
-    aux->waiting_for_surface = 0;
-  }
-  if(s == NULL)
-    return -1;
+  TAILQ_REMOVE(&gv->gv_avail_queue, s, gvs_link);
 
   CFRetain(pb);
   s->gvs_opaque = pb;

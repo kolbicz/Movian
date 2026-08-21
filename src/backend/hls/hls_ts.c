@@ -2319,7 +2319,7 @@ next_sidx:
 		while(1)
 		{
 			data = td->td_buf_fmp4;
-			last_r = r = hls_segment_read(hs, td->td_buf_fmp4+xr, td->td_buf_size-xr);
+			last_r = r = fa_read(hs->hs_fh, td->td_buf_fmp4+xr, td->td_buf_size-xr);
 			if(r < 0) break;
 
 			xr+=r;
@@ -2685,7 +2685,7 @@ next_sidx:
 		data = td->td_buf_fmp4;
 		fa_seek(hs->hs_fh, dataoffset, SEEK_SET);
 		// bw_start = arch_get_avtime();
-		r = hls_segment_read(hs, data, MAX(td->td_buf_size, sample_size_total));
+		r = fa_read(hs->hs_fh, data, MAX(td->td_buf_size, sample_size_total));
 		if(r <= 0) return 0;
 
 		add_speed(hd->hd_hls->h_mp->mp_video.mq_prop_bw, r);
@@ -3507,7 +3507,7 @@ else
 				}
 
 				/*memcpy(td->td_buf, buf_c8(hv->hv_map), buf_size(hv->hv_map));
-				r = hls_segment_read(hs, td->td_buf+buf_size(hv->hv_map), sizeof(td->td_buf)-buf_size(hv->hv_map));
+				r = fa_read(hs->hs_fh, td->td_buf+buf_size(hv->hv_map), sizeof(td->td_buf)-buf_size(hv->hv_map));
 				hd->hd_download_counter += r;
 				unmuxed_input(td, td->td_buf, buf_size(hv->hv_map)+r, hs);
 				*/
@@ -3750,7 +3750,7 @@ else
 					//te->te_sample_rate = 0;
 
 					/*memcpy(td->td_buf, buf_c8(hv->hv_map), buf_size(hv->hv_map));
-					r = hls_segment_read(hs, td->td_buf+buf_size(hv->hv_map), sizeof(td->td_buf)-buf_size(hv->hv_map));
+					r = fa_read(hs->hs_fh, td->td_buf+buf_size(hv->hv_map), sizeof(td->td_buf)-buf_size(hv->hv_map));
 					hd->hd_download_counter += r;
 					unmuxed_input(td, td->td_buf, buf_size(hv->hv_map)+r, hs);
 
@@ -3855,7 +3855,7 @@ else
 
 		while(1)
 		{
-			td->td_last_r = r = hls_segment_read(hs, td->td_buf_fmp4+xr, td->td_buf_size-xr);
+			td->td_last_r = r = fa_read(hs->hs_fh, td->td_buf_fmp4+xr, td->td_buf_size-xr);
 			if(r < 0) break;
 
 			xr+=r;
@@ -3999,7 +3999,7 @@ else
 		// bw_start = arch_get_avtime();
 		while(1)
 		{
-			r = hls_segment_read(hs, td->td_buf_fmp4+xr, td->td_buf_size-xr);
+			r = fa_read(hs->hs_fh, td->td_buf_fmp4+xr, td->td_buf_size-xr);
 			if(r < 0) break;
 			xr+=r;
 
@@ -4044,7 +4044,7 @@ else
 		for(int tsp=0;tsp<3;tsp++)
 		{
 /*
-      r = hls_segment_read(hs,
+      r = fa_read(hs->hs_fh,
                   td->td_buf + td->td_buf_bytes,
                   188 - td->td_buf_bytes);
 */

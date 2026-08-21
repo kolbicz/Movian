@@ -92,12 +92,6 @@ typedef struct vtb_decoder {
   int vtbd_decode_error_notified;
   int vtbd_hdr10plus_reported;
   int vtbd_dv5_transfer_assumed_reported;
-#if TARGET_OS_OSX
-  volatile unsigned int vtbd_diag_submitted;
-  volatile unsigned int vtbd_diag_callbacks;
-  unsigned int vtbd_diag_seek_serial;
-  int vtbd_diag_active;
-#endif
 } vtb_decoder_t;
 
 static uint16_t
@@ -805,21 +799,6 @@ picture_out(void *decompressionOutputRefCon,
   media_buf_meta_t *mbm = &mbm_storage;
   vtb_decoder_t *vtbd = decompressionOutputRefCon;
 
-#if TARGET_OS_OSX
-  const unsigned int diag_callback =
-    __sync_add_and_fetch(&vtbd->vtbd_diag_callbacks, 1);
-  if(vtbd->vtbd_diag_active &&
-     (diag_callback <= 3 || !(diag_callback % 250) || status != noErr)) {
-    TRACE(TRACE_INFO, "VTB-SEEK",
-          "seek=%u callback=%u submitted=%u epoch=%d pts=%"PRId64
-          " key=%d skip=%d status=%d flags=0x%x image=%s",
-          vtbd->vtbd_diag_seek_serial, diag_callback,
-          vtbd->vtbd_diag_submitted, mbm->mbm_epoch, mbm->mbm_pts,
-          mbm->mbm_keyframe, mbm->mbm_skip, (int)status,
-          (unsigned int)infoFlags, imageBuffer != NULL ? "yes" : "no");
-  }
-#endif
-
   if(status != noErr) {
     vtbd->vtbd_decode_errors++;
     if(vtbd->vtbd_decode_errors == 1 ||
@@ -1057,33 +1036,6 @@ vtb_decode(struct media_codec *mc, struct video_decoder *vd,
   }
   copy_mbm_from_mb(frame_opaque, mb);
 
-#if TARGET_OS_OSX
-  const unsigned int diag_submission =
-    __sync_add_and_fetch(&vtbd->vtbd_diag_submitted, 1);
-  if(vtbd->vtbd_diag_active &&
-     (diag_submission <= 3 || mb->mb_keyframe || !(diag_submission % 250))) {
-    media_pipe_t *mp = vd->vd_mp;
-    int64_t audio_clock = PTS_UNSET;
-    int audio_epoch = 0;
-    hts_mutex_lock(&mp->mp_clock_mutex);
-    if(mp->mp_audio_clock != PTS_UNSET) {
-      audio_clock = mp->mp_audio_clock + arch_get_avtime() -
-        mp->mp_audio_clock_avtime + mp->mp_avdelta;
-      audio_epoch = mp->mp_audio_clock_epoch;
-    }
-    hts_mutex_unlock(&mp->mp_clock_mutex);
-    TRACE(TRACE_INFO, "VTB-SEEK",
-          "seek=%u submit=%u callbacks=%u pending=%u epoch=%d pipe=%d"
-          " pts=%"PRId64" dts=%"PRId64" key=%d skip=%d audio=%"PRId64
-          " audio-epoch=%d",
-          vtbd->vtbd_diag_seek_serial, diag_submission,
-          vtbd->vtbd_diag_callbacks,
-          diag_submission - vtbd->vtbd_diag_callbacks,
-          mb->mb_epoch, mp->mp_epoch, mb->mb_pts, mb->mb_dts,
-          mb->mb_keyframe, mb->mb_skip, audio_clock, audio_epoch);
-  }
-#endif
-
   status =
     VTDecompressionSessionDecodeFrame(vtbd->vtbd_session, sample_buf, flags,
                                       frame_opaque, &infoflags);
@@ -1133,23 +1085,7 @@ vtb_flush(struct media_codec *mc, struct video_decoder *vd)
   vtbd->vtbd_sdr_output_reported = 0;
   vtbd->vtbd_decode_errors = 0;
   vtbd->vtbd_decode_error_notified = 0;
-#if TARGET_OS_OSX
-  vtbd->vtbd_diag_submitted = 0;
-  vtbd->vtbd_diag_callbacks = 0;
-  vtbd->vtbd_diag_seek_serial++;
-  vtbd->vtbd_diag_active = vtbd->vtbd_p010_direct;
-#endif
   hts_mutex_unlock(&vtbd->vtbd_mutex);
-
-#if TARGET_OS_OSX
-  if(vtbd->vtbd_diag_active) {
-    media_pipe_t *mp = vd->vd_mp;
-    TRACE(TRACE_INFO, "VTB-SEEK",
-          "seek=%u Direct P010 decoder flush/recreate, pipe-epoch=%d seek-target=%"PRId64,
-          vtbd->vtbd_diag_seek_serial, mp->mp_epoch,
-          mp->mp_video.mq_seektarget);
-  }
-#endif
 
   OSStatus status = vtb_create_session(vtbd);
   if(status) {

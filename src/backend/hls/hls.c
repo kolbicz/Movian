@@ -805,10 +805,6 @@ hls_segment_open(hls_segment_t *hs)
 
 	if(fh == NULL)
 	{
-		TRACE(TRACE_INFO, "HLS-NET",
-		      "segment=%d open failed after %d ms status=%d",
-		      hs->hs_seq, (int)((arch_get_ts() - hs->hs_open_time) / 1000),
-		      foe.foe_protocol_error);
 		if(cancellable_is_cancelled(hd->hd_cancellable))
 			return HLS_ERROR_SEGMENT_NOT_FOUND;
 
@@ -831,13 +827,6 @@ hls_segment_open(hls_segment_t *hs)
 			return HLS_ERROR_SEGMENT_BROKEN;
 		}
 	}
-
-  hs->hs_opened_time = arch_get_ts();
-  const int open_ms = (int)((hs->hs_opened_time - hs->hs_open_time) / 1000);
-  if(open_ms >= 500 || !(hs->hs_seq % 20))
-    TRACE(TRACE_INFO, "HLS-NET",
-          "segment=%d opened in %d ms buffer=%.2f s",
-          hs->hs_seq, open_ms, h->h_mp->mp_buffer_delay / 1000000.0);
 
   fa_set_read_timeout(fh, 15000);
 
@@ -901,25 +890,6 @@ hls_segment_open(hls_segment_t *hs)
 
 
 /**
- * Read and account for an HLS media segment. Diagnostics intentionally carry
- * no URL, hostname, path, headers, cookies or authorization information.
- */
-int
-hls_segment_read(hls_segment_t *hs, void *buf, size_t size)
-{
-  const int r = fa_read(hs->hs_fh, buf, size);
-  if(r > 0) {
-    const int64_t now = arch_get_ts();
-    if(hs->hs_first_byte_time == 0)
-      hs->hs_first_byte_time = now;
-    hs->hs_last_byte_time = now;
-    hs->hs_size += r;
-  }
-  return r;
-}
-
-
-/**
  *
  */
 void
@@ -928,32 +898,6 @@ hls_segment_close(hls_segment_t *hs)
   if(hs->hs_fh == NULL)
     return;
 
-  hls_demuxer_t *hd = hs->hs_variant->hv_demuxer;
-  hls_t *h = hd->hd_hls;
-  if(hs->hs_size > 0 && hs->hs_first_byte_time != 0) {
-    const int64_t end = hs->hs_last_byte_time ?: arch_get_ts();
-    /* A streaming fa_read() may block until its requested buffer is full, so
-     * the return time is not a true first-byte timestamp.  Measure the
-     * complete open-to-last-read interval instead; that is also the rate that
-     * determines whether the media buffer grows or drains. */
-    const int64_t total_us = MAX(1, end - hs->hs_open_time);
-    const int open_ms = (int)((hs->hs_opened_time - hs->hs_open_time) / 1000);
-    const int read_ms = (int)((end - hs->hs_opened_time) / 1000);
-    const double mbps = hs->hs_size * 8.0 / total_us;
-    const double segment_s = hs->hs_duration / 1000000.0;
-    const double buffer_s = h->h_mp->mp_buffer_delay / 1000000.0;
-    const double required_mbps = hd->hd_current != NULL ?
-      hd->hd_current->hv_bitrate / 1000000.0 : 0.0;
-
-    if(open_ms >= 500 || mbps < required_mbps * 1.5 ||
-       buffer_s < 6.0 || !(hs->hs_seq % 20)) {
-      TRACE(TRACE_INFO, "HLS-NET",
-            "segment=%d bytes=%d open=%d ms read=%d ms total=%.2f s rate=%.2f Mbit/s media=%.2f s required=%.2f Mbit/s buffer=%.2f s",
-            hs->hs_seq, hs->hs_size, open_ms, read_ms,
-            total_us / 1000000.0, mbps, segment_s,
-            required_mbps, buffer_s);
-    }
-  }
   fa_close(hs->hs_fh);
   hs->hs_fh = NULL;
 }
@@ -2542,7 +2486,6 @@ hls_seek(hls_t *h, int64_t ts)
 {
   media_pipe_t *mp = h->h_mp;
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
-  const int old_epoch = mp->mp_epoch;
 #endif
 
   //mp_flush(mp);
@@ -2591,14 +2534,6 @@ hls_seek(hls_t *h, int64_t ts)
   mp->mp_audio.mq_seektarget = ts;
   mp->mp_subtitle.mq_seektarget = ts;
   mp_flush(mp);
-
-#if defined(__APPLE__) && !TARGET_OS_IPHONE
-  TRACE(TRACE_INFO, "HLS-SEEK",
-        "target=%"PRId64" epoch=%d->%d video-segment=%"PRId64
-        " audio-segment=%"PRId64,
-        ts, old_epoch, mp->mp_epoch,
-        h->h_primary.hd_seek_to_segment, h->h_audio.hd_seek_to_segment);
-#endif
 
   mp->mp_video.mq_demuxer_flags &= ~HLS_QUEUE_KEYFRAME_SEEN;
   mp->mp_audio.mq_demuxer_flags &= ~HLS_QUEUE_KEYFRAME_SEEN;
@@ -3155,15 +3090,6 @@ hls_play(hls_t *h, media_pipe_t *mp, char *errbuf, size_t errlen,
 	if(loading != (mp->mp_hold_flags & MP_HOLD_PRE_BUFFERING))
 	{
 		loading = (mp->mp_hold_flags & MP_HOLD_PRE_BUFFERING);
-		const hls_variant_t *active = h->h_primary.hd_current;
-		TRACE(TRACE_INFO, "HLS-BUFFER",
-		      "%s buffer=%.2f s bytes=%u/%u variant=%dx%d %.2f Mbit/s",
-		      loading ? "underrun/prebuffer started" : "playback recovered",
-		      mp->mp_buffer_delay / 1000000.0,
-		      mp->mp_buffer_current, mp->mp_buffer_limit,
-		      active != NULL ? active->hv_width : 0,
-		      active != NULL ? active->hv_height : 0,
-		      active != NULL ? active->hv_bitrate / 1000000.0 : 0.0);
 		prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, (loading!=0));
     }
 

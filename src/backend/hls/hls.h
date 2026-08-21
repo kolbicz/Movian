@@ -90,9 +90,6 @@ typedef struct hls_segment {
   fa_handle_t *hs_fh;
 
   int64_t hs_open_time;
-  int64_t hs_opened_time;
-  int64_t hs_first_byte_time;
-  int64_t hs_last_byte_time;
   int hs_blocked_counter;
 
 } hls_segment_t;
@@ -298,8 +295,6 @@ typedef struct hls {
   hls_error_t h_last_error;
 
 } hls_t;
-
-int hls_segment_read(hls_segment_t *hs, void *buf, size_t size);
 
 
 
