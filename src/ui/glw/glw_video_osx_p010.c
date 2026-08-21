@@ -116,7 +116,7 @@ p010_init(glw_video_t *gv)
     TAILQ_INSERT_TAIL(&gv->gv_avail_queue, &gv->gv_surfaces[i], gvs_link);
 
   TRACE(TRACE_INFO, "GLW",
-        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, bounded 100 ms rolling backpressure)");
+        "Direct P010 IOSurface OpenGL renderer initialized (zero-copy input, jump catch-up, bounded 100 ms rolling backpressure)");
   return 0;
 }
 
@@ -129,6 +129,55 @@ p010_newframe(glw_video_t *gv, video_decoder_t *vd, int flags)
   while((gvs = TAILQ_FIRST(&gv->gv_parked_queue)) != NULL) {
     TAILQ_REMOVE(&gv->gv_parked_queue, gvs, gvs_link);
     surface_init(gv, gvs);
+  }
+
+  /* The generic GLW synchronizer catches up by retiring at most one decoded
+   * frame per display refresh.  After an HLS seek or a long underrun that is
+   * visibly equivalent to fast-forwarding through frames that can no longer
+   * be presented on time.  Direct P010 is especially prone to this because
+   * its small zero-copy surface pool can already contain late frames when the
+   * audio clock restarts.
+   *
+   * Re-evaluate the live audio clock on the UI thread and retire every queued
+   * frame more than 250 ms late in one pass.  Never recycle gv_sa/gv_sb here:
+   * they may still be sampled by the current draw and the normal new-frame
+   * path owns their transition back to the available queue. */
+  if(!vd->vd_hold) {
+    media_pipe_t *mp = gv->gv_mp;
+    int64_t aclock = PTS_UNSET;
+    int audio_epoch = 0;
+
+    hts_mutex_lock(&mp->mp_clock_mutex);
+    if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
+      aclock = mp->mp_audio_clock + gv->w.glw_root->gr_frame_start_avtime -
+        mp->mp_audio_clock_avtime + mp->mp_avdelta;
+      audio_epoch = mp->mp_audio_clock_epoch;
+    }
+    hts_mutex_unlock(&mp->mp_clock_mutex);
+
+    if(aclock != PTS_UNSET) {
+      glw_video_surface_t *next;
+      unsigned int dropped = 0;
+      int64_t oldest_lateness = 0;
+
+      for(gvs = TAILQ_FIRST(&gv->gv_decoded_queue); gvs != NULL;
+          gvs = next) {
+        next = TAILQ_NEXT(gvs, gvs_link);
+        if(gvs != gv->gv_sa && gvs != gv->gv_sb &&
+           gvs->gvs_epoch == audio_epoch && gvs->gvs_pts != PTS_UNSET &&
+           aclock - gvs->gvs_pts > 250000) {
+          if(dropped == 0)
+            oldest_lateness = aclock - gvs->gvs_pts;
+          surface_release(gv, gvs, &gv->gv_decoded_queue);
+          dropped++;
+        }
+      }
+
+      if(dropped != 0)
+        TRACE(TRACE_INFO, "GLW",
+              "Direct P010 jumped over %u late queued frame(s) (oldest %d ms behind audio)",
+              dropped, (int)(oldest_lateness / 1000));
+    }
   }
   glw_need_refresh(gv->w.glw_root, 0);
   return glw_video_newframe_blend(gv, vd, flags, &surface_release, 0);
