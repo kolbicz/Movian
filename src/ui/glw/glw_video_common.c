@@ -367,10 +367,10 @@ glw_video_newframe_blend(glw_video_t *gv, video_decoder_t *vd, int flags,
     if(sa != NULL) {
       /* Continue to display last frame */
       gv->gv_sa = sa;
-      gv->gv_sa = NULL;
+      gv->gv_sb = NULL;
     } else {
       gv->gv_sa = NULL;
-      gv->gv_sa = NULL;
+      gv->gv_sb = NULL;
     }
 
   } else {

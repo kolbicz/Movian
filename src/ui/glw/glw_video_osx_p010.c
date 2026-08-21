@@ -395,48 +395,8 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
     return 0;
   }
 
-  /* Do not wait indefinitely for a renderer surface.  With Direct P010 the
-   * four surfaces can all be owned by the UI/display queues after a seek.
-   * The old blocking wait then stops the decoder thread from submitting any
-   * more compressed frames while audio continues to advance.  By the time a
-   * surface is returned, video can already be several seconds late.
-   *
-   * Wake periodically and re-read the audio clock.  Once this frame is late,
-   * discard it without retaining its IOSurface, allowing VideoToolbox to
-   * continue delivering frames until it reaches the current audio position.
-   * The surface mutex is held by the GLW delivery path here. */
-  while((s = TAILQ_FIRST(&gv->gv_avail_queue)) == NULL) {
-    if(gv->w.glw_flags & GLW_DESTROYING)
-      return -1;
-
-    hts_cond_wait_timeout(&gv->gv_avail_queue_cond,
-                          &gv->gv_surface_mutex, 10);
-
-    int64_t wait_aclock = PTS_UNSET;
-    int wait_audio_epoch = 0;
-    hts_mutex_lock(&mp->mp_clock_mutex);
-    if(mp->mp_audio_clock != PTS_UNSET &&
-       mp->mp_audio_clock_epoch != 0) {
-      wait_aclock = mp->mp_audio_clock + arch_get_avtime() -
-        mp->mp_audio_clock_avtime + mp->mp_avdelta;
-      wait_audio_epoch = mp->mp_audio_clock_epoch;
-    }
-    hts_mutex_unlock(&mp->mp_clock_mutex);
-
-    if(wait_aclock != PTS_UNSET && wait_audio_epoch == render_epoch &&
-       fi->fi_pts != PTS_UNSET && wait_aclock - fi->fi_pts > 250000) {
-      aux->late_frames_dropped++;
-      if(aux->late_frames_dropped == 1 ||
-         !(aux->late_frames_dropped % 60)) {
-        TRACE(TRACE_INFO, "GLW",
-              "Direct P010 surface wait dropped %u late frame(s), video behind audio by %d ms",
-              aux->late_frames_dropped,
-              (int)((wait_aclock - fi->fi_pts) / 1000));
-      }
-      return 0;
-    }
-  }
-  TAILQ_REMOVE(&gv->gv_avail_queue, s, gvs_link);
+  if((s = glw_video_get_surface(gv, NULL, NULL)) == NULL)
+    return -1;
 
   CFRetain(pb);
   s->gvs_opaque = pb;
