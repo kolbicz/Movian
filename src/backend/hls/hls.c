@@ -785,7 +785,7 @@ hls_segment_open(hls_segment_t *hs)
   fa_handle_t *fh;
   char errbuf[512];
   hls_demuxer_t *hd = hv->hv_demuxer;
-  hls_t *h = hd->hd_hls;
+  const hls_t *h = hd->hd_hls;
 
   assert(hs->hs_fh == NULL);
   hs->hs_open_time = arch_get_ts();
@@ -898,6 +898,43 @@ hls_segment_close(hls_segment_t *hs)
   if(hs->hs_fh == NULL)
     return;
 
+#if 0
+  hls_demuxer_t *hd = hs->hs_variant->hv_demuxer;
+  hls_t *h = hd->hd_hls;
+
+  if(hs->hs_blocked_counter == h->h_blocked) {
+    int64_t ts = arch_get_ts() - hs->hs_open_time;
+    if(ts > 1000 && hs->hs_size > 0) {
+      int64_t bw = 8000000LL * hs->hs_size / ts;
+      bw = MIN(100000000, bw);
+
+      int low_buffer = h->h_mp->mp_buffer_delay < 6000000; //video_settings.video_buffer_size*1000000;//6000000;
+
+      const char *delta;
+      if(hd->hd_bw == 0) {
+        hd->hd_bw = bw;
+        delta = "Initial";
+      } else if(bw < hd->hd_bw) {
+        delta = "Decrease";
+        if(low_buffer)
+          hd->hd_bw = (hd->hd_bw + bw) / 2;
+        else
+          hd->hd_bw = (hd->hd_bw * 7 + bw) / 8;
+      } else {
+        delta = "Increase";
+        hd->hd_bw = (hd->hd_bw + bw) / 2;
+      }
+      HLS_TRACE(h, "Estimated bandwidth updated %d bps "
+                "(most recent segment %d bps) "
+                "buffer: %ds (%s) delta: %s\n",
+                hd->hd_bw, (int)bw,
+                (int)(h->h_mp->mp_buffer_delay / 1000000),
+                low_buffer ? "Low" : "OK",
+                delta);
+      hd->hd_bw_updated = 1;
+    }
+  }
+#endif
   fa_close(hs->hs_fh);
   hs->hs_fh = NULL;
 }
@@ -2485,8 +2522,6 @@ static void
 hls_seek(hls_t *h, int64_t ts)
 {
   media_pipe_t *mp = h->h_mp;
-#if defined(__APPLE__) && !TARGET_OS_IPHONE
-#endif
 
   //mp_flush(mp);
 
