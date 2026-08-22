@@ -667,7 +667,25 @@ audio_decode_thread(void *aux)
     media_buf_t *data = TAILQ_FIRST(&mq->mq_q_data);
     media_buf_t *ctrl = TAILQ_FIRST(&mq->mq_q_ctrl);
     if(ctrl == NULL && mp->mp_audio_wait_video_epoch >= 0) {
-      hts_cond_wait(&mq->mq_avail, &mp->mp_mutex);
+      if((data != NULL || avail > 0) &&
+         mp->mp_audio_wait_video_deadline == 0)
+        mp->mp_audio_wait_video_deadline = arch_get_avtime() + 15000000;
+
+      if(mp->mp_audio_wait_video_deadline == 0) {
+        hts_cond_wait(&mq->mq_avail, &mp->mp_mutex);
+      } else {
+        int64_t remaining = mp->mp_audio_wait_video_deadline -
+          arch_get_avtime();
+        if(remaining <= 0) {
+          TRACE(TRACE_ERROR, "Audio",
+                "Timed out waiting for first video frame in epoch %d; releasing audio",
+                mp->mp_audio_wait_video_epoch);
+          mp->mp_audio_wait_video_epoch = -1;
+          mp->mp_audio_wait_video_deadline = 0;
+        } else {
+          hts_cond_wait_timeout(&mq->mq_avail, &mp->mp_mutex, remaining);
+        }
+      }
       continue;
     }
     if(avail >= ad->ad_tile_size && blocked == 0 && !ad->ad_paused && !ctrl) {

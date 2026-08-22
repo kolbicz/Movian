@@ -356,7 +356,6 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
   s->gvs_uploaded = 0;
   glw_video_put_surface(gv, s, fi->fi_pts, fi->fi_epoch,
                         fi->fi_duration, 0, 0);
-  mp_video_frame_ready(gv->gv_mp, fi->fi_epoch);
   return 0;
 }
 

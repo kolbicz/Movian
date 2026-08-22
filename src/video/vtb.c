@@ -661,6 +661,31 @@ destroy_frames(vtb_decoder_t *vtbd)
 }
 
 
+static void
+vtb_first_frame_ready(vtb_decoder_t *vtbd, int epoch)
+{
+#if TARGET_OS_OSX
+  if(vtbd->vtbd_audio_wait_epoch == epoch) {
+    mp_video_frame_ready(vtbd->vtbd_mp, epoch);
+    vtbd->vtbd_audio_wait_epoch = -1;
+  }
+#endif
+}
+
+
+static void
+vtb_cancel_audio_wait(vtb_decoder_t *vtbd)
+{
+#if TARGET_OS_OSX
+  if(vtbd->vtbd_audio_wait_epoch >= 0) {
+    mp_cancel_audio_video_wait(vtbd->vtbd_mp,
+                               vtbd->vtbd_audio_wait_epoch);
+    vtbd->vtbd_audio_wait_epoch = -1;
+  }
+#endif
+}
+
+
 /**
  *
  */
@@ -668,6 +693,7 @@ static void
 emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
 {
   CGSize siz;
+  int delivered = 0;
 
   frame_info_t fi;
   memset(&fi, 0, sizeof(fi));
@@ -722,7 +748,7 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
       }
 
       if(fi.fi_duration > 0)
-        video_deliver_frame(vd, &fi);
+        delivered = video_deliver_frame(vd, &fi) == 0;
 
       CVPixelBufferUnlockBaseAddress(vf->vf_buf, 0);
       break;
@@ -732,16 +758,19 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
       fi.fi_type = vtbd->vtbd_nv12_hdr_direct ? 'NVHE' : 'CVPB';
       fi.fi_data[0] = (void *)vf->vf_buf;
       if(fi.fi_duration > 0)
-        video_deliver_frame(vd, &fi);
+        delivered = video_deliver_frame(vd, &fi) == 0;
       break;
 
     case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
       fi.fi_type = 'P010';
       fi.fi_data[0] = (void *)vf->vf_buf;
       if(fi.fi_duration > 0)
-        video_deliver_frame(vd, &fi);
+        delivered = video_deliver_frame(vd, &fi) == 0;
       break;
   }
+
+  if(delivered)
+    vtb_first_frame_ready(vtbd, fi.fi_epoch);
 
 
 
@@ -822,8 +851,11 @@ picture_out(void *decompressionOutputRefCon,
     }
   }
 
-  if(imageBuffer == NULL)
+  if(imageBuffer == NULL) {
+    if(status != noErr)
+      vtb_cancel_audio_wait(vtbd);
     return; // No frame, typically from kVTDecodeFrame_DoNotOutputFrame
+  }
 
   /* Pre-roll frames must still be decoded so the hardware session builds the
    * reference-picture state needed after a random-access point.  Suppress
@@ -1074,17 +1106,17 @@ vtb_flush(struct media_codec *mc, struct video_decoder *vd)
 {
   vtb_decoder_t *vtbd = mc->opaque;
 #if TARGET_OS_OSX
-  if(vtbd->vtbd_audio_wait_epoch >= 0)
-    mp_cancel_audio_video_wait(vtbd->vtbd_mp,
-                               vtbd->vtbd_audio_wait_epoch);
+  vtb_cancel_audio_wait(vtbd);
   if(vtbd->vtbd_p010_direct || vtbd->vtbd_nv12_hdr_direct)
     vtbd->vtbd_audio_wait_epoch =
       mp_wait_audio_for_video_frame(vtbd->vtbd_mp);
 #endif
-  VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
-  VTDecompressionSessionInvalidate(vtbd->vtbd_session);
-  CFRelease(vtbd->vtbd_session);
-  vtbd->vtbd_session = NULL;
+  if(vtbd->vtbd_session != NULL) {
+    VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
+    VTDecompressionSessionInvalidate(vtbd->vtbd_session);
+    CFRelease(vtbd->vtbd_session);
+    vtbd->vtbd_session = NULL;
+  }
   hts_mutex_lock(&vtbd->vtbd_mutex);
   destroy_frames(vtbd);
   vtbd->vtbd_max_ts   = PTS_UNSET;
@@ -1099,13 +1131,7 @@ vtb_flush(struct media_codec *mc, struct video_decoder *vd)
 
   OSStatus status = vtb_create_session(vtbd);
   if(status) {
-#if TARGET_OS_OSX
-    if(vtbd->vtbd_audio_wait_epoch >= 0) {
-      mp_cancel_audio_video_wait(vtbd->vtbd_mp,
-                                 vtbd->vtbd_audio_wait_epoch);
-      vtbd->vtbd_audio_wait_epoch = -1;
-    }
-#endif
+    vtb_cancel_audio_wait(vtbd);
     TRACE(TRACE_ERROR, "VTB",
           "Unable to recreate decoder after seek (status=%d)", (int)status);
   }
@@ -1119,16 +1145,15 @@ static void
 vtb_close(struct media_codec *mc)
 {
   vtb_decoder_t *vtbd = mc->opaque;
-#if TARGET_OS_OSX
-  if(vtbd->vtbd_audio_wait_epoch >= 0)
-    mp_cancel_audio_video_wait(vtbd->vtbd_mp,
-                               vtbd->vtbd_audio_wait_epoch);
-#endif
-  VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
+  vtb_cancel_audio_wait(vtbd);
+  if(vtbd->vtbd_session != NULL)
+    VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
   destroy_frames(vtbd);
 
-  VTDecompressionSessionInvalidate(vtbd->vtbd_session);
-  CFRelease(vtbd->vtbd_session);
+  if(vtbd->vtbd_session != NULL) {
+    VTDecompressionSessionInvalidate(vtbd->vtbd_session);
+    CFRelease(vtbd->vtbd_session);
+  }
 
   CFRelease(vtbd->vtbd_decoder_spec);
   CFRelease(vtbd->vtbd_surface_attrs);

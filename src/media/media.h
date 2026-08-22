@@ -199,6 +199,7 @@ typedef struct media_pipe {
   int mp_hold_gate;
   int mp_hls_source;
   int mp_audio_wait_video_epoch;
+  int64_t mp_audio_wait_video_deadline;
 
   /*
    * Prebuffer logic
