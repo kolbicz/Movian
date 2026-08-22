@@ -86,6 +86,7 @@ mp_flush_locked(media_pipe_t *mp, int final)
 
   mq_flush_locked(mp, a, 0);
   mq_flush_locked(mp, v, 0);
+  mp->mp_interleave_read_ahead_reported = 0;
 
   mp->mp_epoch++;
 
@@ -211,11 +212,21 @@ mb_enqueue_with_events(media_pipe_t *mp, media_queue_t *mq, media_buf_t *mb)
 
   const int vminpkt = mp->mp_video.mq_stream != -1 ? 5 : 0;
   const int aminpkt = mp->mp_audio.mq_stream != -1 ? 5 : 0;
+  /* A badly interleaved file can contain many seconds of one stream before
+   * the first packet of another selected stream.  Movian has historically
+   * allowed the normal buffer limit to be exceeded until both queues have a
+   * small packet reserve.  Keep that useful behaviour, but bound it so a
+   * malformed or effectively missing stream cannot grow memory forever. */
+  const uint64_t interleave_read_ahead_limit =
+    (uint64_t)mp->mp_buffer_limit + 128ULL * 1024 * 1024;
 
   mp_update_buffer_delay(mp);
   mp_enqueue_check_pre_buffering(mp);
 
   while(1) {
+
+    const uint64_t next_buffer_size =
+      (uint64_t)mp->mp_buffer_current + mb_buffered_size(mb);
 
     e = TAILQ_FIRST(&mp->mp_eq);
     if(e != NULL)
@@ -232,11 +243,21 @@ mb_enqueue_with_events(media_pipe_t *mp, media_queue_t *mq, media_buf_t *mb)
     // These two safeguards so we don't run out of packets in any
     // of the queues
 
-    if(mp->mp_video.mq_packets_current < vminpkt)
-      break;
-
-    if(mp->mp_audio.mq_packets_current < aminpkt)
-      break;
+    if(mp->mp_video.mq_packets_current < vminpkt ||
+       mp->mp_audio.mq_packets_current < aminpkt) {
+      if(next_buffer_size <= interleave_read_ahead_limit) {
+        if(!mp->mp_interleave_read_ahead_reported &&
+           next_buffer_size > mp->mp_buffer_limit) {
+          mp->mp_interleave_read_ahead_reported = 1;
+          TRACE(TRACE_INFO, "Media",
+                "Extending startup read-ahead beyond %u MB for an underfilled selected stream (bounded at %llu MB)",
+                mp->mp_buffer_limit / (1024 * 1024),
+                (unsigned long long)(interleave_read_ahead_limit /
+                                     (1024 * 1024)));
+        }
+        break;
+      }
+    }
 
     hts_cond_wait(&mp->mp_backpressure, &mp->mp_mutex);
   }

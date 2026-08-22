@@ -819,6 +819,8 @@ mp_configure(media_pipe_t *mp, int flags, int buffer_size, int64_t duration,
     break;
   }
 
+  mp->mp_interleave_read_ahead_reported = 0;
+
   prop_set_int(mp->mp_prop_buffer_limit, mp->mp_buffer_limit);
   mp_set_duration(mp, duration);
 

@@ -119,6 +119,24 @@ typedef struct vtb_decoder {
   int vtbd_dv5_transfer_assumed_reported;
 } vtb_decoder_t;
 
+
+static void
+vtb_report_runtime_capabilities(void)
+{
+  static int reported;
+  if(!__sync_bool_compare_and_swap(&reported, 0, 1))
+    return;
+
+  TRACE(TRACE_INFO, "VTB",
+        "Apple hardware decode capabilities: H264=%s HEVC=%s DolbyVision=%s VP9=%s AV1=%s",
+        VTIsHardwareDecodeSupported(kCMVideoCodecType_H264) ? "yes" : "no",
+        VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC) ? "yes" : "no",
+        VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC) ?
+          "yes" : "no",
+        VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9) ? "yes" : "no",
+        VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1) ? "yes" : "no");
+}
+
 static uint16_t
 read_be16(const uint8_t *p)
 {
@@ -1765,6 +1783,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   if(!video_settings.video_accel)
     return 1;
+
+  vtb_report_runtime_capabilities();
 
   if(mcp == NULL)
     return 1;
