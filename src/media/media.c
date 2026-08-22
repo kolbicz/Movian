@@ -110,6 +110,7 @@ mp_create(const char *name, int flags)
 
   mp->mp_satisfied = -1;
   mp->mp_epoch = 1;
+  mp->mp_audio_wait_video_epoch = -1;
 
   mp->mp_mb_pool = pool_create("packet headers",
 			       sizeof(media_buf_t),
@@ -658,6 +659,44 @@ mp_unhold(media_pipe_t *mp, int flag)
   hts_mutex_lock(&mp->mp_mutex);
   mp->mp_hold_flags &= ~flag;
   mp_set_playstatus_by_hold_locked(mp, NULL);
+  hts_mutex_unlock(&mp->mp_mutex);
+}
+
+
+int
+mp_wait_audio_for_video_frame(media_pipe_t *mp)
+{
+  hts_mutex_lock(&mp->mp_mutex);
+  const int epoch = mp->mp_epoch;
+  mp->mp_audio_wait_video_epoch = epoch;
+  hts_cond_signal(&mp->mp_audio.mq_avail);
+  hts_mutex_unlock(&mp->mp_mutex);
+  return epoch;
+}
+
+
+void
+mp_video_frame_ready(media_pipe_t *mp, int epoch)
+{
+  hts_mutex_lock(&mp->mp_mutex);
+  if(mp->mp_audio_wait_video_epoch == epoch) {
+    mp->mp_audio_wait_video_epoch = -1;
+    hts_cond_signal(&mp->mp_audio.mq_avail);
+    TRACE(TRACE_DEBUG, "Media",
+          "First video frame ready for epoch %d; releasing audio", epoch);
+  }
+  hts_mutex_unlock(&mp->mp_mutex);
+}
+
+
+void
+mp_cancel_audio_video_wait(media_pipe_t *mp, int epoch)
+{
+  hts_mutex_lock(&mp->mp_mutex);
+  if(mp->mp_audio_wait_video_epoch == epoch) {
+    mp->mp_audio_wait_video_epoch = -1;
+    hts_cond_signal(&mp->mp_audio.mq_avail);
+  }
   hts_mutex_unlock(&mp->mp_mutex);
 }
 

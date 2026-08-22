@@ -666,6 +666,10 @@ audio_decode_thread(void *aux)
     }
     media_buf_t *data = TAILQ_FIRST(&mq->mq_q_data);
     media_buf_t *ctrl = TAILQ_FIRST(&mq->mq_q_ctrl);
+    if(ctrl == NULL && mp->mp_audio_wait_video_epoch >= 0) {
+      hts_cond_wait(&mq->mq_avail, &mp->mp_mutex);
+      continue;
+    }
     if(avail >= ad->ad_tile_size && blocked == 0 && !ad->ad_paused && !ctrl) {
       assert(avail != 0);
 

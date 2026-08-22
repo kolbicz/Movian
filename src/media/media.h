@@ -198,6 +198,7 @@ typedef struct media_pipe {
 
   int mp_hold_gate;
   int mp_hls_source;
+  int mp_audio_wait_video_epoch;
 
   /*
    * Prebuffer logic
@@ -491,6 +492,10 @@ void mp_hold(media_pipe_t *mp, int flag, const char *msg);
  * @flag is one of MP_HOLD_xxx flags
  */
 void mp_unhold(media_pipe_t *mp, int flag);
+
+int mp_wait_audio_for_video_frame(media_pipe_t *mp);
+void mp_video_frame_ready(media_pipe_t *mp, int epoch);
+void mp_cancel_audio_video_wait(media_pipe_t *mp, int epoch);
 
 /**
  * Set current URL.

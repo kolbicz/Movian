@@ -63,6 +63,8 @@ typedef struct vtb_decoder {
 
   hts_mutex_t vtbd_mutex;
   video_decoder_t *vtbd_vd;
+  media_pipe_t *vtbd_mp;
+  int vtbd_audio_wait_epoch;
 
   struct vtb_frame_list vtbd_frames;
   int64_t vtbd_max_ts;
@@ -1071,6 +1073,14 @@ static void
 vtb_flush(struct media_codec *mc, struct video_decoder *vd)
 {
   vtb_decoder_t *vtbd = mc->opaque;
+#if TARGET_OS_OSX
+  if(vtbd->vtbd_audio_wait_epoch >= 0)
+    mp_cancel_audio_video_wait(vtbd->vtbd_mp,
+                               vtbd->vtbd_audio_wait_epoch);
+  if(vtbd->vtbd_p010_direct || vtbd->vtbd_nv12_hdr_direct)
+    vtbd->vtbd_audio_wait_epoch =
+      mp_wait_audio_for_video_frame(vtbd->vtbd_mp);
+#endif
   VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
   VTDecompressionSessionInvalidate(vtbd->vtbd_session);
   CFRelease(vtbd->vtbd_session);
@@ -1089,6 +1099,13 @@ vtb_flush(struct media_codec *mc, struct video_decoder *vd)
 
   OSStatus status = vtb_create_session(vtbd);
   if(status) {
+#if TARGET_OS_OSX
+    if(vtbd->vtbd_audio_wait_epoch >= 0) {
+      mp_cancel_audio_video_wait(vtbd->vtbd_mp,
+                                 vtbd->vtbd_audio_wait_epoch);
+      vtbd->vtbd_audio_wait_epoch = -1;
+    }
+#endif
     TRACE(TRACE_ERROR, "VTB",
           "Unable to recreate decoder after seek (status=%d)", (int)status);
   }
@@ -1102,6 +1119,11 @@ static void
 vtb_close(struct media_codec *mc)
 {
   vtb_decoder_t *vtbd = mc->opaque;
+#if TARGET_OS_OSX
+  if(vtbd->vtbd_audio_wait_epoch >= 0)
+    mp_cancel_audio_video_wait(vtbd->vtbd_mp,
+                               vtbd->vtbd_audio_wait_epoch);
+#endif
   VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
   destroy_frames(vtbd);
 
@@ -1667,6 +1689,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 #endif
 
   vtb_decoder_t *vtbd = calloc(1, sizeof(vtb_decoder_t));
+  vtbd->vtbd_mp = mp;
+  vtbd->vtbd_audio_wait_epoch = -1;
   vtbd->vtbd_codec_id = mc->codec_id;
   if(mc->codec_id == AV_CODEC_ID_HEVC && codec_config_size > 21)
     vtbd->vtbd_nal_length_size = (codec_config[21] & 3) + 1;
@@ -1825,6 +1849,11 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   mc->decode = vtb_decode;
   mc->close = vtb_close;
   mc->flush = vtb_flush;
+
+#if TARGET_OS_OSX
+  if(vtbd->vtbd_p010_direct || vtbd->vtbd_nv12_hdr_direct)
+    vtbd->vtbd_audio_wait_epoch = mp_wait_audio_for_video_frame(mp);
+#endif
 
   TRACE(TRACE_INFO, "VTB",
         "Opened %s decoder %dx%d, source-depth=%d, transfer=%d, primaries=%d, matrix=%d, range=%d, hardware=required, pixel-format=%s, renderer=%s",

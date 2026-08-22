@@ -19,7 +19,6 @@ typedef struct p010_aux {
   int import_reported;
   int shader_transfer_reported;
   float reported_headroom;
-  unsigned int late_frames_dropped;
   int decoder_epoch;
   int decoder_epoch_valid;
   int metal_reported;
@@ -314,17 +313,6 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
 
   p010_aux_t *aux = gv->gv_aux;
 
-  media_pipe_t *mp = gv->gv_mp;
-  int64_t aclock = PTS_UNSET;
-  int audio_epoch = 0;
-  hts_mutex_lock(&mp->mp_clock_mutex);
-  if(mp->mp_audio_clock != PTS_UNSET && mp->mp_audio_clock_epoch != 0) {
-    aclock = mp->mp_audio_clock + arch_get_avtime() -
-      mp->mp_audio_clock_avtime + mp->mp_avdelta;
-    audio_epoch = mp->mp_audio_clock_epoch;
-  }
-  hts_mutex_unlock(&mp->mp_clock_mutex);
-
   /* A seek changes the decoder epoch.  Do not let decoded frames from the
    * previous epoch occupy the small zero-copy IOSurface pool while the new
    * epoch waits for a free slot.  The currently displayed surface is owned by
@@ -345,26 +333,10 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
     }
     aux->decoder_epoch = fi->fi_epoch;
     aux->decoder_epoch_valid = 1;
-    aux->late_frames_dropped = 0;
     if(flushed != 0)
       TRACE(TRACE_INFO, "GLW",
             "Direct P010 seek flushed %u stale queued frame(s) for epoch %d",
             flushed, fi->fi_epoch);
-  }
-
-  /* Catch up before retaining the decoder IOSurface or waiting for one of the
-   * four renderer slots.  Without this, HDR/HLG seeks can leave audio running
-   * while obsolete 4K frames are imported and displayed for several seconds. */
-  if(aclock != PTS_UNSET && audio_epoch == fi->fi_epoch &&
-     fi->fi_pts != PTS_UNSET && aclock - fi->fi_pts > 100000) {
-    aux->late_frames_dropped++;
-    if(aux->late_frames_dropped == 1 ||
-       !(aux->late_frames_dropped % 60))
-      TRACE(TRACE_INFO, "GLW",
-            "Direct P010 catch-up dropped %u late frame(s), video behind audio by %d ms",
-            aux->late_frames_dropped,
-            (int)((aclock - fi->fi_pts) / 1000));
-    return 0;
   }
 
   /* Preserve normal decoder backpressure.  Consuming or recycling frames
@@ -384,6 +356,7 @@ p010_deliver(const frame_info_t *fi, glw_video_t *gv,
   s->gvs_uploaded = 0;
   glw_video_put_surface(gv, s, fi->fi_pts, fi->fi_epoch,
                         fi->fi_duration, 0, 0);
+  mp_video_frame_ready(gv->gv_mp, fi->fi_epoch);
   return 0;
 }
 
