@@ -2287,7 +2287,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
           mcp->color_transfer == AVCOL_TRC_SMPTE2084)
     decode_mode = "HW+HDR";
   else if(vtbd->vtbd_hdr_to_sdr || vtbd->vtbd_p010_playback)
-    decode_mode = "HW+TM";
+    decode_mode = "HW+SDR";
   prop_set_string(mp->mp_video.mq_prop_decode_mode, decode_mode);
 
   const int source_depth = mcp->bits_per_component > 0 ?
