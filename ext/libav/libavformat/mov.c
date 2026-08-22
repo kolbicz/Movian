@@ -1566,6 +1566,9 @@ static int mov_read_enda(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     av_log(c->fc, AV_LOG_TRACE, "enda %d\n", little_endian);
     if (little_endian == 1) {
         switch (st->codecpar->codec_id) {
+        case AV_CODEC_ID_PCM_S16BE:
+            st->codecpar->codec_id = AV_CODEC_ID_PCM_S16LE;
+            break;
         case AV_CODEC_ID_PCM_S24BE:
             st->codecpar->codec_id = AV_CODEC_ID_PCM_S24LE;
             break;
@@ -1582,6 +1585,78 @@ static int mov_read_enda(MOVContext *c, AVIOContext *pb, MOVAtom atom)
             break;
         }
     }
+    return 0;
+}
+
+/*
+ * ISO/IEC 23003-5 uncompressed audio configuration.  FFmpeg gained
+ * support for the 'ipcm' and 'fpcm' sample entries after the 4.4 branch
+ * used by Movian.  Without parsing pcmC, those tracks reach the shared
+ * audio path without a valid codec/sample size and can corrupt decoder
+ * state instead of failing cleanly.
+ */
+static int mov_read_pcmc(MOVContext *c, AVIOContext *pb, MOVAtom atom)
+{
+    AVFormatContext *fc = c->fc;
+    AVStream *st;
+    MOVStreamContext *sc;
+    int version, flags, format_flags, pcm_sample_size;
+
+    if (atom.size < 6 || fc->nb_streams < 1)
+        return AVERROR_INVALIDDATA;
+
+    version = avio_r8(pb);
+    flags = avio_rb24(pb);
+    if (version != 0 || flags != 0) {
+        av_log(fc, AV_LOG_ERROR,
+               "Unsupported pcmC box version %d, flags %#x\n",
+               version, flags);
+        return AVERROR_INVALIDDATA;
+    }
+
+    format_flags = avio_r8(pb);
+    pcm_sample_size = avio_r8(pb);
+    st = fc->streams[fc->nb_streams - 1];
+    sc = st->priv_data;
+
+    if (sc->format == MKTAG('f','p','c','m')) {
+        switch (pcm_sample_size) {
+        case 32: st->codecpar->codec_id = AV_CODEC_ID_PCM_F32BE; break;
+        case 64: st->codecpar->codec_id = AV_CODEC_ID_PCM_F64BE; break;
+        default:
+            av_log(fc, AV_LOG_ERROR, "Invalid fpcm sample size %d\n",
+                   pcm_sample_size);
+            return AVERROR_INVALIDDATA;
+        }
+    } else if (sc->format == MKTAG('i','p','c','m')) {
+        switch (pcm_sample_size) {
+        case 16: st->codecpar->codec_id = AV_CODEC_ID_PCM_S16BE; break;
+        case 24: st->codecpar->codec_id = AV_CODEC_ID_PCM_S24BE; break;
+        case 32: st->codecpar->codec_id = AV_CODEC_ID_PCM_S32BE; break;
+        default:
+            av_log(fc, AV_LOG_ERROR, "Invalid ipcm sample size %d\n",
+                   pcm_sample_size);
+            return AVERROR_INVALIDDATA;
+        }
+    } else {
+        av_log(fc, AV_LOG_ERROR, "pcmC has invalid sample entry '%s'\n",
+               av_fourcc2str(sc->format));
+        return AVERROR_INVALIDDATA;
+    }
+
+    if (format_flags & 1) {
+        switch (st->codecpar->codec_id) {
+        case AV_CODEC_ID_PCM_S16BE: st->codecpar->codec_id = AV_CODEC_ID_PCM_S16LE; break;
+        case AV_CODEC_ID_PCM_S24BE: st->codecpar->codec_id = AV_CODEC_ID_PCM_S24LE; break;
+        case AV_CODEC_ID_PCM_S32BE: st->codecpar->codec_id = AV_CODEC_ID_PCM_S32LE; break;
+        case AV_CODEC_ID_PCM_F32BE: st->codecpar->codec_id = AV_CODEC_ID_PCM_F32LE; break;
+        case AV_CODEC_ID_PCM_F64BE: st->codecpar->codec_id = AV_CODEC_ID_PCM_F64LE; break;
+        default: break;
+        }
+    }
+
+    st->codecpar->bits_per_coded_sample =
+        av_get_bits_per_sample(st->codecpar->codec_id);
     return 0;
 }
 
@@ -6954,6 +7029,7 @@ static const MOVParseTableEntry mov_default_parse_table[] = {
 { MKTAG('e','d','t','s'), mov_read_default },
 { MKTAG('e','l','s','t'), mov_read_elst },
 { MKTAG('e','n','d','a'), mov_read_enda },
+{ MKTAG('p','c','m','C'), mov_read_pcmc },
 { MKTAG('f','i','e','l'), mov_read_fiel },
 { MKTAG('a','d','r','m'), mov_read_adrm },
 { MKTAG('f','t','y','p'), mov_read_ftyp },
