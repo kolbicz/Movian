@@ -688,12 +688,12 @@ mp_video_frame_ready(media_pipe_t *mp, int epoch, int64_t video_pts)
     mp->mp_audio_wait_video_deadline = 0;
     hts_cond_signal(&mp->mp_audio.mq_avail);
     if(video_pts != PTS_UNSET && audio_pts != PTS_UNSET)
-      TRACE(TRACE_INFO, "Media",
+      TRACE(TRACE_DEBUG, "Media",
             "First video frame ready for epoch %d; releasing audio (video PTS %.3f, queued audio PTS %.3f, audio-video delta %d ms)",
             epoch, video_pts / 1000000.0, audio_pts / 1000000.0,
             (int)((audio_pts - video_pts) / 1000));
     else
-      TRACE(TRACE_INFO, "Media",
+      TRACE(TRACE_DEBUG, "Media",
             "First video frame ready for epoch %d; releasing audio (video PTS %s, queued audio PTS %s)",
             epoch, video_pts == PTS_UNSET ? "unset" : "set",
             audio_pts == PTS_UNSET ? "unset" : "set");

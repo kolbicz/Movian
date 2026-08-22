@@ -783,7 +783,7 @@ vtb_frame_precedes_audio_start(vtb_decoder_t *vtbd, int epoch, int64_t pts)
   if(suppress) {
     vtbd->vtbd_preroll_frames_suppressed++;
     if(vtbd->vtbd_preroll_frames_suppressed == 1)
-      TRACE(TRACE_INFO, "VTB",
+      TRACE(TRACE_DEBUG, "VTB",
             "Suppressing video preroll before audio start (video PTS %.3f, audio PTS %.3f)",
             pts / 1000000.0, audio_pts / 1000000.0);
   }
@@ -1436,7 +1436,7 @@ hevc_inband_open(media_codec_t *mc, const media_codec_params_t *mcp)
   mc->decode = hevc_inband_decode;
   mc->flush = hevc_inband_flush;
   mc->close = hevc_inband_close;
-  TRACE(TRACE_INFO, "VTB",
+  TRACE(TRACE_DEBUG, "VTB",
         "Deferring HEVC decoder creation for in-band VPS/SPS/PPS");
   return 0;
 }
@@ -1679,7 +1679,7 @@ hevc_annexb_configure(media_codec_t *mc, hevc_annexb_config_t *hac,
       hac->params.sar_num = ctx->sample_aspect_ratio.num;
       hac->params.sar_den = ctx->sample_aspect_ratio.den;
     }
-    TRACE(TRACE_INFO, "VTB",
+    TRACE(TRACE_DEBUG, "VTB",
           "HEVC Annex-B parser metadata: %ux%u depth=%d transfer=%d primaries=%d matrix=%d range=%d",
           hac->params.width, hac->params.height,
           hac->params.bits_per_component, hac->params.color_transfer,

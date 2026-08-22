@@ -104,7 +104,7 @@ typedef struct media_codec_params {
   /* Internal Apple decoder hint: extradata was synthesized from an MPEG-TS
    * HEVC Annex-B access unit and should be validated from its parameter sets
    * rather than treated as a container-owned hvcC atom. */
-  int hevc_annexb_config : 1;
+  unsigned int hevc_annexb_config : 1;
   unsigned int sar_num;
   unsigned int sar_den;
 

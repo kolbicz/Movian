@@ -5,9 +5,6 @@ set -euo pipefail
 ROOTDIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BUILDDIR="${ROOTDIR}/build.m7osx"
 APP="${BUILDDIR}/dist/Movian.app"
-VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
-  "${APP}/Contents/Info.plist" 2>/dev/null || echo "7.0.273.1")
-DMG=${DMG:-"${BUILDDIR}/Movian-macOS-${VERSION}-arm64.dmg"}
 SIGN_IDENTITY=${SIGN_IDENTITY:-"Developer ID Application: Christoph Kolbicz (LPYXN7JAC8)"}
 NOTARY_PROFILE=${NOTARY_PROFILE:-movian-notary}
 DO_BUILD=1
@@ -34,6 +31,12 @@ if [ ! -d "$APP" ]; then
   echo "Missing application bundle: $APP" >&2
   exit 1
 fi
+
+# Read the version from the freshly built bundle. Reading it before `make dist`
+# can retain the preceding release number during incremental release builds.
+VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+  "${APP}/Contents/Info.plist" 2>/dev/null || echo "7.0.276")
+DMG=${DMG:-"${BUILDDIR}/Movian-macOS-${VERSION}-arm64.dmg"}
 
 if ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
   echo "Signing identity is not available: $SIGN_IDENTITY" >&2

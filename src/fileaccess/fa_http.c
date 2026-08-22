@@ -1000,7 +1000,7 @@ http_headers_init(struct http_header_list *l, const http_file_t *hf)
 	{
 #if defined(__APPLE__)
 	  /* Keep plugin-facing compatibility tied to the imported M7 core. */
-	  snprintf(str, sizeof(str), APPNAMEUSER" %s 7.0.273",
+	  snprintf(str, sizeof(str), APPNAMEUSER" %s 7.0.276",
 	           arch_get_system_type());
 #else
 	  snprintf(str, sizeof(str), APPNAMEUSER" %s %s",

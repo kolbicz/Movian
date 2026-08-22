@@ -153,7 +153,7 @@ video_settings_init(void)
 
 #if TARGET_OS_OSX
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("Direct P010 IOSurface rendering (Test 3)")),
+                 SETTING_TITLE(_p("Direct P010 IOSurface rendering")),
                  SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),
@@ -161,7 +161,7 @@ video_settings_init(void)
                  NULL);
 #elif TARGET_OS_IPHONE
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
-                 SETTING_TITLE(_p("Direct P010 rendering (experimental)")),
+                 SETTING_TITLE(_p("Direct P010 rendering")),
                  SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
                  SETTING_VALUE(0),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),
