@@ -67,6 +67,7 @@ typedef struct media_queue {
   prop_t *mq_prop_upload_peak;
 
   prop_t *mq_prop_codec;
+  prop_t *mq_prop_decode_mode;
 
   prop_t *mq_prop_vq;
   prop_t *mq_prop_aq;

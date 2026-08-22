@@ -261,6 +261,9 @@ p010_render(glw_video_t *gv, glw_rctx_t *rc)
   gv->gv_height = sa->gvs_height[0];
   const float edr_headroom = osx_get_edr_headroom(gr);
   const int use_edr = edr_headroom > 1.0f;
+  if(!use_edr && (sa->gvs_format == AVCOL_TRC_SMPTE2084 ||
+                  sa->gvs_format == AVCOL_TRC_ARIB_STD_B67))
+    prop_set_string(gv->gv_mp->mp_video.mq_prop_decode_mode, "HW+TM");
   gv->gv_gpa.gpa_edr_headroom = edr_headroom;
   gv->gv_gpa.gpa_hdr_peak_luminance = sa->gvs_hdr_peak_luminance;
 

@@ -731,6 +731,8 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   }
 
   prop_set_string(mq->mq_prop_codec, buf);
+  if(avctx->codec_type == AVMEDIA_TYPE_VIDEO)
+    prop_set_string(mq->mq_prop_decode_mode, "SW");
 
   if(mq->mq_meta_width && mq->mq_meta_height)
   {

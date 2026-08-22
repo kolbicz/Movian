@@ -433,6 +433,7 @@ gvv_render(glw_video_t *gv, glw_rctx_t *rc)
         return;
       gvv->gvv_native_enabled = 0;
       ios_native_p010_flush();
+      prop_set_string(gv->gv_mp->mp_video.mq_prop_decode_mode, "HW+TM");
       if(!gvv->gvv_native_failed_reported) {
         gvv->gvv_native_failed_reported = 1;
         TRACE(TRACE_INFO, "GLW",
@@ -702,6 +703,7 @@ p010_ios_render(glw_video_t *gv, glw_rctx_t *rc)
 
     gvv->gvv_native_enabled = 0;
     ios_native_p010_flush();
+    prop_set_string(gv->gv_mp->mp_video.mq_prop_decode_mode, "HW+TM");
     if(!gvv->gvv_native_failed_reported) {
       gvv->gvv_native_failed_reported = 1;
       if(native_result == -2)

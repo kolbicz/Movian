@@ -67,7 +67,10 @@ widget(container_x, {
 			 $core.media.current.metadata.format ?? $core.media.current.format, isVoid($core.media.current.metadata.format ?? $core.media.current.format));
 
 		InfoLine(_("Video codec"),
-			 $core.media.current.video.codec,
+			 select(isVoid($core.media.current.video.decodeMode),
+			        $core.media.current.video.codec,
+			        $core.media.current.video.codec + " (" +
+			        $core.media.current.video.decodeMode + ")"),
 			 isVoid($core.media.current.video.codec));
 
 		InfoLine(_("Video info"),
