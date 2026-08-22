@@ -569,6 +569,17 @@ audio_process_audio(audio_decoder_t *ad, media_buf_t *mb)
     ad->ad_in_sample_format  = frame->format;
     ad->ad_in_channel_layout = frame->channel_layout;
 
+    const int in_channels =
+      av_get_channel_layout_nb_channels(ad->ad_in_channel_layout);
+    if(ad->ad_in_channel_layout == AV_CH_LAYOUT_STEREO || in_channels == 2)
+      prop_set_string(mq->mq_prop_aq, "2.0");
+    else if(ad->ad_in_channel_layout == AV_CH_LAYOUT_5POINT1 ||
+            in_channels == 6)
+      prop_set_string(mq->mq_prop_aq, "5.1");
+    else if(ad->ad_in_channel_layout == AV_CH_LAYOUT_7POINT1 ||
+            in_channels == 8)
+      prop_set_string(mq->mq_prop_aq, "7.1");
+
     ac->ac_reconfig(ad);
 
     if(ad->ad_avr == NULL)

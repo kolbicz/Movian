@@ -667,7 +667,8 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
      mq->mq_meta_channels       == avctx->channels &&
      mq->mq_meta_channel_layout == avctx->channel_layout &&
      mq->mq_meta_width          == avctx->width &&
-     mq->mq_meta_height         == avctx->height)
+     mq->mq_meta_height         == avctx->height &&
+     mq->mq_meta_color_transfer == avctx->color_trc)
     return;
 
   mq->mq_meta_codec_id       = codec->id;
@@ -676,8 +677,10 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   mq->mq_meta_channel_layout = avctx->channel_layout;
   mq->mq_meta_width          = avctx->width;
   mq->mq_meta_height         = avctx->height;
+  mq->mq_meta_color_transfer = avctx->color_trc;
 
-  if(mq->mq_meta_channels==2)
+  if(mq->mq_meta_channel_layout == AV_CH_LAYOUT_STEREO ||
+     mq->mq_meta_channels == 2)
 	  prop_set_string(mq->mq_prop_aq, "2.0");
   else
   if(mq->mq_meta_channels==3)
@@ -689,11 +692,15 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
   if(mq->mq_meta_channels==5)
 	  prop_set_string(mq->mq_prop_aq, "5.0");
   else
-  if(mq->mq_meta_channels==6)
+  if(mq->mq_meta_channel_layout == AV_CH_LAYOUT_5POINT1 ||
+     mq->mq_meta_channels == 6)
 	  prop_set_string(mq->mq_prop_aq, "5.1");
   else
-  if(mq->mq_meta_channels==8)
+  if(mq->mq_meta_channel_layout == AV_CH_LAYOUT_7POINT1 ||
+     mq->mq_meta_channels == 8)
 	  prop_set_string(mq->mq_prop_aq, "7.1");
+  else if(mq->mq_meta_channels < 1 || mq->mq_meta_channels > 8)
+	  prop_set_string(mq->mq_prop_aq, NULL);
 
   char buf[128];
   metadata_from_libav(buf, sizeof(buf), codec, avctx);
@@ -738,5 +745,12 @@ mp_set_mq_meta(media_queue_t *mq, const AVCodec *codec,
 	  else
 		  prop_set_string(mq->mq_prop_vq, "SD");
   }
+
+  if(avctx->color_trc == AVCOL_TRC_ARIB_STD_B67)
+    prop_set_string(mq->mq_prop_hdr, "HLG");
+  else if(avctx->color_trc == AVCOL_TRC_SMPTE2084)
+    prop_set_string(mq->mq_prop_hdr, "HDR");
+  else
+    prop_set_string(mq->mq_prop_hdr, NULL);
 
 }

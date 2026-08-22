@@ -491,6 +491,8 @@ BUNDLES-$(CONFIG_GLW_BACKEND_OPENGL_ES) += res/shaders/glsl
 
 ${BUILDDIR}/src/ui/glw/%.o : CFLAGS = ${OPTFLAGS} ${CFLAGS_std} -ffast-math
 
+${BUILDDIR}/src/video/vtb.o : CFLAGS += -Iext/libav
+
 ##############################################################
 # GTK based interface
 ##############################################################

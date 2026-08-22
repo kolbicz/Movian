@@ -678,15 +678,25 @@ mp_wait_audio_for_video_frame(media_pipe_t *mp)
 
 
 void
-mp_video_frame_ready(media_pipe_t *mp, int epoch)
+mp_video_frame_ready(media_pipe_t *mp, int epoch, int64_t video_pts)
 {
   hts_mutex_lock(&mp->mp_mutex);
   if(mp->mp_audio_wait_video_epoch == epoch) {
+    media_buf_t *audio = TAILQ_FIRST(&mp->mp_audio.mq_q_data);
+    const int64_t audio_pts = audio != NULL ? audio->mb_pts : PTS_UNSET;
     mp->mp_audio_wait_video_epoch = -1;
     mp->mp_audio_wait_video_deadline = 0;
     hts_cond_signal(&mp->mp_audio.mq_avail);
-    TRACE(TRACE_DEBUG, "Media",
-          "First video frame ready for epoch %d; releasing audio", epoch);
+    if(video_pts != PTS_UNSET && audio_pts != PTS_UNSET)
+      TRACE(TRACE_INFO, "Media",
+            "First video frame ready for epoch %d; releasing audio (video PTS %.3f, queued audio PTS %.3f, audio-video delta %d ms)",
+            epoch, video_pts / 1000000.0, audio_pts / 1000000.0,
+            (int)((audio_pts - video_pts) / 1000));
+    else
+      TRACE(TRACE_INFO, "Media",
+            "First video frame ready for epoch %d; releasing audio (video PTS %s, queued audio PTS %s)",
+            epoch, video_pts == PTS_UNSET ? "unset" : "set",
+            audio_pts == PTS_UNSET ? "unset" : "set");
   }
   hts_mutex_unlock(&mp->mp_mutex);
 }

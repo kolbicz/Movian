@@ -70,6 +70,7 @@ typedef struct media_queue {
 
   prop_t *mq_prop_vq;
   prop_t *mq_prop_aq;
+  prop_t *mq_prop_hdr;
 
   prop_t *mq_prop_bw; // network bandwidth
 
@@ -85,6 +86,7 @@ typedef struct media_queue {
   uint64_t mq_meta_channel_layout;
   int mq_meta_width;
   int mq_meta_height;
+  int mq_meta_color_transfer;
 
   media_discontinuity_aux_t mq_demux_debug;
 

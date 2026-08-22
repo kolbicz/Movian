@@ -101,6 +101,10 @@ typedef struct media_codec_params {
   uint8_t dovi_bl_compatibility_id;
   int cheat_for_speed : 1;
   int broken_aud_placement : 1;
+  /* Internal Apple decoder hint: extradata was synthesized from an MPEG-TS
+   * HEVC Annex-B access unit and should be validated from its parameter sets
+   * rather than treated as a container-owned hvcC atom. */
+  int hevc_annexb_config : 1;
   unsigned int sar_num;
   unsigned int sar_den;
 

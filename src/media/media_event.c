@@ -533,4 +533,3 @@ mp_event_set_callback(struct media_pipe *mp,
   mp->mp_handle_event_opaque = opaque;
   hts_mutex_unlock(&mp->mp_mutex);
 }
-

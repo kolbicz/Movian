@@ -34,6 +34,28 @@
 #if TARGET_OS_OSX || TARGET_OS_IPHONE
 #include "../../ext/libav/libavcodec/cbs.h"
 #include "../../ext/libav/libavcodec/cbs_av1.h"
+#include "../../ext/libav/libavformat/avio.h"
+#include "../../ext/libav/libavformat/hevc.h"
+#include "../../ext/libav/libavutil/mem.h"
+#include "../../ext/libav/libavutil/pixdesc.h"
+
+/* The minimal Apple libav builds omit the MOV muxer's AVC/HEVC helpers, even
+ * though those helpers are also exactly what an Annex-B decoder bridge needs.
+ * Compile that small, LGPL-covered conversion code into this Apple-only
+ * translation unit so both the Makefile macOS build and Xcode iOS build use
+ * the same validated hvcC writer. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpointer-sign"
+#pragma clang diagnostic ignored "-Wbitwise-op-parentheses"
+#define SUINT unsigned
+#define get_ue_golomb movian_avc_get_ue_golomb
+#define get_se_golomb movian_avc_get_se_golomb
+#include "../../ext/libav/libavformat/avc.c"
+#undef get_ue_golomb
+#undef get_se_golomb
+#include "../../ext/libav/libavformat/hevc.c"
+#undef SUINT
+#pragma clang diagnostic pop
 #endif
 
 
@@ -92,6 +114,7 @@ typedef struct vtb_decoder {
   int vtbd_sdr_output_reported;
   unsigned int vtbd_decode_errors;
   int vtbd_decode_error_notified;
+  unsigned int vtbd_preroll_frames_suppressed;
   int vtbd_hdr10plus_reported;
   int vtbd_dv5_transfer_assumed_reported;
 } vtb_decoder_t;
@@ -662,11 +685,11 @@ destroy_frames(vtb_decoder_t *vtbd)
 
 
 static void
-vtb_first_frame_ready(vtb_decoder_t *vtbd, int epoch)
+vtb_first_frame_ready(vtb_decoder_t *vtbd, int epoch, int64_t pts)
 {
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
   if(vtbd->vtbd_audio_wait_epoch == epoch) {
-    mp_video_frame_ready(vtbd->vtbd_mp, epoch);
+    mp_video_frame_ready(vtbd->vtbd_mp, epoch, pts);
     vtbd->vtbd_audio_wait_epoch = -1;
   }
 #endif
@@ -676,12 +699,62 @@ vtb_first_frame_ready(vtb_decoder_t *vtbd, int epoch)
 static void
 vtb_cancel_audio_wait(vtb_decoder_t *vtbd)
 {
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
   if(vtbd->vtbd_audio_wait_epoch >= 0) {
     mp_cancel_audio_video_wait(vtbd->vtbd_mp,
                                vtbd->vtbd_audio_wait_epoch);
     vtbd->vtbd_audio_wait_epoch = -1;
   }
+#endif
+}
+
+
+static int
+vtb_decode_error_is_terminal(OSStatus status)
+{
+  switch(status) {
+  case kVTVideoDecoderUnsupportedDataFormatErr:
+  case kVTVideoDecoderMalfunctionErr:
+  case kVTVideoDecoderNotAvailableNowErr:
+  case kVTVideoDecoderAuthorizationErr:
+  case kVTVideoDecoderRemovedErr:
+  case kVTVideoDecoderNeedsRosettaErr:
+  case kVTVideoDecoderCallbackMessagingErr:
+  case kVTVideoDecoderUnknownErr:
+    return 1;
+  default:
+    /* Bad data and a missing reference frame can affect one preroll frame
+     * while the same decoder session remains usable. */
+    return 0;
+  }
+}
+
+
+static int
+vtb_frame_precedes_audio_start(vtb_decoder_t *vtbd, int epoch, int64_t pts)
+{
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+  if(vtbd->vtbd_audio_wait_epoch != epoch || pts == PTS_UNSET)
+    return 0;
+
+  media_pipe_t *mp = vtbd->vtbd_mp;
+  hts_mutex_lock(&mp->mp_mutex);
+  media_buf_t *audio = TAILQ_FIRST(&mp->mp_audio.mq_q_data);
+  const int64_t audio_pts = audio != NULL ? audio->mb_pts : PTS_UNSET;
+  const int suppress = mp->mp_audio_wait_video_epoch == epoch &&
+    audio_pts != PTS_UNSET && pts < audio_pts;
+  hts_mutex_unlock(&mp->mp_mutex);
+
+  if(suppress) {
+    vtbd->vtbd_preroll_frames_suppressed++;
+    if(vtbd->vtbd_preroll_frames_suppressed == 1)
+      TRACE(TRACE_INFO, "VTB",
+            "Suppressing video preroll before audio start (video PTS %.3f, audio PTS %.3f)",
+            pts / 1000000.0, audio_pts / 1000000.0);
+  }
+  return suppress;
+#else
+  return 0;
 #endif
 }
 
@@ -732,6 +805,11 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   fi.fi_width = siz.width;
   fi.fi_height = siz.height;
 
+  if(vtb_frame_precedes_audio_start(vtbd, fi.fi_epoch, fi.fi_pts)) {
+    vtbd->vtbd_last_pts = fi.fi_pts;
+    return;
+  }
+
 
   video_decoder_t *vd = vtbd->vtbd_vd;
   vd->vd_estimated_duration = fi.fi_duration; // For bitrate calculations
@@ -770,7 +848,7 @@ emit_frame(vtb_decoder_t *vtbd, vtb_frame_t *vf, media_queue_t *mq)
   }
 
   if(delivered)
-    vtb_first_frame_ready(vtbd, fi.fi_epoch);
+    vtb_first_frame_ready(vtbd, fi.fi_epoch, fi.fi_pts);
 
 
 
@@ -852,7 +930,7 @@ picture_out(void *decompressionOutputRefCon,
   }
 
   if(imageBuffer == NULL) {
-    if(status != noErr)
+    if(status != noErr && vtb_decode_error_is_terminal(status))
       vtb_cancel_audio_wait(vtbd);
     return; // No frame, typically from kVTDecodeFrame_DoNotOutputFrame
   }
@@ -1105,11 +1183,10 @@ static void
 vtb_flush(struct media_codec *mc, struct video_decoder *vd)
 {
   vtb_decoder_t *vtbd = mc->opaque;
-#if TARGET_OS_OSX
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
   vtb_cancel_audio_wait(vtbd);
-  if(vtbd->vtbd_p010_direct || vtbd->vtbd_nv12_hdr_direct)
-    vtbd->vtbd_audio_wait_epoch =
-      mp_wait_audio_for_video_frame(vtbd->vtbd_mp);
+  vtbd->vtbd_audio_wait_epoch =
+    mp_wait_audio_for_video_frame(vtbd->vtbd_mp);
 #endif
   if(vtbd->vtbd_session != NULL) {
     VTDecompressionSessionWaitForAsynchronousFrames(vtbd->vtbd_session);
@@ -1127,6 +1204,7 @@ vtb_flush(struct media_codec *mc, struct video_decoder *vd)
   vtbd->vtbd_sdr_output_reported = 0;
   vtbd->vtbd_decode_errors = 0;
   vtbd->vtbd_decode_error_notified = 0;
+  vtbd->vtbd_preroll_frames_suppressed = 0;
   hts_mutex_unlock(&vtbd->vtbd_mutex);
 
   OSStatus status = vtb_create_session(vtbd);
@@ -1329,6 +1407,351 @@ hevc_inband_open(media_codec_t *mc, const media_codec_params_t *mcp)
 }
 
 
+/* MPEG-TS carries HEVC as Annex-B access units.  Unlike MP4/fMP4 there is no
+ * hvcC decoder configuration record for CoreMedia, and VideoToolbox accepts
+ * length-prefixed NAL units only.  Keep this adapter separate from the MP4
+ * in-band-config workaround above: it builds hvcC from the stream's in-band
+ * VPS/SPS/PPS and converts each complete access unit before passing it to the
+ * ordinary VideoToolbox codec. */
+typedef struct hevc_annexb_config {
+  media_codec_t *decoder;
+  media_codec_params_t params;
+  uint8_t *source_extradata;
+  uint8_t *hvcc;
+  size_t hvcc_size;
+} hevc_annexb_config_t;
+
+static void
+hevc_annexb_probe_metadata(media_codec_params_t *params,
+                           const uint8_t *data, size_t size)
+{
+  if(size > INT_MAX)
+    return;
+
+  const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
+  AVCodecContext *ctx = codec != NULL ? avcodec_alloc_context3(codec) : NULL;
+  AVFrame *frame = av_frame_alloc();
+  if(ctx == NULL || frame == NULL)
+    goto done;
+
+  ctx->thread_count = 1;
+  if(avcodec_open2(ctx, codec, NULL) < 0)
+    goto done;
+
+  AVPacket packet = {
+    .data = (uint8_t *)data,
+    .size = (int)size,
+  };
+  int got_frame = 0;
+  avcodec_decode_video2(ctx, frame, &got_frame, &packet);
+
+  if(ctx->width > 0)
+    params->width = ctx->width;
+  if(ctx->height > 0)
+    params->height = ctx->height;
+  if(ctx->profile != FF_PROFILE_UNKNOWN)
+    params->profile = ctx->profile;
+  if(ctx->level != FF_LEVEL_UNKNOWN)
+    params->level = ctx->level;
+
+  const enum AVPixelFormat format = got_frame && frame->format >= 0 ?
+    frame->format : ctx->pix_fmt;
+  if(format != AV_PIX_FMT_NONE) {
+    params->pixel_format = format;
+    const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(format);
+    if(desc != NULL && desc->nb_components != 0)
+      params->bits_per_component = desc->comp[0].depth;
+  }
+
+  if(got_frame) {
+    params->color_primaries = frame->color_primaries;
+    params->color_transfer = frame->color_trc;
+    params->color_matrix = frame->colorspace;
+    params->color_range = frame->color_range;
+    if(frame->sample_aspect_ratio.num > 0 &&
+       frame->sample_aspect_ratio.den > 0) {
+      params->sar_num = frame->sample_aspect_ratio.num;
+      params->sar_den = frame->sample_aspect_ratio.den;
+    }
+  } else {
+    params->color_primaries = ctx->color_primaries;
+    params->color_transfer = ctx->color_trc;
+    params->color_matrix = ctx->colorspace;
+    params->color_range = ctx->color_range;
+  }
+
+  TRACE(TRACE_INFO, "VTB",
+        "HEVC Annex-B metadata probe: frame=%s %ux%u depth=%d transfer=%d primaries=%d matrix=%d range=%d",
+        got_frame ? "decoded" : "not decoded",
+        params->width, params->height, params->bits_per_component,
+        params->color_transfer, params->color_primaries,
+        params->color_matrix, params->color_range);
+
+done:
+  if(ctx != NULL) {
+    if(ctx->codec != NULL)
+      avcodec_close(ctx);
+    av_free(ctx);
+  }
+  av_frame_free(&frame);
+}
+
+static int
+hevc_annexb_has_parameter_sets(const uint8_t *data, size_t size)
+{
+  unsigned mask = 0;
+  size_t i = 0;
+
+  while(i + 4 <= size) {
+    size_t sc;
+    if(data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1)
+      sc = 3;
+    else if(i + 5 <= size && data[i] == 0 && data[i + 1] == 0 &&
+            data[i + 2] == 0 && data[i + 3] == 1)
+      sc = 4;
+    else {
+      i++;
+      continue;
+    }
+
+    if(i + sc + 2 <= size) {
+      const int type = (data[i + sc] >> 1) & 0x3f;
+      if(type >= 32 && type <= 34)
+        mask |= 1U << (type - 32);
+    }
+    i += sc;
+  }
+  return mask == 7;
+}
+
+static int
+hevc_annexb_make_hvcc(const uint8_t *data, size_t size,
+                      uint8_t **result, size_t *result_size)
+{
+  AVIOContext *pb = NULL;
+  uint8_t *hvcc = NULL;
+  if(size > INT_MAX || avio_open_dyn_buf(&pb) < 0)
+    return -1;
+
+  const int err = ff_isom_write_hvcc(pb, data, (int)size, 1);
+  const int hvcc_size = avio_close_dyn_buf(pb, &hvcc);
+  if(err < 0 || hvcc_size <= 0) {
+    av_free(hvcc);
+    return -1;
+  }
+  *result = hvcc;
+  *result_size = hvcc_size;
+  return 0;
+}
+
+
+static OSStatus
+hevc_format_description_from_hvcc_parameter_sets(const uint8_t *hvcc,
+                                                  size_t hvcc_size,
+                                                  CFDictionaryRef extensions,
+                                                  CMVideoFormatDescriptionRef *fmt)
+{
+  if(hvcc == NULL || hvcc_size < 23 || hvcc[0] != 1)
+    return kCMFormatDescriptionError_InvalidParameter;
+
+  const uint8_t *parameter_sets[3] = {NULL, NULL, NULL};
+  size_t parameter_set_sizes[3] = {0, 0, 0};
+  size_t offset = 23;
+  const unsigned int arrays = hvcc[22];
+
+  for(unsigned int array = 0; array < arrays; array++) {
+    if(offset + 3 > hvcc_size)
+      return kCMFormatDescriptionError_InvalidParameter;
+    const int nal_type = hvcc[offset++] & 0x3f;
+    const unsigned int nal_count = (hvcc[offset] << 8) | hvcc[offset + 1];
+    offset += 2;
+
+    for(unsigned int nal = 0; nal < nal_count; nal++) {
+      if(offset + 2 > hvcc_size)
+        return kCMFormatDescriptionError_InvalidParameter;
+      const size_t nal_size = (hvcc[offset] << 8) | hvcc[offset + 1];
+      offset += 2;
+      if(nal_size == 0 || offset + nal_size > hvcc_size)
+        return kCMFormatDescriptionError_InvalidParameter;
+      if(nal_type >= 32 && nal_type <= 34 &&
+         parameter_sets[nal_type - 32] == NULL) {
+        parameter_sets[nal_type - 32] = hvcc + offset;
+        parameter_set_sizes[nal_type - 32] = nal_size;
+      }
+      offset += nal_size;
+    }
+  }
+
+  if(parameter_sets[0] == NULL || parameter_sets[1] == NULL ||
+     parameter_sets[2] == NULL)
+    return kCMFormatDescriptionError_InvalidParameter;
+
+  CFMutableDictionaryRef native_extensions =
+    CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, extensions);
+  CFDictionaryRemoveValue(native_extensions,
+    kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms);
+  const OSStatus status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+    kCFAllocatorDefault, 3, parameter_sets, parameter_set_sizes, 4,
+    native_extensions, fmt);
+  CFRelease(native_extensions);
+  return status;
+}
+
+static int
+hevc_annexb_configure(media_codec_t *mc, hevc_annexb_config_t *hac,
+                      const uint8_t *data, size_t size)
+{
+  uint8_t *hvcc;
+  size_t hvcc_size;
+  if(!hevc_annexb_has_parameter_sets(data, size) ||
+     hevc_annexb_make_hvcc(data, size, &hvcc, &hvcc_size))
+    return -1;
+
+  hac->hvcc = hvcc;
+  hac->hvcc_size = hvcc_size;
+
+  /* The MPEG-TS path creates the codec before the HEVC parser has seen an
+   * SPS, so its initial media_codec_params_t contains no profile, dimensions
+   * or colour description.  av_parser_parse2() has populated fmt_ctx by the
+   * time the first complete access unit reaches us.  Carry that information
+   * into the nested VideoToolbox codec; otherwise a correctly tagged PQ/HLG
+   * stream is mistaken for untagged Main10 and falls back to software. */
+  const AVCodecContext *ctx = mc->fmt_ctx;
+  if(ctx != NULL) {
+    if(ctx->width > 0)
+      hac->params.width = ctx->width;
+    if(ctx->height > 0)
+      hac->params.height = ctx->height;
+    if(ctx->profile != FF_PROFILE_UNKNOWN)
+      hac->params.profile = ctx->profile;
+    if(ctx->level != FF_LEVEL_UNKNOWN)
+      hac->params.level = ctx->level;
+    if(ctx->pix_fmt != AV_PIX_FMT_NONE)
+      hac->params.pixel_format = ctx->pix_fmt;
+    if(ctx->bits_per_raw_sample > 0) {
+      hac->params.bits_per_component = ctx->bits_per_raw_sample;
+    } else if(ctx->pix_fmt != AV_PIX_FMT_NONE) {
+      const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(ctx->pix_fmt);
+      if(desc != NULL && desc->nb_components != 0)
+        hac->params.bits_per_component = desc->comp[0].depth;
+    }
+    hac->params.color_primaries = ctx->color_primaries;
+    hac->params.color_transfer = ctx->color_trc;
+    hac->params.color_matrix = ctx->colorspace;
+    hac->params.color_range = ctx->color_range;
+    if(ctx->sample_aspect_ratio.num > 0 &&
+       ctx->sample_aspect_ratio.den > 0) {
+      hac->params.sar_num = ctx->sample_aspect_ratio.num;
+      hac->params.sar_den = ctx->sample_aspect_ratio.den;
+    }
+    TRACE(TRACE_INFO, "VTB",
+          "HEVC Annex-B parser metadata: %ux%u depth=%d transfer=%d primaries=%d matrix=%d range=%d",
+          hac->params.width, hac->params.height,
+          hac->params.bits_per_component, hac->params.color_transfer,
+          hac->params.color_primaries, hac->params.color_matrix,
+          hac->params.color_range);
+  }
+
+  if(hvcc_size > 1 && (hvcc[1] & 0x1f) == 2 &&
+     !hevc_main10_is_sdr(&hac->params) &&
+     !hevc_main10_is_hdr(&hac->params))
+    hevc_annexb_probe_metadata(&hac->params, data, size);
+
+  hac->params.extradata = hvcc;
+  hac->params.extradata_size = hvcc_size;
+  hac->params.hevc_annexb_config = 1;
+  hac->decoder = media_codec_create(mc->codec_id, 0, NULL, NULL,
+                                    &hac->params, mc->mp);
+  if(hac->decoder == NULL) {
+    av_free(hac->hvcc);
+    hac->hvcc = NULL;
+    hac->hvcc_size = 0;
+    hac->params.extradata = hac->source_extradata;
+    return -1;
+  }
+
+  TRACE(TRACE_INFO, "VTB",
+        "Bootstrapped HEVC Annex-B hardware decoder from in-band VPS/SPS/PPS (%zu-byte hvcC)",
+        hvcc_size);
+  return 0;
+}
+
+static void
+hevc_annexb_decode(media_codec_t *mc, video_decoder_t *vd,
+                   media_queue_t *mq, media_buf_t *mb, int reqsize)
+{
+  hevc_annexb_config_t *hac = mc->opaque;
+  if(hac->decoder == NULL) {
+    const uint8_t *config = hac->source_extradata;
+    size_t config_size = hac->params.extradata_size;
+    if(!hevc_annexb_has_parameter_sets(config, config_size)) {
+      config = mb->mb_data;
+      config_size = mb->mb_size;
+    }
+    if(hevc_annexb_configure(mc, hac, config, config_size))
+      return;
+  }
+
+  if(mb->mb_size > INT_MAX)
+    return;
+  int converted_size = (int)mb->mb_size;
+  uint8_t *converted = NULL;
+  if(ff_hevc_annexb2mp4_buf(mb->mb_data, &converted, &converted_size,
+                            0, NULL) < 0)
+    return;
+
+  media_buf_t converted_mb = *mb;
+  converted_mb.mb_data = converted;
+  converted_mb.mb_size = converted_size;
+  hac->decoder->decode(hac->decoder, vd, mq, &converted_mb, reqsize);
+  av_free(converted);
+}
+
+static void
+hevc_annexb_flush(media_codec_t *mc, video_decoder_t *vd)
+{
+  hevc_annexb_config_t *hac = mc->opaque;
+  if(hac->decoder != NULL && hac->decoder->flush != NULL)
+    hac->decoder->flush(hac->decoder, vd);
+}
+
+static void
+hevc_annexb_close(media_codec_t *mc)
+{
+  hevc_annexb_config_t *hac = mc->opaque;
+  if(hac->decoder != NULL)
+    media_codec_deref(hac->decoder);
+  free(hac->source_extradata);
+  av_free(hac->hvcc);
+  free(hac);
+}
+
+static int
+hevc_annexb_open(media_codec_t *mc, const media_codec_params_t *mcp)
+{
+  hevc_annexb_config_t *hac = calloc(1, sizeof(*hac));
+  if(hac == NULL)
+    return 1;
+  hac->params = *mcp;
+  if(mcp->extradata_size != 0) {
+    hac->source_extradata = malloc(mcp->extradata_size);
+    if(hac->source_extradata == NULL) {
+      free(hac);
+      return 1;
+    }
+    memcpy(hac->source_extradata, mcp->extradata, mcp->extradata_size);
+  }
+  hac->params.extradata = hac->source_extradata;
+  mc->opaque = hac;
+  mc->decode = hevc_annexb_decode;
+  mc->flush = hevc_annexb_flush;
+  mc->close = hevc_annexb_close;
+  TRACE(TRACE_INFO, "VTB",
+        "Deferring HEVC Annex-B decoder creation for in-band VPS/SPS/PPS");
+  return 0;
+}
+
+
 /**
  *
  */
@@ -1463,7 +1886,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   if(mcp->extradata == NULL || mcp->extradata_size == 0) {
     if(mc->codec_id == AV_CODEC_ID_HEVC)
-      return 1;
+      return hevc_annexb_open(mc, mcp);
     if(mc->codec_id == AV_CODEC_ID_AV1)
       return 1;
     if(mc->codec_id == AV_CODEC_ID_VP9) {
@@ -1481,7 +1904,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
      mc->codec_id != AV_CODEC_ID_PRORES &&
      codec_config[0] != 1) {
     if(mc->codec_id == AV_CODEC_ID_HEVC)
-      return 1;
+      return hevc_annexb_open(mc, mcp);
     return h264_annexb_to_avc(mc, mp, &video_vtb_codec_create);
   }
 
@@ -1666,12 +2089,20 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
 
   CMVideoFormatDescriptionRef fmt;
 
-  status = CMVideoFormatDescriptionCreate(kCFAllocatorDefault,
-                                          codec_type,
-                                          mcp->width,
-                                          mcp->height,
-                                          config_dict,
-                                          &fmt);
+  if(mc->codec_id == AV_CODEC_ID_HEVC && mcp->hevc_annexb_config) {
+    status = hevc_format_description_from_hvcc_parameter_sets(
+      codec_config, codec_config_size, config_dict, &fmt);
+    TRACE(status == noErr ? TRACE_INFO : TRACE_DEBUG, "VTB",
+          "HEVC Annex-B native parameter-set format description status=%d",
+          (int)status);
+  } else {
+    status = CMVideoFormatDescriptionCreate(kCFAllocatorDefault,
+                                            codec_type,
+                                            mcp->width,
+                                            mcp->height,
+                                            config_dict,
+                                            &fmt);
+  }
   if(status) {
     TRACE(TRACE_DEBUG, "VTB", "Unable to create description %d", status);
     return 1;
@@ -1733,6 +2164,27 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
     codec_type == kCMVideoCodecType_DolbyVisionHEVC;
   vtbd->vtbd_dolby_vision_profile = mcp->dovi_valid ?
     mcp->dovi_profile : 0;
+
+  if(mcp->width > 1920 || mcp->height > 1088)
+    prop_set_string(mp->mp_video.mq_prop_vq, "4K");
+  else if(mcp->width > 1280 || mcp->height > 720)
+    prop_set_string(mp->mp_video.mq_prop_vq, "HD+");
+  else if(mcp->width > 1024 || mcp->height > 576)
+    prop_set_string(mp->mp_video.mq_prop_vq, "HD");
+  else if(mcp->width && mcp->height)
+    prop_set_string(mp->mp_video.mq_prop_vq, "SD");
+  else
+    prop_set_string(mp->mp_video.mq_prop_vq, NULL);
+
+  if(mcp->dovi_valid)
+    prop_set_string(mp->mp_video.mq_prop_hdr, "DV HDR");
+  else if(mcp->color_transfer == AVCOL_TRC_ARIB_STD_B67)
+    prop_set_string(mp->mp_video.mq_prop_hdr, "HLG");
+  else if(mcp->color_transfer == AVCOL_TRC_SMPTE2084)
+    prop_set_string(mp->mp_video.mq_prop_hdr, "HDR");
+  else
+    prop_set_string(mp->mp_video.mq_prop_hdr, NULL);
+
   vtbd->vtbd_hdr_to_sdr = dolby_profile5 ||
                          (hevc_main10_is_hdr(mcp) &&
                           ((mc->codec_id == AV_CODEC_ID_HEVC &&
@@ -1875,9 +2327,8 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   mc->close = vtb_close;
   mc->flush = vtb_flush;
 
-#if TARGET_OS_OSX
-  if(vtbd->vtbd_p010_direct || vtbd->vtbd_nv12_hdr_direct)
-    vtbd->vtbd_audio_wait_epoch = mp_wait_audio_for_video_frame(mp);
+#if TARGET_OS_OSX || TARGET_OS_IPHONE
+  vtbd->vtbd_audio_wait_epoch = mp_wait_audio_for_video_frame(mp);
 #endif
 
   TRACE(TRACE_INFO, "VTB",
