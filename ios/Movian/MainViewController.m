@@ -19,6 +19,7 @@
 #include "ui/longpress.h"
 #include "navigator.h"
 #include "main.h"
+#include "notifications.h"
 
 #include "media/media.h"
 
@@ -131,8 +132,15 @@ ios_native_p010_present(CVPixelBufferRef image, int transfer, float hdrPeak)
     iosNativeVideoLayer.frame = owner.layer.frame;
 
   if(ios_transfer_is_hdr(transfer) &&
-     !ios_native_hdr_display_available(owner))
+     !ios_native_hdr_display_available(owner)) {
+    static BOOL notifiedSDRFallback;
+    if(!notifiedSDRFallback) {
+      notifiedSDRFallback = YES;
+      notify_add(NULL, NOTIFY_INFO, NULL, 5,
+                 _("Native HDR output is unavailable; using SDR tone mapping"));
+    }
     return -2;
+  }
 
   ios_native_video_configure_hdr(image, transfer);
 
@@ -669,6 +677,13 @@ glw_share_log(void *opaque, int val)
 - (void)viewDidLoad
 {
   [super viewDidLoad];
+
+  BOOL nativeEDR = NO;
+  if(@available(iOS 16.0, *))
+    nativeEDR = UIScreen.mainScreen.potentialEDRHeadroom > 1.0;
+  prop_set_int(prop_create(prop_create(prop_create(prop_get_global(),
+                                                   "system"),
+                                       "video"), "edr"), nativeEDR);
   
   self.context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
 

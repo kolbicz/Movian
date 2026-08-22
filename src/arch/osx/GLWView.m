@@ -681,6 +681,9 @@ doCommandBySelector:(SEL)commandSelector
   const CGFloat current = screen != nil ?
     [screen maximumExtendedDynamicRangeColorComponentValue] : 1.0;
   edr_headroom = current > 1.0 ? current : potential;
+  prop_set_int(prop_create(prop_create(prop_create(prop_get_global(),
+                                                   "system"),
+                                       "video"), "edr"), potential > 1.0);
   TRACE(TRACE_INFO, "GLW",
         "macOS EDR surface %s, display headroom=%.2f potential=%.2f",
         potential > 1.0 ? "enabled" : "disabled", current, potential);
@@ -1094,6 +1097,9 @@ doCommandBySelector:(SEL)commandSelector
     const CGFloat current =
       [screen maximumExtendedDynamicRangeColorComponentValue];
     edr_headroom = current > 1.0 ? current : potential;
+    prop_set_int(prop_create(prop_create(prop_create(prop_get_global(),
+                                                     "system"),
+                                         "video"), "edr"), potential > 1.0);
   }
   return edr_headroom;
 }

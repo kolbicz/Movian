@@ -120,21 +120,32 @@ typedef struct vtb_decoder {
 } vtb_decoder_t;
 
 
-static void
-vtb_report_runtime_capabilities(void)
+void
+video_vtb_publish_capabilities(void)
 {
   static int reported;
   if(!__sync_bool_compare_and_swap(&reported, 0, 1))
     return;
 
+  const int h264 = VTIsHardwareDecodeSupported(kCMVideoCodecType_H264);
+  const int hevc = VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC);
+  const int dolby =
+    VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC);
+  const int vp9 = VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9);
+  const int av1 = VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1);
+  prop_t *video = prop_create(prop_create(prop_get_global(), "system"),
+                              "video");
+  prop_set_int(prop_create(video, "appleHardware"), h264 || hevc || av1 || vp9);
+  prop_set_int(prop_create(video, "h264"), h264);
+  prop_set_int(prop_create(video, "hevc"), hevc);
+  prop_set_int(prop_create(video, "dolbyVision"), dolby);
+  prop_set_int(prop_create(video, "vp9"), vp9);
+  prop_set_int(prop_create(video, "av1"), av1);
+
   TRACE(TRACE_INFO, "VTB",
         "Apple hardware decode capabilities: H264=%s HEVC=%s DolbyVision=%s VP9=%s AV1=%s",
-        VTIsHardwareDecodeSupported(kCMVideoCodecType_H264) ? "yes" : "no",
-        VTIsHardwareDecodeSupported(kCMVideoCodecType_HEVC) ? "yes" : "no",
-        VTIsHardwareDecodeSupported(kCMVideoCodecType_DolbyVisionHEVC) ?
-          "yes" : "no",
-        VTIsHardwareDecodeSupported(kCMVideoCodecType_VP9) ? "yes" : "no",
-        VTIsHardwareDecodeSupported(kCMVideoCodecType_AV1) ? "yes" : "no");
+        h264 ? "yes" : "no", hevc ? "yes" : "no",
+        dolby ? "yes" : "no", vp9 ? "yes" : "no", av1 ? "yes" : "no");
 }
 
 static uint16_t
@@ -603,11 +614,17 @@ probe_p010_output(CMVideoFormatDescriptionRef fmt,
   CFRelease(attrs);
 
   if(status == noErr && probe_session != NULL) {
+    prop_set_int(prop_create(prop_create(prop_create(prop_get_global(),
+                                                     "system"),
+                                         "video"), "p010"), 1);
     TRACE(TRACE_INFO, "VTB",
           "P010 probe: hardware decoder session accepted 10-bit bi-planar IOSurface output");
     VTDecompressionSessionInvalidate(probe_session);
     CFRelease(probe_session);
   } else {
+    prop_set_int(prop_create(prop_create(prop_create(prop_get_global(),
+                                                     "system"),
+                                         "video"), "p010"), 0);
     TRACE(TRACE_INFO, "VTB",
           "P010 probe: decoder session rejected 10-bit output (status=%d)",
           (int)status);
@@ -1784,7 +1801,7 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
   if(!video_settings.video_accel)
     return 1;
 
-  vtb_report_runtime_capabilities();
+  video_vtb_publish_capabilities();
 
   if(mcp == NULL)
     return 1;
@@ -1883,6 +1900,39 @@ video_vtb_codec_create(media_codec_t *mc, const media_codec_params_t *mcp,
       notify_add(NULL, NOTIFY_ERROR, NULL, 8,
                  _("Dolby Vision Profile 5 playback is not supported on this Apple device"));
       prop_set(mp->mp_prop_root, "loading", PROP_SET_INT, 0);
+    } else {
+      static unsigned int fallback_notified;
+      unsigned int bit;
+      switch(mc->codec_id) {
+      case AV_CODEC_ID_H264: bit = 1U << 0; break;
+      case AV_CODEC_ID_HEVC: bit = 1U << 1; break;
+      case AV_CODEC_ID_VP9:  bit = 1U << 2; break;
+      case AV_CODEC_ID_AV1:  bit = 1U << 3; break;
+      default:               bit = 0; break;
+      }
+      if(bit == 0 || !(fallback_notified & bit)) {
+        fallback_notified |= bit;
+        switch(mc->codec_id) {
+        case AV_CODEC_ID_AV1:
+          notify_add(NULL, NOTIFY_INFO, NULL, 5,
+                     _("AV1 hardware decoding is unavailable; using software decoding"));
+          break;
+        case AV_CODEC_ID_VP9:
+          notify_add(NULL, NOTIFY_INFO, NULL, 5,
+                     _("VP9 hardware decoding is unavailable; using software decoding"));
+          break;
+        case AV_CODEC_ID_HEVC:
+          notify_add(NULL, NOTIFY_INFO, NULL, 5,
+                     _("HEVC hardware decoding is unavailable; using software decoding"));
+          break;
+        case AV_CODEC_ID_H264:
+          notify_add(NULL, NOTIFY_INFO, NULL, 5,
+                     _("H.264 hardware decoding is unavailable; using software decoding"));
+          break;
+        default:
+          break;
+        }
+      }
     }
     return 1;
   }

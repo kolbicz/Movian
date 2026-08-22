@@ -20,6 +20,10 @@
 #pragma once
 void video_settings_init(void);
 
+#if defined(__APPLE__)
+void video_vtb_publish_capabilities(void);
+#endif
+
 struct video_settings {
   int vdpau;
 

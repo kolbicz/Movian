@@ -112,6 +112,10 @@ video_settings_init(void)
 #endif
 
 #if defined(__APPLE__)
+  video_vtb_publish_capabilities();
+  prop_t *apple_video_caps =
+    prop_create(prop_create(prop_get_global(), "system"), "video");
+
   // The shared separator above already labels this section.
   // settings_create_separator(s, _p("Accelerated Decoding"));
 
@@ -120,6 +124,8 @@ video_settings_init(void)
                  SETTING_STORE("hw_videoplayback", "avc_hevc"),
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel),
+                 SETTING_PROP_ENABLER(prop_create(apple_video_caps,
+                                                  "appleHardware")),
                  NULL);
 
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
@@ -134,6 +140,7 @@ video_settings_init(void)
                  SETTING_STORE("hw_videoplayback", "probe_p010_hdr"),
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_probe_p010),
+                 SETTING_PROP_ENABLER(prop_create(apple_video_caps, "hevc")),
                  NULL);
 
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
@@ -141,6 +148,7 @@ video_settings_init(void)
                  SETTING_STORE("hw_videoplayback", "p010_sdr_playback"),
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_playback),
+                 SETTING_PROP_ENABLER(prop_create(apple_video_caps, "hevc")),
                  NULL);
 
 #if TARGET_OS_OSX
@@ -149,6 +157,7 @@ video_settings_init(void)
                  SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
                  SETTING_VALUE(1),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),
+                 SETTING_PROP_ENABLER(prop_create(apple_video_caps, "hevc")),
                  NULL);
 #elif TARGET_OS_IPHONE
   setting_create(SETTING_BOOL, s, SETTINGS_INITIAL_UPDATE,
@@ -156,6 +165,7 @@ video_settings_init(void)
                  SETTING_STORE("hw_videoplayback", "p010_direct_rendering"),
                  SETTING_VALUE(0),
                  SETTING_WRITE_BOOL(&video_settings.video_accel_p010_direct),
+                 SETTING_PROP_ENABLER(prop_create(apple_video_caps, "hevc")),
                  NULL);
 #endif
 #endif

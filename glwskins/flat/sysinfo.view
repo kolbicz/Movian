@@ -27,6 +27,35 @@ widget(container_x, {
 				// fmt("%d MB (%d MB)", $core.system.mem.activeMem, $core.system.mem.inactiveMem),
                    isVoid($core.system.mem.activeMem));
 
+          InfoLine(_("H.264 hardware decoding"),
+                   select($core.system.video.h264,
+                          _("Supported"), _("Not supported")),
+                   isVoid($core.system.video.h264));
+          InfoLine(_("HEVC hardware decoding"),
+                   select($core.system.video.hevc,
+                          _("Supported"), _("Not supported")),
+                   isVoid($core.system.video.hevc));
+          InfoLine(_("10-bit P010 output"),
+                   select($core.system.video.p010,
+                          _("Supported"), _("Not supported")),
+                   isVoid($core.system.video.p010));
+          InfoLine(_("Dolby Vision decoding"),
+                   select($core.system.video.dolbyVision,
+                          _("Supported"), _("Not supported")),
+                   isVoid($core.system.video.dolbyVision));
+          InfoLine(_("VP9 hardware decoding"),
+                   select($core.system.video.vp9,
+                          _("Supported"), _("Not supported")),
+                   isVoid($core.system.video.vp9));
+          InfoLine(_("AV1 hardware decoding"),
+                   select($core.system.video.av1,
+                          _("Supported"), _("Not supported")),
+                   isVoid($core.system.video.av1));
+          InfoLine(_("Native HDR display"),
+                   select($core.system.video.edr,
+                          _("Available"), _("Not available")),
+                   isVoid($core.system.video.edr));
+
           // InfoLine(_("Inactive memory"), fmt("%d kB", $core.system.mem.inactiveMem), isVoid($core.system.mem.inactiveMem));
           // InfoLine(_("Fragmentation"), fmt("%d", $core.system.mem.unusedChunks), isVoid($core.system.mem.unusedChunks));
           // InfoLine(_("VM Page In/Out"),
