@@ -24,6 +24,11 @@ for arg in "$@"; do
 done
 
 if [ "$DO_BUILD" -eq 1 ]; then
+  SOURCE_VERSION=$(/usr/libexec/PlistBuddy \
+    -c 'Print :CFBundleShortVersionString' \
+    "${ROOTDIR}/support/Movian.app/Contents/Info.plist")
+  "${ROOTDIR}/configure.osx" --build=m7osx \
+    --version="${SOURCE_VERSION}"
   make -C "$ROOTDIR" -j"$(sysctl -n hw.ncpu)" dist
 fi
 
@@ -37,6 +42,13 @@ fi
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
   "${APP}/Contents/Info.plist" 2>/dev/null || echo "7.0.276")
 DMG=${DMG:-"${BUILDDIR}/Movian-macOS-${VERSION}-arm64.dmg"}
+
+CONFIGURED_VERSION=$(sed -n 's/^VERSION:="\(.*\)"/\1/p' \
+  "${BUILDDIR}/config.mak")
+if [ "$CONFIGURED_VERSION" != "$VERSION" ]; then
+  echo "Core version ${CONFIGURED_VERSION:-<unset>} does not match bundle version $VERSION" >&2
+  exit 1
+fi
 
 if ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
   echo "Signing identity is not available: $SIGN_IDENTITY" >&2

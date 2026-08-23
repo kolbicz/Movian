@@ -899,7 +899,7 @@ reconfigure:
 showconfig:
 	@echo $(CONFIGURE_ARGS)
 
-src/version.c: ${BUILDDIR}/version_git.h
+${BUILDDIR}/src/version.o: ${BUILDDIR}/version_git.h
 
 # Include dependency files if they exist.
 -include $(DEPS) $(BUNDLE_DEPS)
